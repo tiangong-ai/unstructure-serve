@@ -1,5 +1,7 @@
 # TianGong AI Unstructure Serve 代理说明
 
+仓库已迁入 `tiangong-ai/unstructure-serve`；迁移与升级公告见 README。此次公告不修改解析运行时或依赖。
+
 ## 项目概览
 - 这是一个基于 FastAPI 的非结构化文档解析服务，负责统一封装 MinerU 文档解析、Markdown 转档、MinIO 对象存储以及视觉问答能力。
 - 主入口在 `src/main.py`，通过依赖注入决定是否开启 Bearer Token 鉴权，并集中挂载各类路由（健康检查、GPU 调度、MinerU 解析、Markdown 转 DOCX、MinIO 上传下载等）。
