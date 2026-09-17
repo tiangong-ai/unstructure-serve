@@ -48,6 +48,8 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 pm2 status
 ```
 
+图片任务默认提示词优先提取图中事实，避免重复 caption；固定前缀清理不代替内容校验。空响应或截断的 OpenAI-compatible 输出会导致失败。采样和实测见[图片描述优化](mineru_4_upgrade_usage.md#图片描述优化)。`VISION_BATCH_SIZE` 只影响同步/普通图片任务，two-stage 的图片并发由 vision worker 的 `-c 32` 控制。
+
 六个 worker（parse 三个，其余阶段各一个）均需在线；模板的 `-Q` 顺序为 urgent 在前。三个 parse 使用不同 Celery 节点名，共同消费同一队列，每个最多执行一份文档，prefetch=1。每个解析进程的 VLM 请求并发为 8，由单地址后端分配至三张卡；worker 与 GPU 没有一一绑定关系。parse 池不能使用 daemonic prefork，因为 SDK 还需要创建渲染子进程。dispatch 使用 `self.replace` 触发 chord，不在任务内同步等待 `result.get()`；Redis result backend 必须可用。
 
 parse 的 PM2 停止窗口为 1900 秒，让在途任务完成；这不是任务 hard timeout，维护前仍需等待 active/reserved 清空。API 和 parse 模板的 SDK 窗口均为 64 页，整本结果仍统一后处理。并发基准和配置选择见[部署记录](mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。
@@ -117,13 +119,17 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
 
 ## 批量脚本
 
-`src/scripts/two_stage_enqueue.py` 读取目录中的 PDF，按每批最多 5000 个任务提交并轮询，成功后把返回的 `result` 保存为 `<stem>.pkl`，跳过已有同名输出。失败/运行超时最多尝试 3 次（首次加 2 次重试）；它不取消之前的服务端任务，重试可能与原任务重叠。
+`src/scripts/two_stage_enqueue.py` 读取目录中的 PDF，默认维持最多 6 个在途任务，有任务完成就立即补位，成功结果原子保存为 `<stem>.pkl`，跳过已有同名输出。队列可以持续保持三个解析 worker 有活可做，不需要一次上传全部文件。
+
+任务 ID、文件 SHA-256 和请求参数写入输出目录 `.tasks/`。重启脚本时续查已有任务；待完成文件或参数变化时要求换输出目录。单输出目录有文件锁，避免多个脚本重复写入。已有 `.pkl` 仍按文件名跳过，更换输入内容或解析参数应使用新输出目录。
+
+只有服务端确认 FAILURE/REVOKED 才最多尝试 3 次。查询网络错误继续查询相同 ID；本地等待超时保留 ID 并停止，不取消或重新上传。POST 响应丢失会保留 SUBMITTING，明确提示提交结果未知，需要核查服务端后再处理；这不是服务端幂等保证，不能直接删除状态并重投。
 
 ```bash
 TWO_STAGE_BASE=http://127.0.0.1:7770 \
 TWO_STAGE_INPUT_DIR=/path/to/pdfs \
 TWO_STAGE_OUTPUT_DIR=/path/to/pickle \
-TWO_STAGE_PRIORITY=normal \
+TWO_STAGE_PRIORITY=normal TWO_STAGE_MAX_IN_FLIGHT=6 \
 TWO_STAGE_CHUNK_TYPE=true TWO_STAGE_RETURN_TXT=true \
 uv run python src/scripts/two_stage_enqueue.py
 ```
@@ -131,11 +137,12 @@ uv run python src/scripts/two_stage_enqueue.py
 | 环境变量 | 脚本缺省值 / 作用 |
 | --- | --- |
 | `TWO_STAGE_BASE` | `http://localhost:8770`；兼容 `MINERU_TASK_BASE`。当前生产 API 需显式设为 7770 |
-| `FASTAPI_BEARER_TOKEN` | 必填，脚本会读取 `.env` |
+| `FASTAPI_BEARER_TOKEN` | 先读进程环境 / `.env`，为空时回退本地 `.secrets/secrets.toml` 的 `FASTAPI.BEARER_TOKEN`；两者都没有则报错 |
 | `TWO_STAGE_INPUT_DIR` / `TWO_STAGE_OUTPUT_DIR` | `pdfs` / `pickle`；兼容 `ESG_INPUT_DIR` / `ESG_OUTPUT_DIR` |
 | `TWO_STAGE_PRIORITY` | `normal` |
 | `TWO_STAGE_CHUNK_TYPE` / `TWO_STAGE_RETURN_TXT` | `false` / `false` |
-| `TWO_STAGE_POLL_INTERVAL` / `TWO_STAGE_POLL_TIMEOUT` | `3` 秒 / `800` 秒；超时从观察到 STARTED 起算，不包含一直 PENDING 的时间 |
+| `TWO_STAGE_MAX_IN_FLIGHT` | `6`；本脚本的在途窗口，不是服务器全局限流；恢复时已提交任务可能超过新设上限 |
+| `TWO_STAGE_POLL_INTERVAL` / `TWO_STAGE_POLL_TIMEOUT` | `1` 秒 / `800` 秒；每次提交/恢复后起算，包含 PENDING；本地超时保留 ID，下次运行重新给等待窗口 |
 | `VISION_PROVIDER` / `VISION_MODEL` / `VISION_PROMPT` | 可选，原样提交给 API 校验 |
 
 脚本尚无 tier 环境开关，提交不带 tier，因此使用 HTTP 默认 `advanced`；选择其他档位请直接调用接口。转换结果可用 `uv run python src/scripts/read_pickle.py pickle/example.pkl --field result`，命令不带路径时选择 `pickle` 下最新文件。

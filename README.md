@@ -83,4 +83,6 @@ uv run --group dev pytest
 
 真实模型测试默认跳过。模型和 `input` 样本准备好后，按[PDF 回归说明](mineru_4_upgrade_usage.md#验证与回归)执行；常规测试通过不代表所有长 PDF 已完整解析。
 
+多文件处理优先使用[两段式批量脚本](two_stage_task_usage.md#批量脚本)，滚动入队并保存任务 ID 以便续跑。它包含图片描述阶段，与同步纯解析接口的功能不同。
+
 `/health` 检查 API 存活，`/ready` 检查 MinerU 模型是否就绪；任务状态由 `/gpu/status`、`/two_stage/queue_status` 提供。日常维护使用指定项目、容器或 PM2 进程的命令，见[运维说明](mineru_4_upgrade_usage.md#启动与维护)。

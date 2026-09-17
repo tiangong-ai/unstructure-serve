@@ -1,10 +1,11 @@
 import atexit
 import ctypes
+import logging
 import multiprocessing
 import os
 import queue
-import re
 import signal
+import sys
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor, Future
@@ -13,7 +14,7 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Dict, List, Optional
 
-from src.utils.text_output import build_plain_text
+from src.utils.text_output import build_plain_text, clean_text as _clean_text
 
 _LINUX_PR_SET_PDEATHSIG = 1
 _CHILD_EXIT_GRACE_SECONDS = 5
@@ -109,17 +110,6 @@ def _worker_init(gpu_id: str):
     # Only expose the target GPU to libraries inside this process
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     # Optional: set Paddle/other OCR backends to GPU if supported. They usually auto-detect.
-
-
-def _clean_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"[\ud800-\udfff]", "", text)
-    try:
-        text = text.encode("utf-8", errors="ignore").decode("utf-8")
-    except UnicodeError:
-        text = text.encode("ascii", errors="ignore").decode("ascii")
-    return text
 
 
 def _image_text(item: dict) -> str:
@@ -242,6 +232,19 @@ def _child_worker(
         q.put({"ok": True, "data": data})
     except Exception as exc:  # noqa: BLE001 - propagate failure info through queue
         q.put({"ok": False, "error": str(exc)})
+    finally:
+        # multiprocessing waits for nested children before normal atexit hooks.
+        # Close only this task's already-loaded render pool, while the watchdog
+        # remains responsible for hard timeouts and failed cleanup.
+        images = sys.modules.get("docvortex.document.pdf.images")
+        if images is not None:
+            try:
+                images.shutdown_pdf_render_executor()
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "PDF render cleanup failed (%s); watchdog will finish cleanup",
+                    type(exc).__name__,
+                )
 
 
 def _worker_process_file(
