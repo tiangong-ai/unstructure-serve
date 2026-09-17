@@ -1,5 +1,7 @@
 # MinerU 3.x 原生 DOCX 拆解评估
 
+> 历史评估（2026-03-29，MinerU 3.x）。样本结论和日志保留用于追溯，不作为 4.0 安装或性能承诺。当前 Office 主结果仍先转 PDF，DOCX TXT 分支已迁到 4.0 原生 flash；见[部署说明](../../mineru_4_upgrade_usage.md)。
+
 ## 背景
 
 当前服务中的 Office 路径默认仍是：

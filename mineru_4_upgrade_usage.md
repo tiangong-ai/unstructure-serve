@@ -1,147 +1,149 @@
-# MinerU 4 部署与 PDF 回归
+# MinerU 4 部署与回归
 
-本项目使用 MinerU 4 无状态 SDK；MinerU VLM 后端通过 Docker 部署，应用环境不安装 vLLM。API、Celery、two-stage、Office→PDF 和 MinIO 的业务接口保持原有约定。历史评估见 [升级评估](mineru_4_upgrade_evaluation.md)。
+当前发布基线为 MinerU 4.0.0：应用调用无状态 SDK `mineru.parser.parse`，小模型使用 CPU ONNX，VLM 通过 Docker 提供。应用 `.venv` 不安装 vLLM。质量档位和请求参数见 [README](README.md#解析接口)，升级前分析保存在[历史评估](docs/history/mineru_4_upgrade_evaluation.md)。
 
-## 安装与启动
+## 首次安装
 
-在项目目录执行：
+所有命令在仓库根目录执行。系统需要 Python 3.12、uv、Docker Compose、PM2，以及支持本机 GPU 的 NVIDIA 驱动和 Container Toolkit。Docker 需已注册 `nvidia` runtime；Compose 显式指定该 runtime，以兼容本机 CDI 模式。
 
 ```bash
+sudo apt update
+sudo apt install -y libmagic-dev poppler-utils libreoffice pandoc graphicsmagick
+uv python install 3.12
 uv sync --locked --group dev
-# 首次部署可复制模板；已有 .env 时保留凭证，合并新增字段。
+mkdir -p .secrets
+cp -n deploy/secrets.example.toml .secrets/secrets.toml
 cp -n .env.example .env
+```
+
+编辑 `.env`，填写真实鉴权令牌、模型地址和运行参数。已有部署应合并新增字段，保留原凭证。配置模块仍会读取 `.secrets/secrets.toml` 中的必需段落，即使凭证全部来自环境变量，也需要该文件；模板只有空值。
+
+模型首次准备：
+
+```bash
 MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
 MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models verify --tier basic --small-backend onnx
 docker compose -f compose.mineru.yaml up -d --build
 docker compose -f compose.mineru.yaml logs -f mineru-vlm
 ```
 
-确保 `.secrets/secrets.toml` 已按原部署要求准备好。Docker 需要 NVIDIA Container Toolkit，并注册 `nvidia` runtime；Compose 显式选择该 runtime，以兼容本机的 CDI 模式。容器 healthcheck 成功后再启动 API/worker。首次启动容器会下载 VLM 权重，保存在 Docker 命名卷中。
+容器首次启动会下载 VLM 权重并编译，等待 healthy 后再接入请求。CPU 模型可通过 `MINERU_HOME` 指定持久目录；容器模型及下载缓存保存在命名卷中。
 
-关键应用配置：
+Celery 需要 Redis。已有实例直接复用；仅在未部署时创建：
 
-```dotenv
-MINERU_DEFAULT_TIER=standard
-MINERU_DEFAULT_METHOD=auto
-MINERU_MODEL_SMALL_BACKEND=onnx
-MINERU_MODEL_VLM_SERVER_URL=http://127.0.0.1:30000
-MINERU_MODEL_VLM_MODEL=mineru4
-MINERU_MODEL_VLM_HTTP_TIMEOUT=600
-MINERU_MODEL_VLM_MAX_CONCURRENCY=8
+```bash
+docker run -d --name redis --restart unless-stopped -p 127.0.0.1:6379:6379 redis:8
 ```
 
-`flash/basic/standard/advanced` 是质量档位。HTTP 请求使用显式 `tier` 或固定缺省值 `standard`，并通过现有 backend payload 字段传到 worker。直接调用服务且未指定档位时，优先读取 `MINERU_DEFAULT_TIER`，再兼容旧 `MINERU_DEFAULT_BACKEND`：pipeline→basic，hybrid→standard，vlm→advanced；旧在途任务仍可读取。旧本地引擎名称也使用 Docker 的远程 VLM 连接，不在应用进程加载大模型。
+## 配置规则
 
-`MINERU_MODEL_VLM_SERVER_URL` 是 MinerU 模型推理服务，不是文档解析 V1 API；也不要与图片描述模型的 `VLLM_BASE_URLS` 混用。单个 URL 优先于旧 URL 列表；多卡轮换时清除单 URL，再设置 `MINERU_VLLM_SERVER_URLS`。连接凭据通过 `.env` 的 `MINERU_MODEL_VLM_API_KEY` 配置；仅支持 Bearer，旧自定义认证头会明确报错。
+Python 配置优先级为 **进程环境 > `.env` > `.secrets/secrets.toml` 的回退值**。`load_dotenv()` 不覆盖已有环境；PM2 的 `env` 块因此优先于 `.env`。部分字符串字段的空值仍回退到 TOML，不能用空字符串假定已清除旧配置。修改配置后要重新加载对应 API/worker。Docker Compose 单独读取 `.env` 做变量替换，Python 加载 `.env` 不会把变量导出到调用它的 shell；curl 示例要求 shell 中已有 `FASTAPI_BEARER_TOKEN`。
 
-通过 `MINERU_HOME` 可选择 CPU 模型及配置的持久目录。`MINERU_DEFAULT_LANG` 仅为旧配置兼容项，新 SDK 不接受语言覆盖；hybrid batch/force-pipeline 参数也不再透传。CPU/GPU 选择和 VLM 并发需显式配置。
-
-## 每次请求选择质量档位
-
-`/mineru`、`/mineru_sci`、`/mineru_with_images`、`/mineru/task`、`/mineru_with_images/task`、`/two_stage/task` 均提供可选 `tier` 表单字段，Swagger 显示四档下拉选项。不传固定使用 `standard`；非法值（包括旧的 `pipeline`/`vlm`/`hybrid` 名称）返回 422，不进入解析队列。
-
-| tier | 解析方式 |
+| 配置 | 模板值 / 作用 |
 | --- | --- |
-| `flash` | 读取 PDF 原生文本层，无推理模型；适合预览和索引，扫描件需选 OCR 档位。 |
-| `basic` | 小模型处理 OCR、公式和表格；本部署在 CPU 上运行。 |
-| `standard` | 默认；小模型结合 Docker VLM，处理复杂版面。 |
-| `advanced` | 使用更多 VLM 推理计算，应对高难度文档。 |
+| `MINERU_DEFAULT_TIER` | `standard`，仅直接服务调用缺省时兜底；HTTP 不传 tier 固定 standard |
+| `MINERU_DEFAULT_METHOD` | `auto`，映射 SDK `ocr_mode`，可选 `auto/txt/ocr` |
+| `MINERU_MODEL_SMALL_BACKEND` | `onnx`，CPU 小模型 |
+| `MINERU_MODEL_VLM_SERVER_URL` | `http://127.0.0.1:30000`，MinerU 模型推理地址 |
+| `MINERU_MODEL_VLM_MODEL` | `mineru4`，容器公开的模型名 |
+| `MINERU_MODEL_VLM_API_KEY` | 可选 Bearer 认证；本机容器默认不启用认证 |
+| `MINERU_MODEL_VLM_HTTP_TIMEOUT` / `MINERU_MODEL_VLM_MAX_CONCURRENCY` | `600` 秒 / `8`，单次模型请求与并发 |
+| `MINERU_DOCKER_GPU_ID` / `MINERU_DOCKER_PORT` / `MINERU_DOCKER_GPU_MEMORY` | `0` / `30000` / `0.15`；端口须与应用 URL 一致，显存比例按空闲资源调整 |
+| `GPU_IDS` | 模板 `0`，现有应用调度器槽位；不决定 Docker 使用哪张卡 |
+| `VISION_*` / `VLLM_BASE_URLS` | 独立图片描述服务，按部署填写，不能指向 MinerU 解析 V1 API |
+| `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | API 与所有 worker 使用相同地址；模板为本机 Redis DB 0 |
+| `CELERY_TASK_*_QUEUE` | 模板显式设置普通与 two-stage 队列；[队列映射](two_stage_task_usage.md#队列与配置)必须与 worker 的 `-Q` 一致 |
+| `MINERU_TASK_STORAGE_DIR` | 默认系统临时目录下的 `tiangong_mineru_tasks`；跨容器时共享相同绝对路径 |
 
-档位语义参见 [MinerU 4.0 发布说明](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.0.0-released)。异步任务保存提交时的档位，worker 环境变量变更不会改变已提交的选择。
+Office 转换模板超时为 600 秒。普通/图片解析 hard timeout 为 1800 秒；科研入口另有 110 秒 HTTP 等待窗口和 300 秒子进程 hard timeout。API 的 Gunicorn timeout/graceful-timeout 均为 1900 秒。具体模板见 `.env.example`、`ecosystem.config.json`，不要把这些数值理解为所有任务统一的超时。
 
-```bash
-curl --fail -X POST 'http://127.0.0.1:7770/mineru?return_txt=true' \
-  -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' \
-  -F 'tier=advanced'
-```
+旧 backend 仅用于直接调用和在途 payload 兼容：`pipeline`→`basic`、`hybrid-*`→`standard`、`vlm-*`→`advanced`；对应大模型推理仍使用 Docker。新请求只使用 `tier`。旧 `MINERU_DEFAULT_LANG`、hybrid batch/force-pipeline 参数不再传给上游。
 
-Office 主结果继续先转 PDF，再使用所选档位。同步 DOCX 的原生 TXT-only 分支仍按 MinerU 的原生文档约束使用 `flash`；图片描述模型由独立的 `provider`/`model` 控制，`tier` 只控制 MinerU 拆解质量。
+## 启动与维护
 
-## Docker 版本与资源
-
-Dockerfile 按 [MinerU 4 官方部署文档](https://opendatalab.github.io/MinerU/quick_start/docker_deployment/) 选用 `vllm/vllm-openai:v0.21.0`（CUDA 13），固定 MinerU 4.0.0，并保留镜像配套的 vLLM/Torch 2.11.0 组合。镜像中安装 FastAPI 0.141.1、Starlette 1.6.0、instrumentator 8.1.0，以覆盖旧路由监控兼容问题；构建执行 `pip check` 和版本断言。
-
-基础镜像原有 PyGObject 缺少 Pycairo；Dockerfile 按 [Pycairo 安装文档](https://pycairo.readthedocs.io/en/latest/getting_started.html) 补齐 Cairo 开发库、pkg-config 与 Python 包。
-
-应用依赖通过 `uv.lock` 固定本次升级解析结果。OpenAI SDK 采用 2.54.0，是 MinerU `<3` 约束下的最新兼容版本；不能同时声称已安装最新 3.x。vLLM 的镜像版本是按官方基线有意保留的例外，后续升级镜像要连同 Torch/CUDA、模型和 PDF 回归重新验证。
-
-默认容器绑定 GPU 0、宿主 127.0.0.1:30000，显存比例 0.15。通过下列字段调整，值应与空闲资源匹配：
-
-```dotenv
-MINERU_DOCKER_GPU_ID=0
-MINERU_DOCKER_PORT=30000
-MINERU_DOCKER_GPU_MEMORY=0.15
-```
-
-与旧服务并行验证的示例：
+先确认共享配置、Redis 和模型服务就绪，再启动所需任务系统：
 
 ```bash
-MINERU_DOCKER_PORT=31000 MINERU_DOCKER_GPU_MEMORY=0.09 \
-  docker compose -p mineru4-upgrade -f compose.mineru.yaml up -d --build
-curl --fail http://127.0.0.1:31000/health
-curl --fail http://127.0.0.1:31000/v1/models
+pm2 start ecosystem.config.json
+pm2 start ecosystem.two_stage.celery.json
+pm2 save
 ```
 
-多卡使用不同 Compose project、端口和 GPU ID，例如：
+| 文件 | 用途 |
+| --- | --- |
+| `compose.mineru.yaml` | 默认 MinerU VLM 生命周期入口，重启策略 `unless-stopped` |
+| `ecosystem.config.json` | API `unstructured-gunicorn`，端口 7770 |
+| `ecosystem.two_stage.celery.json` | 当前部署使用的 parse/vision/dispatch/merge 四个 worker |
+| `ecosystem.celery.json` | 普通任务 worker，调用两个普通 `/task` 接口时另行启动 |
+| `ecosystem.two_stage.flower.json` / `ecosystem.celery.flower.json` | 对应 Celery app 的可选监控；都默认 5555，同时使用时须更改端口 |
+| `ecosystem.vllm*.json` | 保留的 PM2→Docker Compose 包装模板；每卡独立 project，不要与另一入口重复管理同一容器 |
+| `ecosystem.quatro.json` | 多 API 实例示例，不等于自动扩容 Docker 推理服务 |
+
+API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16，保守手动启动可用 solo/1；two-stage parse 为 solo，其余为线程池，详情见各自任务说明。GPU 调度器会再创建子进程，不使用 Celery prefork 执行这类解析。
+
+以下为常用检查，启用鉴权时传入实际令牌：
 
 ```bash
-MINERU_DOCKER_GPU_ID=0 MINERU_DOCKER_PORT=30000 docker compose -p mineru-gpu0 -f compose.mineru.yaml up -d
-MINERU_DOCKER_GPU_ID=1 MINERU_DOCKER_PORT=30001 docker compose -p mineru-gpu1 -f compose.mineru.yaml up -d
+pm2 status
+docker compose -f compose.mineru.yaml ps
+curl --fail http://127.0.0.1:30000/health
+curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/health
+curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/gpu/status
+uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout=5
+pm2 logs unstructured-gunicorn --lines 100
 ```
 
-`ecosystem.vllm*.json` 已改为 Docker Compose 包装器，供仍使用 PM2 管理入口的部署兼容使用；不要同时用两个入口管理同一 Compose project。quatro 模板仍是四卡示例，应按实际硬件删减实例。Docker 默认服务不向公网开放推理端口。
+上例模型端口使用模板值；本机已部署实例使用下方记录的 `31000`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
 
-API 的 Gunicorn 模板已改用独立 `uvicorn-worker` 包中的 `uvicorn_worker.UvicornWorker`。普通 Celery 和 two-stage 的队列、优先级不变。迁移时让旧任务排空，或使用独立 broker/队列路由；不要让不同运行环境混用未验证的在途任务。
+停机分别使用 `pm2 stop ecosystem.config.json`、对应 worker 模板以及 `docker compose -f compose.mineru.yaml stop`。运行清理应定位本项目具体任务或工作目录；共享 Redis、PM2 和 GPU 上还有其他服务，不提供全局清空或按端口强杀作为日常维护步骤。结果过期不等于任务目录可以无条件删除。
 
-## 基于 input PDF 的 TDD
+## Docker 与多卡
 
-`tests/test_mineru_input_pdfs.py` 直接读取项目 `input` 目录，也支持 `MINERU_TEST_INPUT_DIR`。这些测试会真正运行模型，默认常规测试跳过；显式启用时，缺少预期 PDF 会失败，不会假装完成验证。
+镜像基于 `vllm/vllm-openai:v0.21.0`，安装 MinerU 4.0.0，保留基础镜像配套的 Torch 2.11.0/CUDA 13。Dockerfile 补齐 Pycairo/Cairo 依赖并执行 `pip check`。FastAPI/Starlette/instrumentator 组合已验证；应用 OpenAI SDK 固定在 MinerU `<3` 约束内的 2.54.0。应用升级依据 `uv.lock`，镜像升级需重新验证其完整依赖组合。
 
-- `p2.pdf`：完整两页，表格关键字段、选中状态和图片资产；验证 flash、basic、standard、advanced 四档。
-- 锂化学品论文：完整九页，正文、公式和图像资产。
-- fese.pdf：完整 46 页，验证默认整本调用的 is_full_document 和全部源页码，不会截断在前 10 页。
-- 全部 11 份 PDF：分别验证首页、第 11 页（存在时）、末页的源页码和资产，包括 1,016 页文件的末页。抽样测试不等于每份长文档已完整解析。
+模型为 `MinerU2.5-Pro-2605-1.2B`，容器公开名 `mineru4`，最大上下文长度按模型配置设置为 8192。端口默认仅绑定宿主 `127.0.0.1`；跨机器部署需另行配置可达地址和认证。
 
-运行常规检查：
+多卡使用不同 project、端口和 GPU ID：
 
 ```bash
+MINERU_DOCKER_GPU_ID=0 MINERU_DOCKER_PORT=30000 docker compose -p mineru-gpu0 -f compose.mineru.yaml up -d --build
+MINERU_DOCKER_GPU_ID=1 MINERU_DOCKER_PORT=30001 docker compose -p mineru-gpu1 -f compose.mineru.yaml up -d --build
+```
+
+应用端删除单 URL 配置，再设置 `MINERU_VLLM_SERVER_URLS`（逗号分隔或 JSON 数组）。单 URL 优先。现有选择仅为进程内轮换，没有跨任务负载均衡、端点熔断或故障重试承诺，后续工作见[多卡计划](multi_gpu_vllm_scaling_todolist.md)。
+
+## 验证与回归
+
+```bash
+uv sync --locked --group dev --check
 uv run --group dev black .
 uv run --group dev ruff check src
 uv run --group dev pytest
 ```
 
-运行实际 PDF 回归（先准备模型和容器）：
+`tests/test_mineru_input_pdfs.py` 直接读取 `input`，也可用 `MINERU_TEST_INPUT_DIR` 替换。模型测试默认跳过；显式启用时缺文件会失败：
 
 ```bash
+mkdir -p output/mineru4_tdd
 MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v \
   --junitxml=output/mineru4_tdd/input-results.xml
 ```
 
-升级工作区的 `output/mineru4_tdd/` 保存了升级前的 68 项测试结果、p2/论文的 3.4.3 真实解析基线，以及新增测试的失败记录。PDF 文本和派生资产只留在忽略的 output 目录，不复制进测试源码或提交。
+2026-09-17 升级验收记录：
 
-2026-09-17 实测结果：常规测试 79 项通过；模型回归 15 项全部通过，分两次执行共用时 132.20 秒。11 份文件共检查 29 个抽样页，加上 p2/论文/fese 整本测试，共覆盖 79 个不同 PDF 页面；其中 fese 的 46 页完整解析用时 35.35 秒，所有源页码及 is_full_document 均通过校验。论文的 8 张图片通过 two-stage 筛选，其中一张完成真实视觉调用及原位合并；这不代表已逐张人工评估全部视觉输出。另已通过同步 API、真实 MinIO 的 PDF/JSON/JPEG/meta 往返、Office→PDF 和 native DOCX 图片顺序冒烟测试。
+- 常规测试 135 项通过，覆盖六入口 tier 默认/枚举/透传、SDK 资产与字段、MinIO、Office、视觉失败传播及调度生命周期。
+- 升级阶段 11 份 PDF 的 15 项实测通过：29 个抽样页，加 p2/九页论文/46 页 fese 整本，共覆盖 79 个不同源页面；不代表 11 份长文档全部整本验收。
+- tier 补充阶段 p2 四档均通过，共形成当前 17 项可选模型测试。basic 丢失的首个 checkbox 在同页唯一完整选项组匹配时回填，并有歧义、跨页、短标签等拒绝条件测试。
+- 在线六入口的 schema/非法值、同步四档、真实 two-stage basic、MinIO PDF/JSON/JPEG/meta、Office→PDF、原生 DOCX 顺序通过验证；论文的一张图片完成真实视觉请求，未逐图人工评估全部视觉输出。
 
-日志与 JUnit 结果在 `output/mineru4_tdd/`，15 项模型回归的汇总为 `input-results-all.xml`；MinIO 验证使用独立临时容器，测试后已移除，未写入现有业务桶。
+证据仅保存在忽略的 `output/mineru4_tdd/`：`input-results-all.xml`、`tier-p2-results.xml`、`tier-pytest.log`、`tier-api-smoke.log`、`main-deployment-p2.json`。原始文档及解析资产不纳入 Git。
 
-兼容层单测还覆盖保存后的图片引用、页号转换、caption 别名、代码/目录/页脚注释映射、bbox 单位、连接轮换和自定义认证错误。同步、Celery、two-stage 的已有阅读顺序与失败传播测试继续保留。
+## 本机部署与回滚记录（2026-09-17）
 
-同日请求级 tier 补齐后：常规测试增至 135 项通过（其中 48 项覆盖六个接口的四档选择、缺省、非法值和 OpenAPI）；p2 的四档真实解析全部通过。basic 首轮实测漏掉“公开竞争”前的选中符号，已基于原 PDF 文本层补回：要求同页完整选项组唯一匹配、首标签至少四字、至少两个其他选项仍有符号；歧义、跨页及非完整匹配均不补。对应 TDD 日志为 `tier-routes-red.log` / `tier-routes-green.log`、`tier-checkbox-red.log` / `tier-checkbox-green.log`、`tier-p2-results.xml`，常规结果为 `tier-pytest.log`。这次补充回归针对四档 p2，前述 11 文件覆盖数据来自升级阶段的测试。
+升级已合并到 `main`（`e2de2fe`），运行目录为 `/home/david/projects/TianGong-AI-Unstructure-Serve`。API 7770；Compose project `mineru4-upgrade` 由本机 `.env` 指定，模型端口 31000、GPU 0、显存比例 0.09。CPU 模型在 `/home/david/.local/share/tiangong-mineru4`，Docker 缓存使用命名卷。
 
-本机服务重新加载后，六个接口的在线 Swagger/非法值校验、`/mineru` 的缺省及四档 p2 上传、`/two_stage/task` 的 basic 真实 Celery 任务均通过，见 `output/mineru4_tdd/tier-api-smoke.log`。
+API 与 四类 two-stage worker 已启动，旧 MinerU 本机 vLLM 进程和 PM2 启动项已移除，PM2 已保存。另一个仓库的 `vllm-qwen3-embedding-8b` 属于独立 embedding 服务。私有 `.env` 和已运行服务不因文档模板整理而自动改变。
 
-## 结果合同与回滚
+兼容层仍返回 `(content_list, artifact_dir, None)`，PDF 默认整本，保留源页号和可访问图片；业务 MinIO `parsed.json` 使用服务响应结构，不用原生 MiddleJson 替换。Office 主 JSON/MinIO 资产来自 PDF，原生 DOCX 仅用于同步 TXT 增强。
 
-`parse_doc` 保存 4.0 的 MiddleJson/资产，再渲染 Content List V1 并归一化为项目旧字段，最后执行 PDF checkbox 回填。每个任务仍返回 `(content_list, artifact_dir, None)`，并显式写出旧命名的 `_content_list.json` 供诊断使用。缺失图片会导致失败，避免视觉阶段静默跳过。
-
-业务 MinIO `parsed.json` 继续采用现有响应结构；不要用原生 MiddleJson 覆盖它。原生 DOCX 仍只用于同步图片接口的 TXT 增强，默认 JSON 与 PDF 资产继续来自 Office→PDF。
-
-升级前保留旧运行环境、锁文件和模型服务地址；灰度使用独立队列和 MinIO prefix。回滚时同步恢复 API/worker 的代码、环境和模型端点，保留已完成资产及需要收尾的在途任务。容器命名卷可复用，不要因回滚而删除模型缓存。
-
-## 本机切换记录（2026-09-17）
-
-原项目 `/home/david/projects/TianGong-AI-Unstructure-Serve` 使用合并后的 `main` 分支运行（升级开发分支为 `codex/mineru4`），API 端口仍为 7770。Docker 后端使用已验证的 127.0.0.1:31000、GPU 0、显存比例 0.09；本机 `.env` 设置 `COMPOSE_PROJECT_NAME=mineru4-upgrade`，因此在原项目目录运行文中的 Compose 命令即可管理该容器。新装机器可采用前文默认端口 30000。
-
-旧 MinerU 原生 PM2 服务已删除；API 与四个 two-stage worker 已重启并保存进程配置。部署后真实同步解析和 Celery dispatch→parse→merge→状态查询均通过 p2 验证，日志见 `output/mineru4_tdd/deployment-smoke.log`。应用侧 ONNX 模型缓存位于 `/home/david/.local/share/tiangong-mineru4`，Docker 模型及编译缓存位于命名卷。
-
-回滚快照位于 `output/mineru4_tdd/rollback-20260917/`，包含旧源码归档、配置、PM2 快照与旧 `.venv`。恢复时需将旧虚拟环境移回原 `.venv` 路径，再同步恢复代码、配置和原模型服务；不要直接从改名后的旧环境启动带绝对 shebang 的脚本。
+旧源码、配置、PM2 快照和旧 `.venv` 保存在 `output/mineru4_tdd/rollback-20260917/`。回滚需排空或隔离在途任务，并同步恢复代码、应用环境及模型服务地址；旧虚拟环境须放回原 `.venv` 路径，避免绝对 shebang 失效。保留已完成资产与模型缓存。
