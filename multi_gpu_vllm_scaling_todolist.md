@@ -10,6 +10,7 @@
 - [x] SDK 兼容层与页面/图片/Office/MinIO 合同；two-stage 分离 parse、vision、dispatch、merge，支持 normal/urgent 队列。
 - [x] 三卡 Compose/PM2 配置回归，以及使用 input PDF 检查三个 engine 推理增量的可选集成测试。
 - [x] 重启后的 UVM 设备映射修复、启动等待和模型 `/ready` 探测。
+- [x] 隔离解析的渲染池正常退出、共享 Unicode 清理；生产批量脚本滚动窗口和任务 ID 续跑，已比较窗口 3/6/30。详见[第二轮记录](mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)。
 - [x] 1/3/6 个解析进程、VLM 并发 8/16 的真实 PDF 对照；PM2 配置三个独立 solo/1 parse worker，保留整本及跨页处理。[测量结果与限制](mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)见部署记录。
 
 应用 scheduler 的 `GPU_IDS` 仍表示应用进程槽位，未按远端容量调度。三卡内部负载均衡不保证吞吐达到单卡三倍，也不提供单副本故障时的应用重试合同。`flash/basic` 主要不使用 VLM，吞吐也可能受 CPU 小模型和解析任务并发限制。

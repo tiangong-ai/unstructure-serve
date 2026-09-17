@@ -1,14 +1,13 @@
 import os
-import re
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from loguru import logger
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.mineru_service_full import parse_doc
-from src.utils.text_output import build_plain_text, sanitize_vision_text
+from src.utils.text_output import build_plain_text, clean_text, sanitize_vision_text
 from src.services.vision_service import (
     VisionModel,
     VisionProvider,
@@ -66,17 +65,6 @@ STRICT_DOCX_IMAGE_OCR_PROMPT = (
     "output phrases such as 'Based on the context', 'The image shows', '根据上下文', "
     "'根据您提供的图片', or '以下是'."
 )
-
-
-def clean_text(text: str) -> str:
-    """Clean text to remove surrogate characters and other problematic encodings."""
-    if not text:
-        return ""
-    text = re.sub(r"[\ud800-\udfff]", "", text)
-    try:
-        return text.encode("utf-8", errors="ignore").decode("utf-8")
-    except UnicodeError:
-        return text.encode("ascii", errors="ignore").decode("ascii")
 
 
 def _coerce_text_parts(value: object) -> List[str]:
@@ -389,66 +377,54 @@ def _run_image_vision(
 
     total_images = len(image_jobs)
     image_results: Dict[int, str] = {}
-    image_count = 0
+    # Keep one bounded rolling window: a slow image must not hold up the next batch.
+    pending_jobs = iter(image_jobs)
+    with ThreadPoolExecutor(max_workers=VISION_BATCH_SIZE) as executor:
+        futures = {}
 
-    for start in range(0, total_images, VISION_BATCH_SIZE):
-        batch = image_jobs[start : start + VISION_BATCH_SIZE]
-        if not batch:
-            continue
+        def submit_next():
+            job = next(pending_jobs, None)
+            if job is None:
+                return
+            future = executor.submit(
+                vision_completion,
+                job["img_path"],
+                job["context_payload"],
+                prompt_override,
+                vision_provider,
+                vision_model,
+            )
+            futures[future] = job
 
-        logger.info(
-            f"Dispatching batch of {len(batch)} images "
-            f"(total={total_images}, processed={image_count})..."
-        )
-
-        with ThreadPoolExecutor(max_workers=VISION_BATCH_SIZE) as executor:
-            futures = [
-                executor.submit(
-                    vision_completion,
-                    job["img_path"],
-                    job["context_payload"],
-                    prompt_override,
-                    vision_provider,
-                    vision_model,
-                )
-                for job in batch
-            ]
-
-            for job, future in zip(batch, futures):
-                seq = int(job["seq"])
-                page_number = int(job["page_number"])
-                base_text = str(job["base_text"])
-
-                logger.info(f"Image path: {job['img_path']}")
-                logger.info(
-                    f"Calling vision completion for image {seq}/{total_images} "
-                    f"(batch size {VISION_BATCH_SIZE})..."
-                )
-                try:
-                    vision_result = sanitize_vision_text(clean_text(future.result()))
-                    logger.info(f"✓ Vision analysis complete for image {seq}/{total_images}")
-
-                    vision_summary = vision_result.strip()
-                    if base_text and vision_summary:
-                        combined_text = f"{base_text}\n{vision_result}"
-                    elif base_text:
-                        combined_text = base_text
-                    elif vision_summary:
-                        combined_text = vision_result
-                    else:
-                        combined_text = ""
-
-                    if combined_text:
-                        image_results[id(job["item"])] = clean_text(combined_text)
-                except Exception as exc:  # noqa: BLE001 - vision call can fail
-                    message = (
-                        f"Vision analysis failed for image {seq}/{total_images} "
-                        f"on page {page_number}: {exc}"
-                    )
-                    logger.info(message)
-                    raise RuntimeError(message) from exc
-
-        image_count += len(batch)
+        for _ in range(min(VISION_BATCH_SIZE, total_images)):
+            submit_next()
+        try:
+            while futures:
+                completed, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    job = futures.pop(future)
+                    seq = int(job["seq"])
+                    page_number = int(job["page_number"])
+                    try:
+                        vision_result = sanitize_vision_text(
+                            clean_text(future.result()), strip_boilerplate=not strict_ocr_only
+                        )
+                        combined_text = "\n".join(
+                            part for part in (str(job["base_text"]), vision_result) if part
+                        )
+                        if combined_text:
+                            image_results[id(job["item"])] = clean_text(combined_text)
+                        logger.info(f"Vision analysis complete for image {seq}/{total_images}")
+                    except Exception as exc:  # noqa: BLE001 - vision call can fail
+                        raise RuntimeError(
+                            f"Vision analysis failed for image {seq}/{total_images} "
+                            f"on page {page_number}: {exc}"
+                        ) from exc
+                for _ in completed:
+                    submit_next()
+        finally:
+            for future in futures:
+                future.cancel()
 
     logger.info(f"Completed processing all {total_images} images")
     return image_results

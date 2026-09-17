@@ -97,4 +97,13 @@ def vision_completion_openai_compatible(
     response = client.chat.completions.create(
         **request_payload,
     )
-    return response.choices[0].message.content
+    if not response.choices:
+        raise RuntimeError("Vision endpoint returned no choices")
+    choice = response.choices[0]
+    finish_reason = getattr(choice, "finish_reason", None)
+    if finish_reason not in (None, "stop"):
+        raise RuntimeError(f"Vision output is incomplete (finish_reason={finish_reason})")
+    content = choice.message.content
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("Vision endpoint returned empty content")
+    return content

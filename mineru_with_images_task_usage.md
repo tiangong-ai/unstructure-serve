@@ -49,7 +49,7 @@ uv run celery -A src.services.celery_app worker \
 | `minio_prefix` | form | 默认 `mineru/<文件名>`，可覆盖 |
 | `minio_meta` | form | 保存为 `meta.txt`；未启用 MinIO 时忽略 |
 
-图片接口对未知 provider/model 宽松接收，由视觉服务回退到配置的选择；视觉请求异常则任务失败，不用 caption/base_text 掩盖失败。这里的 `tier` 只控制 MinerU 拆解。
+图片接口对未知 provider/model 宽松接收，由视觉服务回退到配置的选择；视觉请求异常则任务失败，不用 caption/base_text 掩盖失败。这里的 `tier` 只控制 MinerU 拆解。图片请求采用 `VISION_BATCH_SIZE` 控制的滚动窗口（缺省 3），完成一张即补下一张，结果保持原位；每个文档的窗口会叠加。默认提示词、采样与截断/空响应处理见[图片描述优化](mineru_4_upgrade_usage.md#图片描述优化)。
 
 ## 提交和查询
 
