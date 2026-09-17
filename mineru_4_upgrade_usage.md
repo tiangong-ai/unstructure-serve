@@ -44,10 +44,12 @@ Python 配置优先级为 **进程环境 > `.env` > `.secrets/secrets.toml` 的�
 | `MINERU_DEFAULT_TIER` | `advanced`，仅直接服务调用缺省时兜底；HTTP 不传 tier 固定 advanced |
 | `MINERU_DEFAULT_METHOD` | `auto`，映射 SDK `ocr_mode`，可选 `auto/txt/ocr` |
 | `MINERU_MODEL_SMALL_BACKEND` | `onnx`，CPU 小模型 |
+| `MINERU_INTRA_OP_NUM_THREADS` / `MINERU_INTER_OP_NUM_THREADS` | 模板 `16` / `1`，每个 ONNX 模型会话的线程数；SDK 未配置时自动选择，API/parse PM2 显式覆盖 |
 | `MINERU_MODEL_VLM_SERVER_URL` | `http://127.0.0.1:30000`，MinerU 模型推理地址 |
 | `MINERU_MODEL_VLM_MODEL` | `mineru4`，容器公开的模型名 |
 | `MINERU_MODEL_VLM_API_KEY` | 可选 Bearer 认证；本机容器默认不启用认证 |
-| `MINERU_MODEL_VLM_HTTP_TIMEOUT` / `MINERU_MODEL_VLM_MAX_CONCURRENCY` | `600` 秒 / `8`，单次模型请求与并发 |
+| `MINERU_MODEL_VLM_HTTP_TIMEOUT` / `MINERU_MODEL_VLM_MAX_CONCURRENCY` | `600` 秒 / `8`，单次模型请求超时 / 每个解析进程的请求并发 |
+| `MINERU_PROCESSING_WINDOW_SIZE` | SDK 缺省、`.env.example`、API/parse PM2 模板均为 `64` 页；是渲染/解析窗口，不限制整本页数 |
 | `MINERU_DOCKER_GPU_ID` / `MINERU_DOCKER_PORT` / `MINERU_DOCKER_GPU_MEMORY` | GPU ID 仅单卡模板使用；三卡固定 0/1/2。三卡 PM2 env 覆盖端口/每卡显存比例为 `30000` / `0.15`，修改时同步应用 URL |
 | `MINERU_DOCKER_MODEL_VOLUME` / `MINERU_DOCKER_CACHE_VOLUME` | 三卡模型/下载缓存卷名，默认 `mineru-vlm-models` / `mineru-vlm-cache`；可复用原部署缓存；已有卷设 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，避免归入新 project 生命周期 |
 | `GPU_IDS` | 模板 `0`，现有应用调度器槽位；不决定 Docker 使用哪张卡 |
@@ -76,13 +78,13 @@ pm2 save
 | `deploy/mineru-vllm/serve.sh` | 前台执行 Compose，`parallel` 合并两份 YAML，project 固定为 `mineru-vlm-parallel` |
 | `compose.mineru.yaml` / `compose.mineru.parallel.yaml` | 单卡基础 / 三卡覆盖；三卡命令必须带两份文件 |
 | `ecosystem.config.json` | API `unstructured-gunicorn`，端口 7770 |
-| `ecosystem.two_stage.celery.json` | 当前部署使用的 parse/vision/dispatch/merge 四个 worker |
+| `ecosystem.two_stage.celery.json` | 当前部署使用的六个 worker：parse 三个，vision/dispatch/merge 各一个 |
 | `ecosystem.celery.json` | 普通任务 worker，调用两个普通 `/task` 接口时另行启动 |
 | `ecosystem.two_stage.flower.json` / `ecosystem.celery.flower.json` | 对应 Celery app 的可选监控；都默认 5555，同时使用时须更改端口 |
 | `ecosystem.vllm.config.json` / `ecosystem.vllm.quatro.json` | 可选单卡 / 四个独立端点模板，不属于三卡内部 DP 部署 |
 | `ecosystem.quatro.json` | 多 API 实例示例，不等于自动扩容 Docker 推理服务 |
 
-API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16，保守手动启动可用 solo/1；two-stage parse 为 solo，其余为线程池，详情见各自任务说明。GPU 调度器会再创建子进程，不使用 Celery prefork 执行这类解析。
+API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16，保守手动启动可用 solo/1；two-stage parse 为三个独立 solo/1，其余为线程池，详情见各自任务说明。GPU 调度器会再创建子进程，不使用 Celery prefork 执行这类解析。
 
 以下为常用检查，启用鉴权时传入实际令牌：
 
@@ -90,11 +92,13 @@ API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16�
 pm2 status
 docker compose -p mineru-vlm-parallel -f compose.mineru.yaml -f compose.mineru.parallel.yaml ps
 curl --fail http://127.0.0.1:30000/health
-curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/health
+curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/ready
 curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/gpu/status
 uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout=5
 pm2 logs unstructured-gunicorn --lines 100
 ```
+
+`/health` 仅返回 API 存活状态；`/ready` 并行探测全部配置的 MinerU VLM `/health`，不可用时返回 503，单端点超时 3 秒。它沿用解析端点及认证配置，不探测 Redis、MinIO 或独立图片描述服务，也不能代替真实 PDF 回归。
 
 三卡服务和应用 URL 均使用 `30000`；启动脚本的 project 参数优先于 `.env` 中旧的 `COMPOSE_PROJECT_NAME`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
 
@@ -127,6 +131,12 @@ curl --fail http://127.0.0.1:30000/metrics
 ```
 
 `/metrics` 中的 `vllm:request_success_total` 应有 `engine="0"`、`"1"`、`"2"`。用 PDF 发起推理后检查三者增量，不能仅凭 nvidia-smi 有显存占用判断负载均衡生效。每卡显存比例是各自总显存的比例，部署前检查其他模型占用；应用的 `GPU_IDS=0` 是解析调度槽位，不限制容器只用 GPU 0。小文档或 flash/basic 请求未必产生足够 VLM 请求，三卡不保证每份文档平均分配或吞吐正好三倍。
+
+主机升级驱动/重启后，如果 `nvidia-smi` 正常但 CUDA 报错，检查容器是否有 `/dev/nvidia-uvm` 和 `/dev/nvidia-uvm-tools`。Docker Snap 的启动期 CDI 扫描可能早于这些节点生成。基础 Compose 显式映射两设备，PM2 启动脚本最多等待约 120 秒；缺失时明确失败，不从应用脚本加载内核模块或重启共享 Docker。确认主机设备存在后，仅重启本项目模型进程。实际 CUDA 验证可用：
+
+```bash
+docker exec mineru-vlm-parallel-mineru-vlm-1 python -c 'import torch; assert torch.cuda.device_count() == 3; print([torch.ones(1, device=f"cuda:{i}").item() for i in range(3)])'
+```
 
 只有一张卡时，选择单卡模板并将应用 URL 与其端口保持一致，不要同时启动三卡模板：
 
@@ -186,3 +196,48 @@ API 与四类 two-stage worker 已切换新地址并重启，缺省档位现为 
 三卡修复前的私有 `.env`、PM2 快照和本次验证日志保存在 `output/mineru4_tdd/three-gpu/`。仅回退三卡部署时可继续使用当前 MinerU 4 应用与单卡 Docker 模板，同步更改模型 URL；不需要恢复 3.x 虚拟环境。
 
 缺省档位调整为 advanced：六入口的 OpenAPI 与任务参数、服务无配置兜底、`.env.example` 和本机 `.env` 同步更新；138 项常规测试、p2 缺省档位真实 SDK 回归，以及重载后的六入口 schema / 同步 / Celery 默认解析均通过；回归证据位于 `output/mineru4_tdd/default-advanced/`。显式指定的其他档位及旧 backend 映射继续保留。
+
+
+## 重启修复与并发优化（2026-09-18）
+
+驱动升级至 615.71.09 后，主机 GPU 正常，但 Docker Snap 在启动时生成 CDI 清单早于 UVM 设备创建，导致容器缺少 UVM、PyTorch 初始化 CUDA 失败。已在 Compose 显式映射两个 UVM 设备，并在 PM2 启动脚本等待设备就绪。使用新建容器在三卡上执行实际 CUDA 张量计算通过，模型服务恢复；本轮没有再次重启整台主机，也没有重启共享 Docker 或修改独立 embedding 服务。
+
+新增 `/ready`，避免 API 进程仍存活时把模型故障当作解析服务就绪。部署模板使用三个独立 parse worker，每个 solo/1、VLM 并发 8，ONNX intra/inter 线程为 16/1；API 使用相同 ONNX 预算，SDK 窗口由 API 原模板 512 统一为 64。每份文档仍整本解析及后处理，不拆成独立单页任务；三个 worker 共同使用一个 VLM 地址，由后端分配推理请求。
+
+以下是同一三卡后端上的配置对照，**不是单卡与三卡对照**。SDK 测试每个进程先解析一次 p2，再计时；不包括进程启动、预热、Celery 和独立图片描述。共享主机上每组只跑一轮，结果不构成容量或 P99 保证。
+
+| 30 份两页 p2，ONNX 自动线程 | 整批秒数 | 单份服务 P50 / P95（秒） |
+| --- | ---: | ---: |
+| 1 进程 × VLM 8 | 69.98 | 2.30 / 2.50 |
+| 3 进程 × VLM 8 | 31.07 | 3.01 / 3.67 |
+| 3 进程 × VLM 16 | 31.10 | 2.96 / 3.76 |
+| 6 进程 × VLM 8 | 23.32 | 4.25 / 6.24 |
+
+三个进程明显减少排队和批量完成时间；六个进程吞吐更高，但单份服务耗时更长。本机采用三个进程作为交互延迟与吞吐的折中，不宣称是所有负载的最优值。同步 API 仍有自己的调度器，以上设置不是 API 与 Celery 共享的全局限流器。
+
+混合样本按 p2（2 页）、论文（9 页）、fese（46 页）顺序重复两次，共六份、114 页；固定三个进程 × VLM 8：
+
+| ONNX intra / inter 线程 | 整批秒数 | 单任务服务 P95（秒） |
+| --- | ---: | ---: |
+| 自动 / 自动 | 101.70 | 56.27 |
+| 4 / 1 | 113.17 | 62.79 |
+| **16 / 1（采用）** | **73.53** | **42.96** |
+
+另有单进程按相同顺序解析三份样本的 VLM 并发对照：8→16 时整批 82.05→69.66 秒，fese 49.70→39.13 秒，论文 30.02→28.28 秒。提高请求并发可能缩短长文档的模型阶段，但对短文档无明显收益；暂不同时扩大三进程的 VLM 并发。单页也只有在包含可并行区域时才可能受益，单次模型生成不会被 DP 自动分到三卡计算。
+
+所有 SDK 批次均断言整本页号、非空结果、图片文件，以及 p2 表格和 checkbox。复杂报告不同运行的块数有变化，不能将这些检查解释为逐字/逐表质量完全相同；改变采样、精度或进一步提高并发前仍需内容级评估。跨页语义保持依赖整本后处理，不能靠把页面独立分发再简单拼接来替代。
+
+复测示例（输出目录必须不存在，CPU 自动对照可显式把两个线程变量设为 `0`）：
+
+```bash
+MINERU_INTRA_OP_NUM_THREADS=16 MINERU_INTER_OP_NUM_THREADS=1 \
+  uv run python -m src.scripts.benchmark_mineru \
+  --workers 3 --concurrency 8 --jobs 30 \
+  --output output/mineru4_tdd/benchmark-new-run
+```
+
+真实 HTTP → Celery → 结果查询对照：30 份 p2 均省略 tier（使用 advanced），开启 chunk_type/return_txt，每批先完成一次预热。原单 parse worker 完成整批 **70.87 秒**，新配置 **27.48 秒**（约 2.58 倍吞吐）；从提交到结果的 P95 为 **68.56→27.42 秒**。两批共 60 个任务全部成功，验证两页和关键内容；p2 无需独立图片描述，因此不代表视觉服务的吞吐。
+
+最终常规测试 143 项通过、19 项可选集成默认跳过；本轮显式运行 p2 默认及四档、九页论文三卡回归共 6 项通过，三个 engine 成功请求增量为 6/6/6。混合压测额外覆盖 fese 全 46 页。新 API、三个 parse worker 已重载，`/ready` 返回 200，队列排空后保存 PM2 状态。完整硬件重启复验未执行。
+
+私有证据目录为 `output/mineru4_tdd/reboot-optimization/`，含故障日志、配置失败回归、各组 `report.json` 和完整解析资产。模型、原始 PDF、配置凭证和解析全文均未加入 Git。

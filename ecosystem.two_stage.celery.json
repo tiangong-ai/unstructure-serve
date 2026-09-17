@@ -5,11 +5,48 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.two_stage_pipeline worker -n parse@%h -l info -Q queue_parse_urgent,queue_parse_gpu -P solo --prefetch-multiplier=1",
+      "args": "-A src.services.two_stage_pipeline worker -n parse@%h -l info -Q queue_parse_urgent,queue_parse_gpu -P solo -c 1 --prefetch-multiplier=1",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
-        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu"
-      }
+        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu",
+        "MINERU_PROCESSING_WINDOW_SIZE": "64",
+        "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
+      },
+      "kill_timeout": 1900000
+    },
+    {
+      "name": "celery-two-stage-parse-2",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n parse-2@%h -l info -Q queue_parse_urgent,queue_parse_gpu -P solo -c 1 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu",
+        "MINERU_PROCESSING_WINDOW_SIZE": "64",
+        "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
+      },
+      "kill_timeout": 1900000
+    },
+    {
+      "name": "celery-two-stage-parse-3",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n parse-3@%h -l info -Q queue_parse_urgent,queue_parse_gpu -P solo -c 1 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu",
+        "MINERU_PROCESSING_WINDOW_SIZE": "64",
+        "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
+      },
+      "kill_timeout": 1900000
     },
     {
       "name": "celery-two-stage-vision",
