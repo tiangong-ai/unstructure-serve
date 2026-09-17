@@ -5,6 +5,7 @@
 ## 文档与修改约定
 
 - **每次修改代码、配置或说明，都同步更新本文件涉及的规则或入口。**
+- 新增 [AI 接入指南](docs/ai-integration.md) 与 [调优指南](docs/performance-tuning.md)。调优文档正常纳入 Git，但仅供仓库开发运维使用，不通过服务路由、静态目录或 llms.txt 暴露。接口变更同步更新 AI 指南；硬件/调度规则变更同步更新调优指南。
 - 当前操作以 [README](README.md)、[部署与回归](mineru_4_upgrade_usage.md)、[普通异步任务](mineru_with_images_task_usage.md)、[two-stage](two_stage_task_usage.md) 为准。
 - [历史文档](docs/history/README.md)保留原版本的样本、评估和测试结果，不作为当前安装步骤。[多卡计划](multi_gpu_vllm_scaling_todolist.md)明确区分已实现与待验证能力。
 - `.env`、`.secrets/`、输入文件、模型、结果、日志和回滚环境保持私有。公共配置骨架为 `deploy/secrets.example.toml`；不要在 PM2 模板写凭证或实际视觉服务地址。
@@ -15,6 +16,7 @@
 | 文件 / 目录 | 职责 |
 | --- | --- |
 | `src/main.py` | FastAPI 路由、Bearer 鉴权、日志和 shutdown；退出时等待 scheduler 收敛 |
+| `src/routers/guides_router.py` | 仅提供 `/llms.txt` 索引和 `/guides/ai-integration.md` 原始 Markdown，继承全局 Bearer；不挂载 docs 或仓库目录 |
 | `src/routers/` | 同步/异步解析、MinIO、Markdown、健康检查与队列状态 |
 | `src/services/mineru_service_full.py` | MinerU 4 SDK 兼容层、保存资产、归一化 Content List V1 |
 | `src/services/gpu_scheduler.py` | 排队、进程隔离、hard timeout、任务进程组收尾 |
@@ -73,6 +75,7 @@
 - Docker 基线为 vLLM 0.21.0 配套 Torch/CUDA，模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `/dev/nvidia-uvm` 和 `/dev/nvidia-uvm-tools`，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
 - PM2 API 为 `unstructured-gunicorn`，Gunicorn timeout/graceful-timeout 1900 秒。科研入口另有自己的 HTTP 等待窗口；具体超时以模板/运行环境为准。
+- 远程 AI 使用实际部署 `/openapi.json` 与 `/guides/ai-integration.md`，`/llms.txt` 仅为文档索引，不是 MCP。两个新增文档路由继承业务鉴权；FastAPI 自动 `/openapi.json`、`/docs`、`/redoc` 不自动继承业务 Depends 保护，需私有时由网关额外限制。索引链接保留 root_path 前缀，不链接调优文档。
 - `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/MinIO/独立视觉模型，也不执行实际推理。结合 `/gpu/status` 和 `/two_stage/queue_status` 检查任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
 - 维护先定位当前服务树和 active/reserved 任务，按具体任务清理。不要在日常说明中使用全局 PM2 删除、Redis flushdb 或无差别清空共享任务目录。
 
@@ -87,6 +90,7 @@ uv run --group dev pytest
 ```
 
 - Black 必须排除任意层级 `.venv` 及根目录 output/input/pdfs/pickle，防止修改依赖备份。Ruff 当前显式使用 E4/E7/E9/F；保持异常处理粒度合理，不扩大吞异常范围。
+- `test_guides_router.py` 验证只读 AI 指南与带 root_path 的索引，确保调优资料不被服务提供。视觉代码默认值测试必须隔离本机 `VLLM_VISION_*` 环境覆盖。
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉、MinIO 和进程生命周期。
 - 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。读取 input 的 11 份 PDF；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
 - 视觉真实回归：`MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.py -v` 从 input 论文第五页真实解析图像并请求已配置多模态模型，检查图中关键数值及单位；需同时具备 MinerU 与图片模型服务，不用替身。
@@ -101,3 +105,5 @@ uv run --group dev pytest
 
 
 2026-09-18 第二轮：三个 parse worker（solo/1，prefetch=1）、ONNX 16/1、VLM 并发 8 和 64 页窗口保持；修复同步隔离任务渲染池退出等待。批量脚本采用 6 个在途任务并保存可续跑日志。图片请求继续关闭 thinking，本机和公开 Qwen3.5 模板采样 0.7/0.8/20/1.5；同步窗口仍 3、two-stage vision threads/32。API 和六个 two-stage worker 已重载，九页论文与 6 张图的真实任务通过，PM2 已保存。性能证据和限制见[第二轮记录](mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)及[图片描述优化](mineru_4_upgrade_usage.md#图片描述优化)。
+
+2026-09-18 文档入口：两份完整指南位于 `docs/ai-integration.md`、`docs/performance-tuning.md`，均提交 Git；只有前者经 `/guides/ai-integration.md` 与 `/llms.txt` 提供给调用者。API 已重载、鉴权与调优文档不暴露已验收，177 项常规测试通过。没有新增公网域名或 MCP 服务。

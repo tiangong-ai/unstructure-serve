@@ -307,3 +307,11 @@ MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.p
 API 与六个 two-stage worker 已重载并完成整本线上验收：同一九页论文、6 个真实图片任务，解析后 vision/dispatch/merge 18.30→16.75 秒，整份 49.16→48.19 秒；解析阶段仍约 31 秒，不能将图片阶段收益等同于整份文件收益。`/health`、`/ready`、`/gpu/status`、`/two_stage/queue_status` 均为 200，PM2 状态已保存。
 
 证据与各版输出保存在同一私有目录 `output/mineru4_tdd/queue-optimization/`，模型输出未提交 Git。
+
+## AI 接入文档入口（2026-09-18）
+
+面向调用者的完整指南为 [AI 接入指南](docs/ai-integration.md)，通过 `GET /guides/ai-integration.md` 返回 UTF-8 Markdown；`GET /llms.txt` 提供指向该指南与部署 `/openapi.json` 的小型索引，支持 root_path 前缀。两条新增路由继承现有业务 Bearer 鉴权，不挂载文件目录。FastAPI 自动 `/docs`、`/redoc`、`/openapi.json` 不因此增加鉴权，需要限制时在网关另行配置。
+
+[调优指南](docs/performance-tuning.md) 正常纳入 Git，作为开发运维文档维护，但没有服务路由，也不出现在 llms.txt 中；没有新增 Git 忽略规则。服务不提供 MCP，远程域名/TLS/网络可达性仍由部署方配置。
+
+本次 177 项常规测试通过、20 项模型测试默认跳过；只变更说明与文档只读入口，未重跑模型性能基准。API 已重载，PM2 状态已保存；两个文档入口带凭证 200、无凭证 401，调优文件路径 404，`/health` 与 `/ready` 为 200。轮询示例另验证了成功、普通任务 HTTP 500 失败、two-stage HTTP 200 失败及代理路径前缀。
