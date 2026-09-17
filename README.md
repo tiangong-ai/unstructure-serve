@@ -1,44 +1,77 @@
-
 # TianGong AI Unstructure Serve
 
-<!-- tiangong-ai-migration-20260914:start -->
+基于 FastAPI 的文档解析服务，提供 MinerU 解析、图片视觉增强、Celery 异步任务、MinIO 资产存储及 Markdown→DOCX。当前使用 **MinerU 4.0.0 + Docker vLLM**，Python 应用依赖由 `uv.lock` 固定。
 
-## GitHub organization migration / GitHub 组织迁移
+仓库已迁至 [tiangong-ai/unstructure-serve](https://github.com/tiangong-ai/unstructure-serve)，保留原有历史。组织迁移背景见[迁移公告](https://github.com/tiangong-ai/cli-toolkit/releases/tag/v0.0.63)。
 
-This original repository now belongs to the [tiangong-ai organization](https://github.com/tiangong-ai), with its repository identity and history retained. The CLI package `@tiangong-ai/cli` and command `tiangong-ai` are unchanged. Wiki is now published as `@tiangong-ai/wiki`; its commands remain unchanged. See the [migration and upgrade notes](https://github.com/tiangong-ai/cli-toolkit/releases/tag/v0.0.63).
+## 文档入口
 
-该仓库已迁入 [tiangong-ai 组织](https://github.com/tiangong-ai)，仓库身份与历史保留。CLI 包名 `@tiangong-ai/cli` 和命令 `tiangong-ai` 不变；Wiki 新包名为 `@tiangong-ai/wiki`，命令不变。升级方式见[迁移说明](https://github.com/tiangong-ai/cli-toolkit/releases/tag/v0.0.63)。原个人账号 `tiangong-ai-legacy` 保留历史；请自行 Follow 新组织。
+| 文档 | 内容 |
+| --- | --- |
+| [部署与回归](mineru_4_upgrade_usage.md) | 安装、配置优先级、Docker/PM2、验证、当前主机与回滚记录 |
+| [普通异步任务](mineru_with_images_task_usage.md) | `/mineru/task`、`/mineru_with_images/task`、普通 worker 与 MinIO |
+| [两段式任务](two_stage_task_usage.md) | `/two_stage/task`、四类 worker、队列与批量脚本 |
+| [多卡后续工作](multi_gpu_vllm_scaling_todolist.md) | 已有能力与尚未实现的调度、容错和压测工作 |
+| [代理说明](AGENTS.md) | 代码入口、兼容合同和修改要求 |
+| [历史记录](docs/history/README.md) | 3.x DOCX 评估、4.0 升级前评估和旧视觉改动 |
 
-<!-- tiangong-ai-migration-20260914:end -->
+## 开始运行
 
-## Env Preparing
-
-Use [uv](https://docs.astral.sh/uv/) to manage Python and project dependencies:
+首次部署先按[部署说明](mineru_4_upgrade_usage.md)安装系统工具，准备 `.env`、`.secrets/secrets.toml`、CPU 模型和 Redis。以下命令均在仓库根目录执行：
 
 ```bash
-# (optional) install uv if it is not available yet
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# ensure CPython 3.12 is available locally
 uv python install 3.12
-
-# reproduce the validated dependency set
 uv sync --locked --group dev
+docker compose -f compose.mineru.yaml up -d --build
+pm2 start ecosystem.config.json
+pm2 start ecosystem.two_stage.celery.json
+pm2 save
 ```
 
-`uv sync` reads `pyproject.toml` (and `uv.lock` when present) to create a virtual environment at `.venv/`.  
-Application runtime and development dependencies live in `pyproject.toml` and the committed `uv.lock`. MinerU VLM inference runs in Docker; vLLM is not installed in the application environment.
-Activate it with `source .venv/bin/activate` or prefer `uv run …` / `uv venv` for ephemeral shells.
+API 默认端口为 `7770`，Swagger 位于 `/docs`。普通 `/mineru/task` 和 `/mineru_with_images/task` 还需要单独启动 `ecosystem.celery.json`；仅启动 two-stage worker 不会消费普通任务。
 
-Download MinerU models (first run only):
+开发时可单独启动 API：
 
 ```bash
-MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
-MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models verify --tier basic --small-backend onnx
-docker compose -f compose.mineru.yaml up -d --build
+uv run uvicorn src.main:app --host 127.0.0.1 --port 7770
 ```
 
-### Development helpers
+## 解析接口
+
+| POST 路径 | 执行方式 | 图片视觉增强 | MinIO |
+| --- | --- | --- | --- |
+| `/mineru` | 同步 | 否 | 支持 |
+| `/mineru_sci` | 同步科研入口 | 否 | 不支持 |
+| `/mineru_with_images` | 同步 | 是 | 支持 |
+| `/mineru/task` | 普通 Celery | 否 | 支持 |
+| `/mineru_with_images/task` | 普通 Celery | 是 | 支持 |
+| `/two_stage/task` | parse/dispatch/vision/merge | 是 | 不支持 |
+
+支持 PDF、PNG/JPEG/WebP/BMP/TIFF，以及[Office 转换清单](src/utils/file_conversion.py)中的格式。Office 主结果先经 LibreOffice 转 PDF；Markdown/TXT 不走解析接口。MinerU 上游新增的所有原生格式并未自动向本服务开放。
+
+六个接口均接受 multipart 表单字段 `file` 和 `tier`。`tier` 不传固定使用 `standard`，与 API 进程环境变量无关；异步任务保留提交时的选择，非法值返回 422。
+
+| tier | 用途 |
+| --- | --- |
+| `flash` | 读取原生文本层，无推理模型；适合电子 PDF 预览，扫描件应选择 OCR 档位 |
+| `basic` | 小模型进行 OCR、公式和表格识别；本部署使用 CPU ONNX |
+| `standard` | 默认，小模型结合 Docker VLM |
+| `advanced` | 使用更多 VLM 推理计算处理困难文档 |
+
+`chunk_type`、`return_txt` 在前五个接口中是 **URL 查询参数**，仅 `/two_stage/task` 把它们定义为表单字段。`chunk_type=true` 保留标题、页眉、页脚及原阅读顺序；视觉增强流程为图片识别块标注 `image`。普通正文或表格不保证有 `type` 字段。`return_txt=true` 返回拼接纯文本，页码从 1 开始。
+
+以下示例要求 shell 中已有实际的 `FASTAPI_BEARER_TOKEN`；Python 会读取 `.env`，curl 不会自动读取：
+
+```bash
+curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=true' \
+  -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
+  -F 'file=@input/p2.pdf' \
+  -F 'tier=standard'
+```
+
+更多请求示例见 [test.http](test.http)。图片描述使用独立的 `VISION_*` / `VLLM_BASE_URLS` 配置；`tier` 控制 MinerU 拆解，不选择图片描述模型。同步 DOCX 的原生 TXT-only 分支固定使用 `flash`，主 JSON 结果仍使用 Office→PDF 后的所选档位。
+
+## 检查与测试
 
 ```bash
 uv run --group dev black .
@@ -46,189 +79,6 @@ uv run --group dev ruff check src
 uv run --group dev pytest
 ```
 
-```bash
-sudo apt update
+真实模型测试默认跳过。模型和 `input` 样本准备好后，按[PDF 回归说明](mineru_4_upgrade_usage.md#验证与回归)执行；常规测试通过不代表所有长 PDF 已完整解析。
 
-sudo apt install -y libmagic-dev
-sudo apt install -y poppler-utils
-sudo apt install -y libreoffice
-sudo apt install -y pandoc
-sudo apt install -y graphicsmagick
-```
-
-### MinerU 4 runtime defaults (.env)
-
-- See [MinerU 4 deployment and regression guide](mineru_4_upgrade_usage.md) before migrating a running service.
-- All six upload parsing endpoints (`/mineru`, `/mineru_sci`, `/mineru_with_images`, `/mineru/task`, `/mineru_with_images/task`, `/two_stage/task`) accept the optional multipart form field `tier`: `flash/basic/standard/advanced`. Omission always selects `standard`; Swagger shows all four choices. Invalid values return 422. For example, add `-F "tier=advanced"` to a curl upload.
-- `MINERU_DEFAULT_TIER=standard` sets the fallback for direct service calls without a tier; HTTP requests use their explicit tier or the fixed `standard` default, and queued jobs keep the submitted choice.
-- `MINERU_DEFAULT_METHOD=auto` maps to SDK `ocr_mode` (`auto/txt/ocr`).
-- `MINERU_MODEL_SMALL_BACKEND=onnx` runs small models on CPU. The VLM runs in the Docker service in `compose.mineru.yaml`.
-- `MINERU_MODEL_VLM_SERVER_URL=http://127.0.0.1:30000` and `MINERU_MODEL_VLM_MODEL=mineru4` select that service. Set `MINERU_MODEL_VLM_API_KEY` only when its endpoint requires Bearer authentication.
-- For multiple containers, unset the single URL and configure `MINERU_VLLM_SERVER_URLS` with comma-separated URLs or a JSON array. Endpoint selection uses a per-process round robin.
-- `MINERU_MODEL_VLM_HTTP_TIMEOUT` / `MINERU_MODEL_VLM_MAX_CONCURRENCY` control individual VLM requests; project `MINERU_*_HARD_TIMEOUT_SECONDS` still controls scheduler task lifetimes.
-- Old backend task values remain accepted: `pipeline` maps to basic, `hybrid-*` to standard, `vlm-*` to advanced. All VLM inference uses the configured Docker endpoint. An explicit new tier is stored in new task payloads.
-- Office files continue through LibreOffice→PDF. The existing synchronous DOCX TXT-only branch uses native Flash parsing, with strict image OCR. PDF page numbers, TXT/chunk ordering and MinIO assets retain the service contract.
-- API extension validation explicitly accepts PDF and supported images, plus the separate Office conversion formats. Markdown/TXT and new native document families are not implicitly enabled.
-- `VISION_*` / `VLLM_BASE_URLS` configure the separate image-description model. They are independent of the MinerU VLM connection; vision failures still fail sync/async tasks.
-- Legacy language and hybrid batch/force-pipeline settings are not forwarded to MinerU 4. Small-model and VLM resource settings replace backend-specific tuning.
-
-Test Cuda (optional):
-
-```bash
-watch -n 1 nvidia-smi
-```
-
-Start Server:
-
-```bash
-# run from within the uv-managed environment (activate .venv or prefix with `uv run`)
-MINERU_MODEL_SOURCE=modelscope uvicorn src.main:app --host 0.0.0.0 --port 7770
-
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 uvicorn src.main:app --host 0.0.0.0 --port 8770
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 uvicorn src.main:app --host 0.0.0.0 --port 8771
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main:app --host 0.0.0.0 --port 8772
-
-# run in background
-
-nohup env MINERU_MODEL_SOURCE=modelscope uvicorn src.main:app --host 0.0.0.0 --port 7770 > uvicorn.log 2>&1 &
-
-nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 uvicorn src.main:app --host 0.0.0.0 --port 8770 > uvicorn.log 2>&1 &
-nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 uvicorn src.main:app --host 0.0.0.0 --port 8771 > uvicorn.log 2>&1 &
-nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main:app --host 0.0.0.0 --port 8772 > uvicorn.log 2>&1 &
-
-npm i -g pm2
-watch -n 1 nvidia-smi
-
-# 使用 pm2 管理进程
-pm2 save
-pm2 resurrect
-
-# 启动所有服务
-docker compose -f compose.mineru.yaml up -d --build
-pm2 start ecosystem.config.json
-pm2 start ecosystem.celery.json # 普通一队列
-pm2 start ecosystem.two_stage.celery.json # 两队列
-
-pm2 start ecosystem.two_stage.flower.json  # includes separate dispatch + merge workers; dispatch 不再订阅 default，避免阻塞 merge。用不上！
-pm2 start ecosystem.celery.flower.json # 用这个开启flower监控
-
-pm2 stop ecosystem.two_stage.celery.json # 停掉 two_stage celery
-pm2 delete ecosystem.two_stage.celery.json
-
-
-pm2 stop ecosystem.celery.flower.json # 停掉 flower
-pm2 delete ecosystem.celery.flower.json
-
-pm2 stop ecosystem.config.json # 停掉 unstructured-gunicorn
-pm2 delete ecosystem.config.json
-
-pm2 list # 查看状态
-
-# 清理/清空队列（选择对应 broker）
-# purge via celery (会连到 CELERY_BROKER_URL)
-celery -A src.services.celery_app purge -f
-
-
-
-# Multi-GPU: see mineru_4_upgrade_usage.md (one Docker project per GPU)
-pm2 start ecosystem.quatro.json
-
-pm2 restart all
-
-pm2 status
-
-pm2 restart all
-
-pm2 status
-
-pm2 delete all
-
-#清空队列
-uv run celery -A src.services.two_stage_pipeline purge -Q queue_parse_gpu,queue_vision,queue_dispatch,default
-# 清空redis
-redis-cli -n 0 flushdb
-# 删除暂存文件
-rm -rf /tmp/tiangong_mineru_tasks/*
-# 转成json
-python3 src/scripts/read_pickle.py "pickle/41-Life cycle assessment of lithium nickel cobalt manganese oxide batteries and lithium iron phosphate batteries for electric vehicles in China. JES 2022.pkl"
-
-# 使用 for 循环和 lsof
-for port in {8770..8773}
-do
-  # lsof -t 选项只会输出PID，方便后续处理
-  PID=$(sudo lsof -t -i:$port)
-  
-  if [ -n "$PID" ]; then
-    echo "找到占用端口 $port 的进程，PID: $PID。正在终止..."
-    sudo kill -9 $PID
-  else
-    echo "端口 $port 未被占用。"
-  fi
-done
-
-# 使用 lsof 清理 7770 端口
-port=7770
-# lsof -t 选项只会输出PID，方便后续处理
-PID=$(sudo lsof -t -i:$port)
-
-if [ -n "$PID" ]; then
-  echo "找到占用端口 $port 的进程，PID: $PID。正在终止..."
-  sudo kill -9 $PID
-else
-  echo "端口 $port 未被占用。"
-fi
-
-```
-
-# Kroki Server
-```bash
-docker run -d -p --restart unless-stopped 7999:8000 yuzutech/kroki
-```
-# Quickchart Server
-```bash
-docker run -d -p --restart unless-stopped 7998:3400 ianw/quickchart
-```
-
-# MinIO Server
-```bash
-docker run -d \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  --name minio \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=yourpassword \
-  --restart unless-stopped \
-  -v "$(pwd)/minio/data:/data" \
-  quay.io/minio/minio server /data --console-address ":9001"
-
-```
-
-# MinerU vLLM Server
-```bash
-docker compose -f compose.mineru.yaml up -d --build
-docker compose -f compose.mineru.yaml logs -f mineru-vlm
-```
-
-# Redis Server
-```bash
-docker run -d --name redis -p 6379:6379 redis:8 
-```
-
-# Celery Worker
-```bash
-# GPU 调度内部会再起子进程，Celery worker 请用非 daemonic 池
-# 监听 urgent + normal + default 队列，priority=urgent 会落到 queue_urgent
-CELERY_BROKER_URL=redis://localhost:6379/0 \
-CELERY_TASK_MINERU_QUEUE=queue_normal \
-CELERY_TASK_URGENT_QUEUE=queue_urgent \
-uv run celery -A src.services.celery_app worker \
--l info -Q queue_urgent,queue_normal,default -P solo -c 1 --prefetch-multiplier=1
-```
-
-# Celery Flower Monitoring
-```bash
-uv run celery -A src.services.celery_app flower --address=0.0.0.0 --port=5555
-```
-
-# redis自启动
-docker run -d --name redis --restart=always -p 6379:6379 redis:8
+运行状态由 `/health`、`/gpu/status`、`/two_stage/queue_status` 提供。日常维护使用指定项目、容器或 PM2 进程的命令，见[运维说明](mineru_4_upgrade_usage.md#启动与维护)。

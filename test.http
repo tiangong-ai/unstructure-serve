@@ -1,11 +1,81 @@
-### @Upload PDF and return text without saving to MinIO
-curl -X POST "http://localhost:8770/mineru/task" \
-  -F "file=@/path/to/sample.pdf" \
-  -F "chunk_type=false" \
-  -F "return_txt=false" \
-  -F "save_to_minio=false"
+# REST Client examples. Set token to the deployed FASTAPI_BEARER_TOKEN.
+# Syntax: https://github.com/Huachao/vscode-restclient#request-body
+@baseUrl = http://127.0.0.1:7770
+@token = replace-with-your-token
+@taskId = replace-with-returned-task-id
 
-### @Get Task Status
-curl -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  "http://localhost:8770/mineru/task/<task_id>?pretty=true"
+### Health
+GET {{baseUrl}}/health
+Authorization: Bearer {{token}}
 
+### Synchronous parse: switches are query parameters, tier is a form field.
+POST {{baseUrl}}/mineru?chunk_type=true&return_txt=true
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=mineru-example
+
+--mineru-example
+Content-Disposition: form-data; name="tier"
+
+standard
+--mineru-example
+Content-Disposition: form-data; name="file"; filename="p2.pdf"
+Content-Type: application/pdf
+
+< ./input/p2.pdf
+--mineru-example--
+
+### Ordinary task: requires ecosystem.celery.json worker.
+POST {{baseUrl}}/mineru/task?chunk_type=true&return_txt=true
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=mineru-example
+
+--mineru-example
+Content-Disposition: form-data; name="tier"
+
+advanced
+--mineru-example
+Content-Disposition: form-data; name="priority"
+
+normal
+--mineru-example
+Content-Disposition: form-data; name="file"; filename="p2.pdf"
+Content-Type: application/pdf
+
+< ./input/p2.pdf
+--mineru-example--
+
+### Ordinary task result
+GET {{baseUrl}}/mineru/task/{{taskId}}?pretty=true
+Authorization: Bearer {{token}}
+
+### Two-stage: all switches are form fields.
+POST {{baseUrl}}/two_stage/task
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=mineru-example
+
+--mineru-example
+Content-Disposition: form-data; name="tier"
+
+standard
+--mineru-example
+Content-Disposition: form-data; name="chunk_type"
+
+true
+--mineru-example
+Content-Disposition: form-data; name="return_txt"
+
+true
+--mineru-example
+Content-Disposition: form-data; name="file"; filename="p2.pdf"
+Content-Type: application/pdf
+
+< ./input/p2.pdf
+--mineru-example--
+
+### Two-stage result
+GET {{baseUrl}}/two_stage/task/{{taskId}}
+Authorization: Bearer {{token}}
+
+### Two-stage ready/unacked queue counts
+GET {{baseUrl}}/two_stage/queue_status
+Authorization: Bearer {{token}}

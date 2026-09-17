@@ -144,7 +144,8 @@ dmypy.json
 # pytype static type analyzer
 .pytype/
 
-.secrets/secrets.toml
+# Runtime credentials; public skeleton lives in deploy/secrets.example.toml.
+.secrets/
 
 output
 input
