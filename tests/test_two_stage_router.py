@@ -24,7 +24,6 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
         return workspace_root
 
     monkeypatch.setattr(two_stage_router, "_ensure_workspace", fake_ensure_workspace)
-    monkeypatch.setattr(two_stage_router, "resolve_backend_from_env", lambda: "vlm-http-client")
 
     captured = {}
 

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from src.services import pdf_text_layer_reconcile as reconcile
 
 
@@ -129,3 +131,46 @@ def test_reconcile_content_list_checkboxes_can_be_disabled(monkeypatch, tmp_path
 
     assert changes == 0
     assert "☐公开竞争" in content_list[0]["table_body"]
+
+
+@pytest.mark.parametrize(
+    "cell,source_pages,expected_changes",
+    [
+        ("公开竞争 □定向委托 □定向择优", [["■公开竞争 □定向委托 □定向择优"]], 1),
+        ("☑公开竞争 □定向委托 □定向择优", [["■公开竞争 □定向委托 □定向择优"]], 0),
+        ("公开竞争 □定向委托 □定向择优", [["■公开竞争 □定向委托 □定向择优"]] * 2, 1),
+        ("公开竞争 □定向委托 □定向择优", [[], ["■公开竞争 □定向委托 □定向择优"]], 0),
+        (
+            "公开竞争 □定向委托 □定向择优",
+            [["■公开竞争 □定向委托 □定向择优", "□公开竞争 □定向委托 □定向择优"]],
+            0,
+        ),
+        ("说明：公开竞争 □定向委托 □定向择优", [["■公开竞争 □定向委托 □定向择优"]], 0),
+        ("公开竞争 □定向委托", [["■公开竞争 □定向委托"]], 0),
+        ("其他 □选项甲 □选项乙", [["■其他 □选项甲 □选项乙"]], 0),
+    ],
+)
+def test_missing_leading_marker_requires_unique_full_option_group(
+    monkeypatch, tmp_path, cell, source_pages, expected_changes
+):
+    """Basic-tier p2 regression: restore a dropped glyph only with strong evidence."""
+    content = [
+        {"type": "table", "page_idx": 0, "table_body": f"<table><tr><td>{cell}</td></tr></table>"}
+    ]
+    bbox = _bbox_xml(
+        [
+            [
+                (50 + column * 100, 10 + row * 30, word)
+                for row, text in enumerate(rows)
+                for column, word in enumerate(text.split())
+            ]
+            for rows in source_pages
+        ]
+    )
+    monkeypatch.setattr(reconcile, "_run_pdftotext_bbox", lambda _path: bbox)
+
+    changes = reconcile.reconcile_content_list_checkboxes(content, _pdf_path(tmp_path))
+
+    assert changes == expected_changes
+    expected = f"☑{cell}" if expected_changes else cell
+    assert content[0]["table_body"] == f"<table><tr><td>{expected}</td></tr></table>"

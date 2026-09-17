@@ -9,20 +9,17 @@ from typing import Optional
 from dotenv import load_dotenv
 from loguru import logger
 
-from mineru.cli.common import do_parse as mineru_do_parse
-from mineru.cli.common import read_fn
-
 from src.services.pdf_text_layer_reconcile import reconcile_content_list_checkboxes
-from src.utils.mineru_backend import normalize_backend, resolve_backend, resolve_backend_from_env
+from src.utils.mineru_backend import normalize_backend, resolve_tier
 
 DEFAULT_VLLM_SERVER_URL = "http://127.0.0.1:30000"
 _SERVER_URL_ENV_KEYS: tuple[str, ...] = (
+    "MINERU_MODEL_VLM_SERVER_URL",
     "MINERU_VLLM_SERVER_URLS",
     "MINERU_VLLM_SERVER_URL",
     "MINERU_VLM_SERVER_URLS",
     "MINERU_VLM_SERVER_URL",
 )
-_DEFAULT_BACKEND = "vlm-http-client"
 _DEFAULT_LANG = "ch"
 _DEFAULT_METHOD = "auto"
 _SERVER_URL_CYCLE_LOCK = Lock()
@@ -31,8 +28,18 @@ _SERVER_URL_CYCLE = None
 
 load_dotenv()
 
-# Expose the upstream entrypoint so tests and downstream code can monkeypatch it directly.
-do_parse = mineru_do_parse
+
+def mineru_parse(*args, **kwargs):
+    # Load .env before MinerU constructs its config singleton.
+    from mineru.parser import parse
+
+    return parse(*args, **kwargs)
+
+
+def render(middle_json):
+    from mineru.render import RenderFormat, render as render_result
+
+    return render_result(middle_json, RenderFormat.CONTENT_LIST)
 
 
 def _normalize_server_url_input(raw_value) -> list[str]:
@@ -136,79 +143,97 @@ def _env_default_method() -> str:
     return _DEFAULT_METHOD
 
 
-def _resolve_backend_value(backend: Optional[str]) -> str:
-    normalized = normalize_backend(backend)
-    if normalized is not None:
-        return resolve_backend(normalized) or _DEFAULT_BACKEND
-
-    resolved_from_env = resolve_backend_from_env()
-    if resolved_from_env is not None:
-        return resolved_from_env
-
-    return _DEFAULT_BACKEND
-
-
-def _content_list_search_roots(
-    output_dir: Path,
-    pdf_file_name: str,
-    backend: str,
-    parse_method: str,
-) -> list[Path]:
-    file_root = output_dir / pdf_file_name
-    roots: list[Path] = []
-
-    if backend == "pipeline":
-        roots.append(file_root / parse_method)
-    elif backend.startswith("hybrid-"):
-        roots.append(file_root / f"hybrid_{parse_method}")
-    else:
-        roots.append(file_root / "vlm")
-
-    roots.append(file_root)
-    return roots
+def _page_range(start_page_id: int, end_page_id: Optional[int]) -> str:
+    if isinstance(start_page_id, bool) or not isinstance(start_page_id, int) or start_page_id < 0:
+        raise ValueError("start_page_id must be a non-negative integer")
+    if end_page_id is not None:
+        if (
+            isinstance(end_page_id, bool)
+            or not isinstance(end_page_id, int)
+            or end_page_id < start_page_id
+        ):
+            raise ValueError("end_page_id must be an integer >= start_page_id")
+        return f"{start_page_id + 1}-{end_page_id + 1}"
+    return "all" if start_page_id == 0 else f"{start_page_id + 1}-r1"
 
 
-def _find_content_list_file(
-    output_dir: Path,
-    pdf_file_name: str,
-    backend: str,
-    parse_method: str,
-) -> Optional[Path]:
-    target_name = f"{pdf_file_name}_content_list.json"
-    for root in _content_list_search_roots(output_dir, pdf_file_name, backend, parse_method):
-        candidate = root / target_name
-        if candidate.exists():
-            return candidate
+def _vlm_config(backend, server_url, server_headers):
+    from mineru.config import VlmConfig, config
 
-    file_root = output_dir / pdf_file_name
-    if not file_root.exists():
-        return None
+    values = config.model.vlm.model_dump()
+    normalize_backend(backend)
+    # Legacy backend names select quality only; VLM inference lives in Docker.
+    explicit = _normalize_server_url_input(server_url)
+    urls = explicit or _server_urls_from_env() or _normalize_server_url_input(values["server_url"])
+    values["server_url"] = _next_server_url(urls or [DEFAULT_VLLM_SERVER_URL])
 
-    matches = list(file_root.rglob(target_name))
-    if not matches:
-        return None
-
-    def _mtime_ns(path: Path) -> int:
-        try:
-            return path.stat().st_mtime_ns
-        except OSError:
-            return -1
-
-    matches.sort(key=_mtime_ns, reverse=True)
-    return matches[0]
+    headers = _resolve_server_headers(server_headers)
+    if headers:
+        if len(headers) != 1 or next(iter(headers)).lower() != "authorization":
+            raise ValueError("MinerU 4 supports only a Bearer Authorization header")
+        auth = next(iter(headers.values())).strip()
+        scheme, _, key = auth.partition(" ")
+        if scheme.lower() != "bearer" or not key.strip():
+            raise ValueError("MinerU 4 requires Bearer authentication; custom auth needs a proxy")
+        values["api_key"] = key.strip()
+    if os.getenv("MINERU_MODEL_VLM_API_KEY") is not None and not server_headers:
+        values["api_key"] = os.environ["MINERU_MODEL_VLM_API_KEY"].strip()
+    return VlmConfig(**values)
 
 
-def _load_content_list(path: Path) -> list[dict]:
-    try:
-        payload = json.loads(path.read_text("utf-8"))
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Missing MinerU content list file: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid MinerU content list JSON: {path}") from exc
+def _normalize_content_list(items: list[dict], output_dir: Path, middle_json) -> list[dict]:
+    """Project the V1 renderer into the service's stable downstream vocabulary."""
+    geometries = {
+        page["page_idx"]: page
+        for page in middle_json.extensions.get("docvortex_layout", {}).get("pages", [])
+    }
+    normalized = []
+    for original in items:
+        item = dict(original)
+        kind = item.get("type")
+        if kind == "image":
+            item["img_caption"] = item.get("image_caption") or item.get("img_caption") or []
+            item["img_footnote"] = item.get("image_footnote") or item.get("img_footnote") or []
+            if item.get("content"):
+                item["img_caption"] = [*item["img_caption"], item["content"]]
+        elif kind == "chart":
+            item.update(
+                type="image",
+                img_caption=item.get("chart_caption") or [],
+                img_footnote=item.get("chart_footnote") or [],
+            )
+            if item.get("content"):
+                item["img_caption"] = [*item["img_caption"], item["content"]]
+        elif kind == "code":
+            parts = [
+                *(item.get("code_caption") or []),
+                item.get("code_body", ""),
+                *(item.get("code_footnote") or []),
+            ]
+            item.update(type="text", text="\n".join(part for part in parts if part))
+        elif kind == "index":
+            item["type"] = "list"
+        elif kind == "page_footnote":
+            item["type"] = "text"
 
-    if not isinstance(payload, list):
-        raise RuntimeError(f"Unexpected MinerU content list payload in {path}")
-    return payload
+        geometry = geometries.get(item.get("page_idx"))
+        if geometry and item.get("bbox"):
+            width, height = geometry["width_pt"], geometry["height_pt"]
+            item["bbox"] = [
+                value * scale / 1000
+                for value, scale in zip(item["bbox"], (width, height, width, height))
+            ]
+            item["page_size"] = [width, height]
+        elif item.get("bbox"):
+            item["page_size"] = [1000, 1000]
+            item["bbox_normalized"] = True
+
+        if item.get("img_path"):
+            asset = (output_dir / item["img_path"]).resolve()
+            if not asset.is_relative_to(output_dir.resolve()) or not asset.is_file():
+                raise RuntimeError(f"Missing or invalid MinerU asset: {item['img_path']}")
+        normalized.append(item)
+    return normalized
 
 
 def parse_doc(
@@ -219,118 +244,74 @@ def parse_doc(
     method: Optional[str] = None,
     server_url=None,
     server_headers=None,
-    start_page_id=0,  # Start page ID for parsing, default is 0
-    end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
-    dump_debug_intermediate=False,  # Retained for compatibility with the previous local wrapper
-    log_debug_intermediate=False,  # Retained for compatibility with the previous local wrapper
-    return_txt=False,  # Retained for API compatibility; plain text is composed upstream
+    start_page_id=0,
+    end_page_id=None,
+    dump_debug_intermediate=False,
+    log_debug_intermediate=False,
+    return_txt=False,
+    *,
+    tier: Optional[str] = None,
 ):
-    """
-    Thin compatibility wrapper around MinerU's official `mineru.cli.common.do_parse`.
+    """Adapt MinerU 4's stateless SDK to (content_list, artifact_dir, None).
 
-    MinerU 3.x no longer returns `content_list` directly from `do_parse`, so this service
-    keeps the historical contract by reading `{stem}_content_list.json` back from MinerU's
-    output directory and returning `(content_list, output_dir_path, None)` to downstream code.
+    PDF indices remain source-document indices. Native DOCX is only used by
+    the existing txt-only branch; the API still converts Office files to PDF.
     """
-    del return_txt  # kept only to preserve the public function signature
+    from mineru.parser import ParseResult
+    from mineru.parser.writer import FileBasedDataWriter
 
+    del return_txt
     if not path_list:
         raise ValueError("path_list must not be empty.")
-
     if dump_debug_intermediate or log_debug_intermediate:
-        logger.warning(
-            "dump_debug_intermediate/log_debug_intermediate are ignored by the MinerU "
-            "3.x compatibility wrapper."
-        )
-
-    effective_backend = _resolve_backend_value(backend)
-    effective_lang = (lang or "").strip() or _env_default_lang()
+        logger.debug("MinerU 4 saves structured diagnostics alongside materialized assets")
     effective_method = (method or "").strip() or _env_default_method()
-    resolved_headers = _resolve_server_headers(server_headers)
-    server_urls = _resolve_server_urls(server_url)
-    output_dir_path = Path(output_dir)
-
-    last_content_list: Optional[list[dict]] = None
-    last_local_output_dir: Optional[str] = None
-
-    try:
-        for path in path_list:
-            file_path = Path(path)
-            file_name = str(file_path.stem)
-            pdf_bytes = read_fn(file_path)
-            assigned_server_url = _next_server_url(server_urls)
-
-            logger.debug(
-                "Dispatching %s to MinerU backend '%s' via %s",
-                file_name,
-                effective_backend,
-                assigned_server_url,
-            )
-            do_parse(
-                output_dir=output_dir,
-                pdf_file_names=[file_name],
-                pdf_bytes_list=[pdf_bytes],
-                p_lang_list=[effective_lang],
-                backend=effective_backend,
-                parse_method=effective_method,
-                server_url=assigned_server_url,
-                server_headers=resolved_headers,
-                start_page_id=start_page_id,
-                end_page_id=end_page_id,
-                f_draw_layout_bbox=False,
-                f_draw_span_bbox=False,
-                f_dump_md=False,
-                f_dump_middle_json=False,
-                f_dump_model_output=False,
-                f_dump_orig_pdf=False,
-                f_dump_content_list=True,
-            )
-
-            content_list_path = _find_content_list_file(
-                output_dir_path, file_name, effective_backend, effective_method
-            )
-            if content_list_path is None:
-                raise RuntimeError(
-                    "MinerU did not produce "
-                    f"{file_name}_content_list.json under {output_dir_path}"
-                )
-
-            last_content_list = _load_content_list(content_list_path)
-            reconcile_content_list_checkboxes(last_content_list, file_path)
-            last_local_output_dir = str(content_list_path.parent)
-
-        if last_content_list is None or last_local_output_dir is None:
-            raise RuntimeError("MinerU did not return any parsed content.")
-
-        return last_content_list, last_local_output_dir, None
-    except Exception as exc:
-        logger.exception(exc)
-        raise
-
-
-if __name__ == "__main__":
-    # args
-    __dir__ = os.path.dirname(os.path.abspath(__file__))
-    pdf_files_dir = os.path.join(__dir__, "../../pdfs")
-    output_dir = os.path.join(__dir__, "./../output")
-    pdf_suffixes = [".pdf"]
-    image_suffixes = [".png", ".jpeg", ".jpg"]
-
-    doc_path_list = []
-    for doc_path in Path(pdf_files_dir).glob("*"):
-        if doc_path.suffix in pdf_suffixes + image_suffixes:
-            doc_path_list.append(doc_path)
-
-    """如果您由于网络问题无法下载模型，可以设置环境变量MINERU_MODEL_SOURCE为modelscope使用免代理仓库下载模型"""
-    os.environ["MINERU_MODEL_SOURCE"] = "modelscope"
-
-    """Use pipeline mode if your environment does not support VLM"""
-    parse_doc(doc_path_list, output_dir, backend="pipeline")
-
-    """To enable VLM mode, change the backend to one of the vlm-* options"""
-    # parse_doc(doc_path_list, output_dir, backend="vlm-transformers")  # more general.
-    # parse_doc(doc_path_list, output_dir, backend="vlm-vllm-engine")  # vLLM engine.
-    # parse_doc(doc_path_list, output_dir, backend="vlm-lmdeploy-engine")  # LMDeploy engine.
-    # parse_doc(doc_path_list, output_dir, backend="vlm-http-client")  # HTTP client.
-    # parse_doc(doc_path_list, output_dir, backend="vlm-mlx-engine")  # Apple silicon engine.
-    # parse_doc(doc_path_list, output_dir, backend="hybrid-auto-engine")
+    if effective_method not in {"auto", "txt", "ocr"}:
+        raise ValueError("MinerU ocr_mode must be auto/txt/ocr")
+    effective_lang = (lang or "").strip() or _env_default_lang()
+    if effective_lang not in {"ch", "auto"}:
+        logger.warning(
+            "MinerU 4 selects OCR languages internally; legacy lang={} is not forwarded",
+            effective_lang,
+        )
+    requested_pages = _page_range(start_page_id, end_page_id)
+    effective_tier = resolve_tier(backend, tier)
+    last_content_list, last_output = None, None
+    for path in path_list:
+        source = Path(path)
+        is_pdf = source.suffix.lower() == ".pdf"
+        native_docx = source.suffix.lower() == ".docx"
+        if not is_pdf and (start_page_id != 0 or end_page_id is not None):
+            raise ValueError("Page ranges are supported only for PDF inputs")
+        current_tier = "flash" if native_docx else effective_tier
+        artifact_dir = Path(output_dir) / source.stem / current_tier
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        connection = (
+            _vlm_config(backend, server_url, server_headers)
+            if current_tier in {"standard", "advanced"}
+            else None
+        )
+        result = mineru_parse(
+            source,
+            tier=current_tier,
+            ocr_mode=effective_method,
+            page_range=requested_pages if is_pdf else "",
+            vlm_config=connection,
+        )
+        if result is None:
+            raise RuntimeError(f"MinerU returned no result for {source.name}")
+        result.save(FileBasedDataWriter(str(artifact_dir)))
+        try:
+            saved = ParseResult.from_json((artifact_dir / "middle_json.json").read_text("utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"Invalid MinerU materialized result for {source.name}") from exc
+        last_content_list = _normalize_content_list(
+            render(saved.middle_json), artifact_dir, saved.middle_json
+        )
+        if is_pdf:
+            reconcile_content_list_checkboxes(last_content_list, source)
+        (artifact_dir / f"{source.stem}_content_list.json").write_text(
+            json.dumps(last_content_list, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        last_output = str(artifact_dir)
+    return last_content_list, last_output, None

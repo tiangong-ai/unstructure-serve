@@ -182,6 +182,10 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
         return area / page_area
 
     def _aspect_ratio(item: Dict) -> Optional[float]:
+        if item.get("bbox_normalized"):
+            # A 0-1000 box distorts aspect ratio on non-square pages. The
+            # intrinsic image dimensions are checked below in the same filter.
+            return None
         bbox = _extract_bbox(item)
         if not bbox:
             return None

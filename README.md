@@ -22,20 +22,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # ensure CPython 3.12 is available locally
 uv python install 3.12
 
-# install or upgrade all project dependencies into .venv/
-uv sync
-uv sync --upgrade
+# reproduce the validated dependency set
+uv sync --locked --group dev
 ```
 
 `uv sync` reads `pyproject.toml` (and `uv.lock` when present) to create a virtual environment at `.venv/`.  
-All runtime and development dependencies now live in `pyproject.toml`; the legacy requirement files are retained only for reference.
+Application runtime and development dependencies live in `pyproject.toml` and the committed `uv.lock`. MinerU VLM inference runs in Docker; vLLM is not installed in the application environment.
 Activate it with `source .venv/bin/activate` or prefer `uv run …` / `uv venv` for ephemeral shells.
 
 Download MinerU models (first run only):
 
 ```bash
-wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/scripts/download_models_hf.py -O download_models_hf.py
-uv run python download_models_hf.py
+MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
+MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models verify --tier basic --small-backend onnx
+docker compose -f compose.mineru.yaml up -d --build
 ```
 
 ### Development helpers
@@ -56,19 +56,21 @@ sudo apt install -y pandoc
 sudo apt install -y graphicsmagick
 ```
 
-### MinerU runtime defaults (.env)
+### MinerU 4 runtime defaults (.env)
 
-- `.env` is loaded automatically; adjust defaults there without touching code.
-- `MINERU_DEFAULT_BACKEND` controls the parsing backend (default `vlm-http-client`; options: `pipeline`, `vlm-transformers`, `vlm-vllm-engine`, `vlm-lmdeploy-engine`, `vlm-http-client`, `vlm-mlx-engine`).
-- `MINERU_DEFAULT_LANG` sets the OCR language hint for pipeline mode (default `ch`).
-- `MINERU_DEFAULT_METHOD` sets the pipeline parse method (`auto`/`txt`/`ocr`, default `auto`).
-- Vision defaults are now vLLM-only: `.env` / `.env.example` set `VISION_PROVIDER=vllm` and `VISION_PROVIDER_CHOICES=vllm`; image-aware routes no longer fall back to OpenAI / Gemini by default.
-- `VLLM_BASE_URLS` / `VLLM_BASE_URL` is now required for the vLLM vision provider; `VLLM_API_KEY` is optional auth only. When multiple URLs are configured, each image request tries them in rotated order until one succeeds or all fail.
-- `/mineru_with_images`, `/mineru_with_images/task`, and `/two_stage/task` no longer degrade vision failures back to caption/footnote text. If the vision stage raises, the sync API returns 500 and async/Celery tasks fail.
-- MinerU 后端通过 `MINERU_DEFAULT_BACKEND` 环境变量配置；允许值：`pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，额外接受 `hybrid-auto-engine`/`hybrid-http-client`。在当前 MinerU 3.x 适配层中，`hybrid-*` 会直接透传给官方 `do_parse`，不再回退到 `vlm-*`。API 不再接受表单参数覆盖后端。
-- `MINERU_VLLM_SERVER_URLS` / `MINERU_VLLM_SERVER_URL` (or `MINERU_VLM_SERVER_URLS` / `MINERU_VLM_SERVER_URL`) list VLM endpoints; comma-separated or JSON array values are accepted. If unset, the service falls back to `http://127.0.0.1:30000`.
-- `MINERU_HYBRID_BATCH_RATIO` 控制 hybrid-* 后端小模型 batch 倍率（默认 8）；仅在 hybrid 模式有效，用于权衡显存占用。
-- `MINERU_HYBRID_FORCE_PIPELINE_ENABLE` 强制 hybrid-* 的文本提取使用小模型（默认 false），在极端场景可降低幻觉。
+- See [MinerU 4 deployment and regression guide](mineru_4_upgrade_usage.md) before migrating a running service.
+- All six upload parsing endpoints (`/mineru`, `/mineru_sci`, `/mineru_with_images`, `/mineru/task`, `/mineru_with_images/task`, `/two_stage/task`) accept the optional multipart form field `tier`: `flash/basic/standard/advanced`. Omission always selects `standard`; Swagger shows all four choices. Invalid values return 422. For example, add `-F "tier=advanced"` to a curl upload.
+- `MINERU_DEFAULT_TIER=standard` sets the fallback for direct service calls without a tier; HTTP requests use their explicit tier or the fixed `standard` default, and queued jobs keep the submitted choice.
+- `MINERU_DEFAULT_METHOD=auto` maps to SDK `ocr_mode` (`auto/txt/ocr`).
+- `MINERU_MODEL_SMALL_BACKEND=onnx` runs small models on CPU. The VLM runs in the Docker service in `compose.mineru.yaml`.
+- `MINERU_MODEL_VLM_SERVER_URL=http://127.0.0.1:30000` and `MINERU_MODEL_VLM_MODEL=mineru4` select that service. Set `MINERU_MODEL_VLM_API_KEY` only when its endpoint requires Bearer authentication.
+- For multiple containers, unset the single URL and configure `MINERU_VLLM_SERVER_URLS` with comma-separated URLs or a JSON array. Endpoint selection uses a per-process round robin.
+- `MINERU_MODEL_VLM_HTTP_TIMEOUT` / `MINERU_MODEL_VLM_MAX_CONCURRENCY` control individual VLM requests; project `MINERU_*_HARD_TIMEOUT_SECONDS` still controls scheduler task lifetimes.
+- Old backend task values remain accepted: `pipeline` maps to basic, `hybrid-*` to standard, `vlm-*` to advanced. All VLM inference uses the configured Docker endpoint. An explicit new tier is stored in new task payloads.
+- Office files continue through LibreOffice→PDF. The existing synchronous DOCX TXT-only branch uses native Flash parsing, with strict image OCR. PDF page numbers, TXT/chunk ordering and MinIO assets retain the service contract.
+- API extension validation explicitly accepts PDF and supported images, plus the separate Office conversion formats. Markdown/TXT and new native document families are not implicitly enabled.
+- `VISION_*` / `VLLM_BASE_URLS` configure the separate image-description model. They are independent of the MinerU VLM connection; vision failures still fail sync/async tasks.
+- Legacy language and hybrid batch/force-pipeline settings are not forwarded to MinerU 4. Small-model and VLM resource settings replace backend-specific tuning.
 
 Test Cuda (optional):
 
@@ -102,7 +104,7 @@ pm2 save
 pm2 resurrect
 
 # 启动所有服务
-pm2 start ecosystem.vllm.config.json
+docker compose -f compose.mineru.yaml up -d --build
 pm2 start ecosystem.config.json
 pm2 start ecosystem.celery.json # 普通一队列
 pm2 start ecosystem.two_stage.celery.json # 两队列
@@ -128,7 +130,7 @@ celery -A src.services.celery_app purge -f
 
 
 
-pm2 start ecosystem.vllm.quatro.json
+# Multi-GPU: see mineru_4_upgrade_usage.md (one Docker project per GPU)
 pm2 start ecosystem.quatro.json
 
 pm2 restart all
@@ -203,8 +205,8 @@ docker run -d \
 
 # MinerU vLLM Server
 ```bash
-# Run first time to download models
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 mineru-vllm-server --port 30000
+docker compose -f compose.mineru.yaml up -d --build
+docker compose -f compose.mineru.yaml logs -f mineru-vlm
 ```
 
 # Redis Server

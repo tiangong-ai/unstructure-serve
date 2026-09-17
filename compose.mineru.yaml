@@ -1,0 +1,49 @@
+services:
+  mineru-vlm:
+    image: tiangong/mineru-vlm:4.0.0-vllm0.21.0
+    build:
+      context: ./deploy/mineru-vllm
+      args:
+        VLLM_IMAGE: ${MINERU_DOCKER_BASE_IMAGE:-vllm/vllm-openai:v0.21.0}
+    restart: unless-stopped
+    runtime: nvidia
+    stop_grace_period: 60s
+    shm_size: 8gb
+    ports:
+      - "127.0.0.1:${MINERU_DOCKER_PORT:-30000}:30000"
+    volumes:
+      - mineru-models:/opt/mineru
+      - mineru-download-cache:/root/.cache
+    environment:
+      MINERU_MODEL_SOURCE: ${MINERU_MODEL_SOURCE:-modelscope}
+      MINERU_MODEL_VLM_ENGINE: vllm
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "30000"
+      - --served-model-name
+      - mineru4
+      - --gpu-memory-utilization
+      - "${MINERU_DOCKER_GPU_MEMORY:-0.15}"
+      - --max-model-len
+      - "8192"
+      - --max-num-seqs
+      - "16"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${MINERU_DOCKER_GPU_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:30000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      start_period: 10m
+      retries: 5
+
+volumes:
+  mineru-models:
+  mineru-download-cache:

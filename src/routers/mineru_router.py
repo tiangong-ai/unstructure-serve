@@ -18,7 +18,7 @@ from src.utils.file_conversion import (
     format_extension_list,
     maybe_convert_to_pdf,
 )
-from src.utils.mineru_backend import resolve_backend_from_env
+from src.utils.mineru_backend import MinerUTier
 from src.utils.mineru_support import (
     mineru_supported_extensions,
 )
@@ -45,6 +45,10 @@ ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 )
 async def mineru(
     file: UploadFile = File(...),
+    tier: MinerUTier = Form(
+        MinerUTier.STANDARD,
+        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+    ),
     save_to_minio: bool = Form(
         False,
         description="Store the parsed PDF, JSON payload, and per-page images in MinIO.",
@@ -91,13 +95,7 @@ async def mineru(
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
-    try:
-        backend_value = resolve_backend_from_env()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Invalid MINERU_DEFAULT_BACKEND: {exc}",
-        ) from exc
+    backend_value = tier.value
 
     if not save_to_minio:
         # Ignore meta payloads when MinIO persistence is disabled.

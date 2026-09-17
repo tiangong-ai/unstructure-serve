@@ -1,51 +1,23 @@
-import sys
-import types
-
-import pytest
+import builtins
 
 from src.utils import mineru_support
 
 
-@pytest.fixture(autouse=True)
-def clear_mineru_cache():
-    mineru_support.mineru_supported_extensions.cache_clear()
-    yield
-    mineru_support.mineru_supported_extensions.cache_clear()
+def test_service_extensions_keep_the_page_assets_contract():
+    extensions = mineru_support.mineru_supported_extensions()
+    assert extensions == {".pdf", ".png", ".jpeg", ".jpg", ".webp", ".bmp", ".tif", ".tiff"}
+    assert not extensions & {".md", ".txt", ".epub", ".html", ".csv"}
+    assert mineru_support.format_supported_extensions() == ", ".join(sorted(extensions))
 
 
-def test_mineru_supported_extensions_fallback(monkeypatch):
-    import builtins
-
+def test_extension_validation_does_not_import_removed_mineru_modules(monkeypatch):
     original_import = builtins.__import__
 
-    def failing_import(name, *args, **kwargs):
-        if name == "mineru.cli.common":
-            raise ImportError("forced for test")
+    def guarded_import(name, *args, **kwargs):
+        if name.startswith("mineru"):
+            raise AssertionError("Extension validation must not depend on MinerU internals")
         return original_import(name, *args, **kwargs)
 
-    monkeypatch.setattr(builtins, "__import__", failing_import)
-
-    expected = {".pdf", ".png", ".jpeg", ".jpg"}
-    assert mineru_support.mineru_supported_extensions() == expected
-
-
-def test_mineru_supported_extensions_collects_from_module(monkeypatch):
-    monkeypatch.delitem(sys.modules, "mineru", raising=False)
-    monkeypatch.delitem(sys.modules, "mineru.cli", raising=False)
-    monkeypatch.delitem(sys.modules, "mineru.cli.common", raising=False)
-
-    mineru_pkg = types.ModuleType("mineru")
-    mineru_pkg.__path__ = []
-    mineru_cli_pkg = types.ModuleType("mineru.cli")
-    mineru_cli_pkg.__path__ = []
-    mineru_common = types.ModuleType("mineru.cli.common")
-    mineru_common.FILE_SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
-    mineru_common.extra_extensions = ["png", ".jpg", ".markdown"]
-
-    monkeypatch.setitem(sys.modules, "mineru", mineru_pkg)
-    monkeypatch.setitem(sys.modules, "mineru.cli", mineru_cli_pkg)
-    monkeypatch.setitem(sys.modules, "mineru.cli.common", mineru_common)
-
-    extensions = mineru_support.mineru_supported_extensions()
-    assert extensions == {".docx", ".jpg", ".pdf", ".png"}
-    assert mineru_support.format_supported_extensions() == ".docx, .jpg, .pdf, .png"
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    mineru_support.mineru_supported_extensions.cache_clear()
+    assert ".pdf" in mineru_support.mineru_supported_extensions()

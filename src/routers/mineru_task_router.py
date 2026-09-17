@@ -22,7 +22,7 @@ from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
     format_extension_list,
 )
-from src.utils.mineru_backend import resolve_backend_from_env
+from src.utils.mineru_backend import MinerUTier
 from src.utils.mineru_support import mineru_supported_extensions
 from src.utils.response_utils import json_response, pretty_response_flag
 from src.config.config import CELERY_TASK_MINERU_QUEUE, CELERY_TASK_URGENT_QUEUE
@@ -59,6 +59,10 @@ def _ensure_storage_root() -> Path:
 )
 async def mineru_task(
     file: UploadFile = File(...),
+    tier: MinerUTier = Form(
+        MinerUTier.STANDARD,
+        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+    ),
     save_to_minio: bool = Form(
         False,
         description="Store the parsed PDF, JSON payload, and per-page images in MinIO.",
@@ -99,13 +103,7 @@ async def mineru_task(
             status_code=400,
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
-    try:
-        backend_value = resolve_backend_from_env()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Invalid MINERU_DEFAULT_BACKEND: {exc}",
-        ) from exc
+    backend_value = tier.value
 
     storage_root = _ensure_storage_root()
     workspace = storage_root / uuid.uuid4().hex

@@ -5,7 +5,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn.workers.UvicornWorker --timeout 120 -b 0.0.0.0:8770 src.main:app",
+      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8770 src.main:app",
       "env": {
         "GPU_IDS": "0",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -29,7 +29,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn.workers.UvicornWorker --timeout 120 -b 0.0.0.0:8771 src.main:app",
+      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8771 src.main:app",
       "env": {
         "GPU_IDS": "1",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -53,7 +53,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn.workers.UvicornWorker --timeout 120 -b 0.0.0.0:8772 src.main:app",
+      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8772 src.main:app",
       "env": {
         "GPU_IDS": "2",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -77,7 +77,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn.workers.UvicornWorker --timeout 120 -b 0.0.0.0:8773 src.main:app",
+      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8773 src.main:app",
       "env": {
         "GPU_IDS": "3",
         "MINERU_MODEL_SOURCE": "modelscope",

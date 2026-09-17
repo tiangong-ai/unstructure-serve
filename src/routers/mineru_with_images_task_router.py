@@ -27,7 +27,7 @@ from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
     format_extension_list,
 )
-from src.utils.mineru_backend import resolve_backend_from_env
+from src.utils.mineru_backend import MinerUTier
 from src.utils.mineru_support import mineru_supported_extensions
 from src.utils.response_utils import json_response, pretty_response_flag
 
@@ -89,6 +89,10 @@ def _form_model(
 )
 async def mineru_with_images_task(
     file: UploadFile = File(...),
+    tier: MinerUTier = Form(
+        MinerUTier.STANDARD,
+        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+    ),
     provider: Optional[str] = Depends(_form_provider),
     model: Optional[str] = Depends(_form_model),
     prompt: Optional[str] = Form(
@@ -135,13 +139,7 @@ async def mineru_with_images_task(
             status_code=400,
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
-    try:
-        backend_value = resolve_backend_from_env()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Invalid MINERU_DEFAULT_BACKEND: {exc}",
-        ) from exc
+    backend_value = tier.value
 
     if not save_to_minio:
         minio_meta = None

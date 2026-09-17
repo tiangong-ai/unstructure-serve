@@ -1,10 +1,11 @@
 import asyncio
 import os
 import tempfile
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
+from src.utils.mineru_backend import MinerUTier
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
     format_extension_list,
@@ -37,6 +38,10 @@ PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
 )
 async def mineru(
     file: UploadFile = File(...),
+    tier: MinerUTier = Form(
+        MinerUTier.STANDARD,
+        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
     return_txt: bool = False,
@@ -97,6 +102,7 @@ async def mineru(
         fut = scheduler.submit(
             processing_path,
             pipeline="sci",
+            backend=tier.value,
             chunk_type=chunk_type,
             return_txt=return_txt,
         )

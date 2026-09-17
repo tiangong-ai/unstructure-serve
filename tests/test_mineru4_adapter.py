@@ -1,0 +1,144 @@
+"""Behavioral contracts at the MinerU SDK / service boundary."""
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from src.services import mineru_service_full as service
+
+
+@pytest.fixture
+def sdk(monkeypatch):
+    calls = []
+    payload = {
+        "schema": "docvortex.middle",
+        "schema_version": "2.0",
+        "metadata": {"file_suffix": "pdf", "producer": {"name": "mineru", "version": "4.0.0"}},
+        "extensions": {"mineru": {"tier": "standard", "parse_mode": "txt"}},
+        "pages": [{"page_idx": 10, "blocks": []}],
+        "is_full_document": False,
+    }
+
+    class Result:
+        def save(self, writer):
+            writer.write_string("middle_json.json", json.dumps(payload))
+            writer.write("images/figure.png", b"image-bytes")
+
+    def parse(path, **kwargs):
+        calls.append((path, kwargs))
+        return Result()
+
+    monkeypatch.setattr(service, "mineru_parse", parse, raising=False)
+    monkeypatch.setenv("MINERU_DEFAULT_TIER", "standard")
+    monkeypatch.setenv("MINERU_MODEL_VLM_SERVER_URL", "http://127.0.0.1:31000")
+    monkeypatch.setattr(service, "reconcile_content_list_checkboxes", lambda *args: None)
+    return calls
+
+
+def test_materialized_images_and_new_fields_reach_existing_consumers(monkeypatch, tmp_path, sdk):
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"%PDF")
+    rendered = [
+        {"type": "header", "text": "header", "page_idx": 10},
+        {"type": "text", "text": "Title", "text_level": 1, "page_idx": 10},
+        {
+            "type": "image",
+            "img_path": "images/figure.png",
+            "image_caption": ["caption"],
+            "image_footnote": ["note"],
+            "content": "visible labels",
+            "page_idx": 10,
+        },
+        {"type": "code", "code_body": "print(1)", "page_idx": 10},
+        {"type": "index", "list_items": ["Introduction"], "page_idx": 10},
+        {"type": "page_footnote", "text": "footnote", "page_idx": 10},
+    ]
+    monkeypatch.setattr(service, "render", lambda *args, **kwargs: rendered, raising=False)
+    items, output, txt = service.parse_doc(
+        [source], tmp_path / "out", tier="standard", start_page_id=10, end_page_id=10
+    )
+    assert txt is None
+    assert sdk[0][1]["page_range"] == "11-11"
+    assert items[2]["img_caption"] == ["caption", "visible labels"]
+    assert items[2]["img_footnote"] == ["note"]
+    assert (Path(output) / items[2]["img_path"]).read_bytes() == b"image-bytes"
+    assert [(item["type"], item.get("text")) for item in items[3:]] == [
+        ("text", "print(1)"),
+        ("list", None),
+        ("text", "footnote"),
+    ]
+    assert [item["page_idx"] for item in items] == [10] * 6
+
+
+def test_native_docx_uses_flash_without_pdf_range(monkeypatch, tmp_path, sdk):
+    source = tmp_path / "report.docx"
+    source.write_bytes(b"docx")
+    monkeypatch.setattr(service, "render", lambda *args: [], raising=False)
+    service.parse_doc([source], tmp_path / "out", backend="vlm-http-client")
+    assert sdk[0][1]["tier"] == "flash"
+    assert sdk[0][1]["page_range"] == ""
+
+
+def test_missing_materialized_asset_fails_instead_of_skipping_vision(monkeypatch, tmp_path, sdk):
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"%PDF")
+    monkeypatch.setattr(
+        service,
+        "render",
+        lambda *args: [{"type": "image", "img_path": "images/missing.png", "page_idx": 0}],
+        raising=False,
+    )
+    with pytest.raises(RuntimeError, match="[Aa]sset"):
+        service.parse_doc([source], tmp_path / "out", tier="standard")
+
+
+def test_missing_result_json_reports_a_parse_error(monkeypatch, tmp_path, sdk):
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"%PDF")
+    monkeypatch.setattr(
+        service, "mineru_parse", lambda *args, **kwargs: SimpleNamespace(save=lambda writer: None)
+    )
+    with pytest.raises(RuntimeError, match="materialized result"):
+        service.parse_doc([source], tmp_path / "out", tier="standard")
+
+
+def test_custom_auth_is_not_silently_dropped(monkeypatch, tmp_path, sdk):
+    monkeypatch.setenv("MINERU_VLLM_AUTH_HEADER", "Basic opaque")
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"%PDF")
+    with pytest.raises(ValueError, match="Bearer"):
+        service.parse_doc([source], tmp_path / "out", tier="standard")
+
+
+def test_geometry_uses_matching_units_for_image_filters(tmp_path):
+    middle = SimpleNamespace(
+        extensions={
+            "docvortex_layout": {"pages": [{"page_idx": 0, "width_pt": 600, "height_pt": 800}]}
+        }
+    )
+    items = service._normalize_content_list(
+        [{"type": "image", "page_idx": 0, "bbox": [100, 200, 500, 600]}], tmp_path, middle
+    )
+    assert items[0]["bbox"] == [60, 160, 300, 480]
+    assert items[0]["page_size"] == [600, 800]
+
+
+def test_docker_endpoints_rotate_without_changing_global_config(monkeypatch):
+    from mineru.config import config
+
+    monkeypatch.delenv("MINERU_VLLM_AUTH_HEADER", raising=False)
+    initial = config.model.vlm.model_dump()
+    urls = ["http://127.0.0.1:31001", "http://127.0.0.1:31002"]
+    first = service._vlm_config("vlm-vllm-engine", urls, None)
+    second = service._vlm_config("vlm-vllm-engine", urls, None)
+    assert first.server_url == urls[0] + "/"
+    assert second.server_url == urls[1] + "/"
+    assert config.model.vlm.model_dump() == initial
+
+
+@pytest.mark.parametrize("start,end", [(-1, None), (2, 1), (True, None)])
+def test_invalid_page_ranges_are_rejected(start, end):
+    with pytest.raises(ValueError):
+        service._page_range(start, end)

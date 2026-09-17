@@ -328,14 +328,41 @@ def _replace_marker_for_label(fragment: str, label: str, *, selected: bool) -> t
     return pattern.sub(_replace, fragment), changes
 
 
+def _restore_leading_cell_marker(fragment: str, source_rows: list[_CheckboxRow]) -> tuple[str, int]:
+    """Restore one omitted leading glyph only for an exact, unambiguous option group."""
+    changes = 0
+
+    def _replace_cell(match: re.Match[str]) -> str:
+        nonlocal changes
+        cell = match.group(1)
+        candidates = []
+        for row in source_rows:
+            # Require two surviving marked options and a distinctive first label.
+            if len(row.entries) < 3 or len(row.entries[0].normalized_label) < 4:
+                continue
+            pattern = r"\s*" + re.escape(row.entries[0].label)
+            for entry in row.entries[1:]:
+                pattern += rf"\s*[{re.escape(CHECKBOX_CHARS)}]\s*{re.escape(entry.label)}"
+            if re.fullmatch(pattern + r"\s*", cell):
+                candidates.append(row)
+        if len(candidates) != 1:
+            return match.group(0)
+        marker = "☑" if candidates[0].entries[0].selected else "☐"
+        offset = match.start(1) - match.start() + len(cell) - len(cell.lstrip())
+        changes += 1
+        return match.group(0)[:offset] + marker + match.group(0)[offset:]
+
+    return _TABLE_CELL_RE.sub(_replace_cell, fragment), changes
+
+
 def _reconcile_fragment(fragment: str, source_rows: list[_CheckboxRow]) -> tuple[str, int]:
+    fragment, changes = _restore_leading_cell_marker(fragment, source_rows)
     target_entries = _extract_entries_from_html_fragment(fragment)
     source_row = _source_for_target_row(target_entries, source_rows)
     if source_row is None:
-        return fragment, 0
+        return fragment, changes
 
     updated = fragment
-    changes = 0
     for target_entry in target_entries:
         source_entry = _source_entry_for_target(target_entry, source_row.entries)
         if source_entry is None:
@@ -377,6 +404,8 @@ def reconcile_content_list_checkboxes(content_list: list[dict], pdf_path: str | 
     table symbols. This postprocess is intentionally narrow: it only runs when
     MinerU output already contains checkbox symbols, reads Poppler's bbox text
     layer, and updates matching rows on the same page.
+    A missing leading cell glyph also requires a unique, exact option group with
+    at least two surviving markers and a first label of four or more characters.
     """
 
     if not _env_enabled():

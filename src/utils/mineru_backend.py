@@ -1,7 +1,17 @@
 import os
+from enum import Enum
 from typing import Optional
 
-# Supported MinerU backends exposed by the service.
+
+class MinerUTier(str, Enum):
+    FLASH = "flash"
+    BASIC = "basic"
+    STANDARD = "standard"
+    ADVANCED = "advanced"
+
+
+# Legacy task payloads remain valid during a rolling upgrade.
+SUPPORTED_MINERU_TIERS = {tier.value for tier in MinerUTier}
 SUPPORTED_MINERU_BACKENDS = {
     "pipeline",
     "vlm-transformers",
@@ -11,10 +21,9 @@ SUPPORTED_MINERU_BACKENDS = {
     "vlm-mlx-engine",
     "hybrid-auto-engine",
     "hybrid-http-client",
-}
+} | SUPPORTED_MINERU_TIERS
 
-# Kept as a named constant for testability and to make the 3.x behavior explicit:
-# hybrid backends are now passed through directly.
+# Preserve legacy task payload names; resolve_tier maps them at the SDK boundary.
 BACKEND_FALLBACKS: dict[str, str] = {}
 
 
@@ -40,14 +49,40 @@ def normalize_backend(backend: Optional[str]) -> Optional[str]:
 
 
 def resolve_backend(normalized_backend: Optional[str]) -> Optional[str]:
-    """Return the actual backend to pass to MinerU."""
+    """Keep the backend name carried in existing task payloads."""
     if normalized_backend is None:
         return None
     return BACKEND_FALLBACKS.get(normalized_backend, normalized_backend)
 
 
 def resolve_backend_from_env() -> Optional[str]:
-    """Load MINERU_DEFAULT_BACKEND from env, normalize, and return the runtime backend."""
+    """Snapshot the configured tier into existing task payloads."""
+    tier = os.getenv("MINERU_DEFAULT_TIER", "").strip().lower()
+    if tier:
+        return normalize_tier(tier)
     raw = os.getenv("MINERU_DEFAULT_BACKEND")
     normalized = normalize_backend(raw)
     return resolve_backend(normalized)
+
+
+def normalize_tier(tier: str) -> str:
+    candidate = tier.strip().lower()
+    if candidate not in SUPPORTED_MINERU_TIERS:
+        raise ValueError(
+            f"Unsupported MinerU tier '{tier}'. Expected flash/basic/standard/advanced."
+        )
+    return candidate
+
+
+def resolve_tier(backend: Optional[str] = None, tier: Optional[str] = None) -> str:
+    """Translate old quality choices without silently downgrading VLM tasks."""
+    if tier is not None:
+        return normalize_tier(tier)
+    choice = normalize_backend(backend) or resolve_backend_from_env() or "standard"
+    if choice in SUPPORTED_MINERU_TIERS:
+        return choice
+    if choice == "pipeline":
+        return "basic"
+    if choice.startswith("vlm-"):
+        return "advanced"
+    return "standard"
