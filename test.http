@@ -16,7 +16,7 @@ Content-Type: multipart/form-data; boundary=mineru-example
 --mineru-example
 Content-Disposition: form-data; name="tier"
 
-standard
+advanced
 --mineru-example
 Content-Disposition: form-data; name="file"; filename="p2.pdf"
 Content-Type: application/pdf
@@ -56,7 +56,7 @@ Content-Type: multipart/form-data; boundary=mineru-example
 --mineru-example
 Content-Disposition: form-data; name="tier"
 
-standard
+advanced
 --mineru-example
 Content-Disposition: form-data; name="chunk_type"
 

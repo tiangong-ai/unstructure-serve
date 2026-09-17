@@ -127,8 +127,8 @@ def _form_model(
 async def two_stage_task(
     file: UploadFile = File(...),
     tier: MinerUTier = Form(
-        MinerUTier.STANDARD,
-        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+        MinerUTier.ADVANCED,
+        description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
     ),
     chunk_type: bool = Form(False),
     return_txt: bool = Form(False),

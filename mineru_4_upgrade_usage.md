@@ -41,7 +41,7 @@ Python 配置优先级为 **进程环境 > `.env` > `.secrets/secrets.toml` 的�
 
 | 配置 | 模板值 / 作用 |
 | --- | --- |
-| `MINERU_DEFAULT_TIER` | `standard`，仅直接服务调用缺省时兜底；HTTP 不传 tier 固定 standard |
+| `MINERU_DEFAULT_TIER` | `advanced`，仅直接服务调用缺省时兜底；HTTP 不传 tier 固定 advanced |
 | `MINERU_DEFAULT_METHOD` | `auto`，映射 SDK `ocr_mode`，可选 `auto/txt/ocr` |
 | `MINERU_MODEL_SMALL_BACKEND` | `onnx`，CPU 小模型 |
 | `MINERU_MODEL_VLM_SERVER_URL` | `http://127.0.0.1:30000`，MinerU 模型推理地址 |
@@ -167,7 +167,7 @@ MINERU_RUN_DP_PDFS=1 MINERU_TEST_VLM_URL=http://127.0.0.1:30000 \
 
 - 常规测试 138 项通过（新增三卡配置与 PM2 启动回归），覆盖六入口 tier 默认/枚举/透传、SDK 资产与字段、MinIO、Office、视觉失败传播及调度生命周期。
 - 升级阶段 11 份 PDF 的 15 项实测通过：29 个抽样页，加 p2/九页论文/46 页 fese 整本，共覆盖 79 个不同源页面；不代表 11 份长文档全部整本验收。
-- tier 补充阶段 p2 四档均通过，形成 17 项可选模型测试；本次新增三卡测试后共 18 项。basic 丢失的首个 checkbox 在同页唯一完整选项组匹配时回填，并有歧义、跨页、短标签等拒绝条件测试。
+- tier 补充阶段 p2 四档均通过，形成 17 项可选模型测试；新增三卡测试与 p2 缺省档位回归后共 19 项。basic 丢失的首个 checkbox 在同页唯一完整选项组匹配时回填，并有歧义、跨页、短标签等拒绝条件测试。
 - 三卡实测：input 的两页 p2 与九页论文以 advanced 整本通过，engine 0/1/2 成功推理增量分别为 5/6/7；完整页号、图片文件和 p2 checkbox 均通过断言。这是负载分配验收，尚未做同负载吞吐基准。
 - 在线六入口的 schema/非法值、同步四档、真实 two-stage basic、MinIO PDF/JSON/JPEG/meta、Office→PDF、原生 DOCX 顺序通过验证；论文的一张图片完成真实视觉请求，未逐图人工评估全部视觉输出。
 
@@ -177,10 +177,12 @@ MINERU_RUN_DP_PDFS=1 MINERU_TEST_VLM_URL=http://127.0.0.1:30000 \
 
 升级已合并到 `main`（`e2de2fe`），运行目录为 `/home/david/projects/TianGong-AI-Unstructure-Serve`。API 7770；当前模型由 PM2 `mineru-vlm-docker-parallel` 管理，Compose project `mineru-vlm-parallel`，端口 30000、GPU 0/1/2、DP=3 / TP=1、每卡显存比例 0.15。CPU 模型在 `/home/david/.local/share/tiangong-mineru4`；外部卷 `mineru4-upgrade_mineru-models` 和 `mineru4-upgrade_mineru-download-cache` 继续复用。
 
-API 与四类 two-stage worker 已切换新地址并重启，默认 standard、advanced 同步解析和真实 two-stage Celery p2 任务通过。PM2 stop 实测使容器正常退出（exit 0），重新启动后健康检查和线上请求通过，已执行 `pm2 save`。原 31000 单卡容器已停止并移除，模型缓存保留；旧 MinerU 本机 vLLM 启动项已移除。另一仓库的 `vllm-qwen3-embedding-8b` 保持原进程运行。
+API 与四类 two-stage worker 已切换新地址并重启，缺省档位现为 advanced。standard/advanced 同步解析和真实 two-stage Celery p2 任务已验收。PM2 stop 实测使容器正常退出（exit 0），重新启动后健康检查和线上请求通过，已执行 `pm2 save`。原 31000 单卡容器已停止并移除，模型缓存保留；旧 MinerU 本机 vLLM 启动项已移除。另一仓库的 `vllm-qwen3-embedding-8b` 保持原进程运行。
 
 兼容层仍返回 `(content_list, artifact_dir, None)`，PDF 默认整本，保留源页号和可访问图片；业务 MinIO `parsed.json` 使用服务响应结构，不用原生 MiddleJson 替换。Office 主 JSON/MinIO 资产来自 PDF，原生 DOCX 仅用于同步 TXT 增强。
 
 旧源码、配置、PM2 快照和旧 `.venv` 保存在 `output/mineru4_tdd/rollback-20260917/`。回滚需排空或隔离在途任务，并同步恢复代码、应用环境及模型服务地址；旧虚拟环境须放回原 `.venv` 路径，避免绝对 shebang 失效。保留已完成资产与模型缓存。
 
 三卡修复前的私有 `.env`、PM2 快照和本次验证日志保存在 `output/mineru4_tdd/three-gpu/`。仅回退三卡部署时可继续使用当前 MinerU 4 应用与单卡 Docker 模板，同步更改模型 URL；不需要恢复 3.x 虚拟环境。
+
+缺省档位调整为 advanced：六入口的 OpenAPI 与任务参数、服务无配置兜底、`.env.example` 和本机 `.env` 同步更新；138 项常规测试、p2 缺省档位真实 SDK 回归，以及重载后的六入口 schema / 同步 / Celery 默认解析均通过；回归证据位于 `output/mineru4_tdd/default-advanced/`。显式指定的其他档位及旧 backend 映射继续保留。

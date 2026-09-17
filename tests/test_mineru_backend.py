@@ -55,6 +55,7 @@ def test_resolve_backend_from_env(monkeypatch):
 
     monkeypatch.delenv("MINERU_DEFAULT_BACKEND", raising=False)
     assert resolve_backend_from_env() is None
+    assert resolve_tier() == "advanced"
 
     monkeypatch.setenv("MINERU_DEFAULT_BACKEND", "bogus-backend")
     with pytest.raises(ValueError):

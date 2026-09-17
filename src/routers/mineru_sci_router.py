@@ -39,8 +39,8 @@ PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
 async def mineru(
     file: UploadFile = File(...),
     tier: MinerUTier = Form(
-        MinerUTier.STANDARD,
-        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+        MinerUTier.ADVANCED,
+        description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
     ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,

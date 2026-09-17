@@ -60,8 +60,8 @@ def _ensure_storage_root() -> Path:
 async def mineru_task(
     file: UploadFile = File(...),
     tier: MinerUTier = Form(
-        MinerUTier.STANDARD,
-        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+        MinerUTier.ADVANCED,
+        description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
     ),
     save_to_minio: bool = Form(
         False,

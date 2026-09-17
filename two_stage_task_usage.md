@@ -68,7 +68,7 @@ pm2 logs celery-two-stage-parse --lines 100
 | 字段 | 默认值 / 含义 |
 | --- | --- |
 | `file` | 必填；支持类型见 [README](README.md#解析接口)，Office 先转 PDF |
-| `tier` | `standard`；`flash/basic/standard/advanced`，非法值返回 422，任务保留提交时选择 |
+| `tier` | `advanced`；`flash/basic/standard/advanced`，非法值返回 422，任务保留提交时选择 |
 | `chunk_type` | `false`；保留标题、页眉、页脚和图片类型及阅读顺序 |
 | `return_txt` | `false`；返回拼接纯文本 |
 | `priority` | `normal`；仅 `normal/urgent`，urgent 将四个阶段全部路由到 urgent 队列 |
@@ -85,7 +85,7 @@ shell 中先设置实际 `FASTAPI_BEARER_TOKEN`；Python 会读取 `.env`，curl
 API_BASE=http://127.0.0.1:7770
 curl --fail-with-body "$API_BASE/two_stage/task" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' -F 'tier=standard' \
+  -F 'file=@input/p2.pdf' -F 'tier=advanced' \
   -F 'chunk_type=true' -F 'return_txt=true' -F 'priority=normal'
 ```
 
@@ -136,7 +136,7 @@ uv run python src/scripts/two_stage_enqueue.py
 | `TWO_STAGE_POLL_INTERVAL` / `TWO_STAGE_POLL_TIMEOUT` | `3` 秒 / `800` 秒；超时从观察到 STARTED 起算，不包含一直 PENDING 的时间 |
 | `VISION_PROVIDER` / `VISION_MODEL` / `VISION_PROMPT` | 可选，原样提交给 API 校验 |
 
-脚本尚无 tier 环境开关，提交不带 tier，因此使用 HTTP 默认 `standard`；选择其他档位请直接调用接口。转换结果可用 `uv run python src/scripts/read_pickle.py pickle/example.pkl --field result`，命令不带路径时选择 `pickle` 下最新文件。
+脚本尚无 tier 环境开关，提交不带 tier，因此使用 HTTP 默认 `advanced`；选择其他档位请直接调用接口。转换结果可用 `uv run python src/scripts/read_pickle.py pickle/example.pkl --field result`，命令不带路径时选择 `pickle` 下最新文件。
 
 ## 排查
 
