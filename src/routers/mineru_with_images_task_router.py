@@ -90,8 +90,8 @@ def _form_model(
 async def mineru_with_images_task(
     file: UploadFile = File(...),
     tier: MinerUTier = Form(
-        MinerUTier.STANDARD,
-        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+        MinerUTier.ADVANCED,
+        description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
     ),
     provider: Optional[str] = Depends(_form_provider),
     model: Optional[str] = Depends(_form_model),

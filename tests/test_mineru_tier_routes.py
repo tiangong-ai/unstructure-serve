@@ -23,7 +23,7 @@ def submissions(client, monkeypatch, tmp_path, route):
     module = importlib.import_module(f"src.routers.{route[1]}")
     captured = []
     # API defaults must not depend on a worker's or API process's legacy config.
-    monkeypatch.setenv("MINERU_DEFAULT_TIER", "advanced")
+    monkeypatch.setenv("MINERU_DEFAULT_TIER", "standard")
     monkeypatch.setenv("MINERU_DEFAULT_BACKEND", "pipeline")
 
     def record(source, tier):
@@ -72,7 +72,7 @@ def test_tier_reaches_parser_or_task_payload(client, route, tier, submissions):
         data={} if tier is None else {"tier": tier},
     )
     assert response.status_code == 200, response.text
-    assert submissions == [tier or "standard"]
+    assert submissions == [tier or "advanced"]
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=[route[0] for route in ROUTES])
@@ -89,14 +89,14 @@ def test_invalid_tier_is_rejected_before_dispatch(client, route, tier, submissio
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=[route[0] for route in ROUTES])
-def test_openapi_exposes_four_tiers_with_standard_default(app, route):
+def test_openapi_exposes_four_tiers_with_advanced_default(app, route):
     schema = app.openapi()
     body = schema["paths"][route[0]]["post"]["requestBody"]["content"]["multipart/form-data"][
         "schema"
     ]
     body = schema["components"]["schemas"][body["$ref"].split("/")[-1]]
     tier = body["properties"]["tier"]
-    assert tier["default"] == "standard"
+    assert tier["default"] == "advanced"
     assert "tier" not in body.get("required", [])
     choices = schema["components"]["schemas"][tier["$ref"].split("/")[-1]]
     assert choices["enum"] == list(TIERS)

@@ -46,8 +46,8 @@ ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 async def mineru(
     file: UploadFile = File(...),
     tier: MinerUTier = Form(
-        MinerUTier.STANDARD,
-        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+        MinerUTier.ADVANCED,
+        description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
     ),
     save_to_minio: bool = Form(
         False,

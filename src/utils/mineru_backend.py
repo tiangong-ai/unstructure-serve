@@ -78,7 +78,7 @@ def resolve_tier(backend: Optional[str] = None, tier: Optional[str] = None) -> s
     """Translate old quality choices without silently downgrading VLM tasks."""
     if tier is not None:
         return normalize_tier(tier)
-    choice = normalize_backend(backend) or resolve_backend_from_env() or "standard"
+    choice = normalize_backend(backend) or resolve_backend_from_env() or "advanced"
     if choice in SUPPORTED_MINERU_TIERS:
         return choice
     if choice == "pipeline":

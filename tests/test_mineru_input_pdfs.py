@@ -43,12 +43,17 @@ def _check_assets(items, output_dir):
             assert image.stat().st_size > 0
 
 
-@pytest.mark.parametrize("tier", ["flash", "basic", "standard", "advanced"])
+@pytest.mark.parametrize(
+    "tier",
+    [None, "flash", "basic", "standard", "advanced"],
+    ids=["default", "flash", "basic", "standard", "advanced"],
+)
 def test_p2_full_document_preserves_table_and_checked_options(tmp_path, tier):
     source = INPUT_DIR / "p2.pdf"
     assert source.is_file(), source
     items, output_dir, txt = parse_doc([source], tmp_path, tier=tier)
     assert txt is None
+    assert Path(output_dir).name == (tier or "advanced")
     assert {item["page_idx"] for item in items} == {0, 1}
     tables = "\n".join(item.get("table_body", "") for item in items)
     assert "项目名称" in tables

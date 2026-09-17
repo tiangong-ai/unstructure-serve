@@ -38,7 +38,7 @@ uv run celery -A src.services.celery_app worker \
 | 字段 | 位置 | 默认值 / 含义 |
 | --- | --- | --- |
 | `file` | multipart form | 必填；PDF、受支持图片或 Office 转 PDF 格式 |
-| `tier` | form | `standard`；可选 `flash/basic/standard/advanced`，非法值 422，入队后保留 |
+| `tier` | form | `advanced`；可选 `flash/basic/standard/advanced`，非法值 422，入队后保留 |
 | `priority` | form | `normal`；`urgent` 插入 urgent 队列 |
 | `chunk_type` | query | `false`；保留标题、页眉、页脚类型；图片接口标注 image，保持阅读顺序 |
 | `return_txt` | query | `false`；返回拼接纯文本 `txt` |
@@ -60,7 +60,7 @@ API_BASE=http://127.0.0.1:7770
 curl --fail-with-body "$API_BASE/mineru_with_images/task?chunk_type=true&return_txt=true" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
   -F 'file=@input/p2.pdf' \
-  -F 'tier=standard' \
+  -F 'tier=advanced' \
   -F 'priority=normal'
 ```
 
@@ -96,7 +96,7 @@ curl --fail-with-body "$API_BASE/mineru_with_images/task/$TASK_ID?pretty=true" \
 ```bash
 curl --fail-with-body "$API_BASE/mineru/task?chunk_type=true&return_txt=true" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' -F 'tier=standard' -F 'save_to_minio=true' \
+  -F 'file=@input/p2.pdf' -F 'tier=advanced' -F 'save_to_minio=true' \
   -F "minio_address=$MINIO_ADDRESS" -F "minio_access_key=$MINIO_ACCESS_KEY" \
   -F "minio_secret_key=$MINIO_SECRET_KEY" -F "minio_bucket=$MINIO_BUCKET" \
   -F 'minio_prefix=mineru/demo/p2' -F 'minio_meta=source=manual-test'

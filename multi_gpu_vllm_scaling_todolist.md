@@ -1,6 +1,6 @@
 # MinerU 4 多卡后续工作
 
-当前基线是 MinerU 4、请求默认 standard、CPU ONNX 小模型和 Docker VLM。三卡部署采用 **一个容器、三个完整模型副本、一个 API 地址**，恢复旧部署的 vLLM 内部数据并行。启动及维护见[部署说明](mineru_4_upgrade_usage.md#docker-与多卡)。
+当前基线是 MinerU 4、请求默认 advanced、CPU ONNX 小模型和 Docker VLM。三卡部署采用 **一个容器、三个完整模型副本、一个 API 地址**，恢复旧部署的 vLLM 内部数据并行。启动及维护见[部署说明](mineru_4_upgrade_usage.md#docker-与多卡)。
 
 ## 已具备
 

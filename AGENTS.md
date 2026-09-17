@@ -29,9 +29,9 @@
 
 ## 解析合同
 
-- 六个 POST 入口均有 `tier` 表单枚举：`flash/basic/standard/advanced`，不传固定 `standard`，非法值 422。枚举位于 `src/utils/mineru_backend.py`；任务通过现有 `backend` / `backend_value` 字段保存提交时的选择。
+- 六个 POST 入口均有 `tier` 表单枚举：`flash/basic/standard/advanced`，不传固定 `advanced`，非法值 422。枚举位于 `src/utils/mineru_backend.py`；任务通过现有 `backend` / `backend_value` 字段保存提交时的选择。
 - `/mineru`、`/mineru_sci`、`/mineru_with_images` 和两个普通 `/task` 的 `chunk_type`、`return_txt` 是 **query 参数**；仅 `/two_stage/task` 将它们定义为 form。文档、curl 和脚本示例必须按真实 OpenAPI 编写。
-- 直接服务调用未指定档位时读取 `MINERU_DEFAULT_TIER`，再兼容旧 backend：pipeline→basic、hybrid→standard、vlm→advanced。旧名称只影响档位，大模型推理仍走 Docker；不要重新引入本机引擎。
+- 直接服务调用未指定档位时读取 `MINERU_DEFAULT_TIER`，再兼容旧 backend；两者均未配置时使用 `advanced`。旧映射：pipeline→basic、hybrid→standard、vlm→advanced。旧名称只影响档位，大模型推理仍走 Docker；不要重新引入本机引擎。
 - PDF、受支持图片和 Office 转 PDF 清单才是服务输入边界；Markdown/TXT 拒绝。不要因上游新增格式而自动扩大接口范围。
 - `parse_doc()` 使用无状态 `mineru.parser.parse`，默认 PDF `page_range=all`。零基 start/end 转成一基范围，保留源页号；返回 `(content_list, artifact_dir, None)`。先保存 MiddleJson/图片，再渲染 V1 并补齐旧字段；图片引用缺失必须失败。
 - `img_caption/img_footnote`、chart/code/index/page_footnote 映射和 bbox 单位需保持下游兼容；同时写旧命名 `_content_list.json` 供诊断。异常继续冒泡，不返回空值伪装成功。
@@ -82,10 +82,10 @@ uv run --group dev pytest
 
 - Black 必须排除任意层级 `.venv` 及根目录 output/input/pdfs/pickle，防止修改依赖备份。Ruff 当前显式使用 E4/E7/E9/F；保持异常处理粒度合理，不扩大吞异常范围。
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉、MinIO 和进程生命周期。
-- 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。读取 input 的 11 份 PDF；p2 四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
+- 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。读取 input 的 11 份 PDF；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。测试数量与部署证据统一记录在部署说明。
-- `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 standard）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
+- `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 advanced）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
 
 ## 本机状态
 
-2026-09-17：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；默认 standard、advanced 同步请求及真实 Celery 任务通过。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。回滚与验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。
+2026-09-17：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；缺省档位现为 advanced。standard/advanced 同步请求及真实 Celery 任务已验收。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。回滚与验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。

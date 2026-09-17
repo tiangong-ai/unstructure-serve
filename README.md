@@ -51,14 +51,14 @@ uv run uvicorn src.main:app --host 127.0.0.1 --port 7770
 
 支持 PDF、PNG/JPEG/WebP/BMP/TIFF，以及[Office 转换清单](src/utils/file_conversion.py)中的格式。Office 主结果先经 LibreOffice 转 PDF；Markdown/TXT 不走解析接口。MinerU 上游新增的所有原生格式并未自动向本服务开放。
 
-六个接口均接受 multipart 表单字段 `file` 和 `tier`。`tier` 不传固定使用 `standard`，与 API 进程环境变量无关；异步任务保留提交时的选择，非法值返回 422。
+六个接口均接受 multipart 表单字段 `file` 和 `tier`。`tier` 不传固定使用 `advanced`，与 API 进程环境变量无关；异步任务保留提交时的选择，非法值返回 422。
 
 | tier | 用途 |
 | --- | --- |
 | `flash` | 读取原生文本层，无推理模型；适合电子 PDF 预览，扫描件应选择 OCR 档位 |
 | `basic` | 小模型进行 OCR、公式和表格识别；本部署使用 CPU ONNX |
-| `standard` | 默认，小模型结合 Docker VLM |
-| `advanced` | 使用更多 VLM 推理计算处理困难文档 |
+| `standard` | 小模型结合 Docker VLM |
+| `advanced` | 默认，使用更多 VLM 推理计算处理困难文档 |
 
 `chunk_type`、`return_txt` 在前五个接口中是 **URL 查询参数**，仅 `/two_stage/task` 把它们定义为表单字段。`chunk_type=true` 保留标题、页眉、页脚及原阅读顺序；视觉增强流程为图片识别块标注 `image`。普通正文或表格不保证有 `type` 字段。`return_txt=true` 返回拼接纯文本，页码从 1 开始。
 
@@ -68,7 +68,7 @@ uv run uvicorn src.main:app --host 127.0.0.1 --port 7770
 curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=true' \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
   -F 'file=@input/p2.pdf' \
-  -F 'tier=standard'
+  -F 'tier=advanced'
 ```
 
 更多请求示例见 [test.http](test.http)。图片描述使用独立的 `VISION_*` / `VLLM_BASE_URLS` 配置；`tier` 控制 MinerU 拆解，不选择图片描述模型。同步 DOCX 的原生 TXT-only 分支固定使用 `flash`，主 JSON 结果仍使用 Office→PDF 后的所选档位。
