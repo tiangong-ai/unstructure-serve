@@ -22,11 +22,13 @@
 ```bash
 uv python install 3.12
 uv sync --locked --group dev
-docker compose -f compose.mineru.yaml up -d --build
+pm2 start ecosystem.vllm.parallele.config.json
 pm2 start ecosystem.config.json
 pm2 start ecosystem.two_stage.celery.json
 pm2 save
 ```
+
+上述模型模板使用 GPU 0、1、2，在一个 Docker 容器中启动三个 vLLM 副本，通过单一 `30000` 端口内部负载均衡；单卡替代步骤见部署说明。
 
 API 默认端口为 `7770`，Swagger 位于 `/docs`。普通 `/mineru/task` 和 `/mineru_with_images/task` 还需要单独启动 `ecosystem.celery.json`；仅启动 two-stage worker 不会消费普通任务。
 

@@ -44,7 +44,7 @@
 
 - 默认视觉 provider 为 vLLM；OpenAI/Gemini 实现仍可显式配置。未知 provider/model 在同步图片接口及普通图片任务中宽松接收，由服务兜底；two-stage 则在路由层校验枚举并可返回 422。
 - vLLM 必须有 `VLLM_BASE_URL(S)` 才可用，API key 可选。此地址是独立图片描述模型，与 `MINERU_MODEL_VLM_SERVER_URL` 不同。
-- OpenAI/vLLM 复用客户端池；多个视觉 endpoint 会顺序尝试。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 目前只有进程内轮换。
+- OpenAI/vLLM 复用客户端池；多个视觉 endpoint 会顺序尝试。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
 - 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片分批并发由 `VISION_BATCH_SIZE` 控制；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。
 - two-stage 图片筛选按相对面积、分辨率、体积、长宽比、每页数量及哈希去重，合并保持原位；清理视觉输出中的 Page/ChunkType 标记和固定说明前缀。
 - `/mineru`、`/mineru_with_images` 及两个普通任务支持 MinIO；科研/two-stage 不支持。保存转换后的 source.pdf、服务 parsed.json、逐页 JPEG 和可选 meta.txt。`chunk_type=true` 时 JSON 保留类型，`save_to_minio=false` 时忽略 minio_meta。
@@ -64,7 +64,7 @@
 
 - 进程环境优先于 `.env`，再回退到 `.secrets/secrets.toml`。PM2 `env` 属于进程环境，不会被 `load_dotenv()` 覆盖；Python 加载 `.env` 不会替调用方 shell 导出变量。
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
-- 默认部署入口为 `compose.mineru.yaml`；`ecosystem.vllm*.json` 是保留的 Compose 包装示例，同一 project 由一个入口管理。应用的 `GPU_IDS` 不控制 Docker GPU。
+- 三卡部署入口为 `ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - Docker 基线为 vLLM 0.21.0 配套 Torch/CUDA，模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
 - PM2 API 为 `unstructured-gunicorn`，Gunicorn timeout/graceful-timeout 1900 秒。科研入口另有自己的 HTTP 等待窗口；具体超时以模板/运行环境为准。
 - `/health`、`/gpu/status` 和 `/two_stage/queue_status` 用于检查状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
@@ -83,11 +83,9 @@ uv run --group dev pytest
 - Black 必须排除任意层级 `.venv` 及根目录 output/input/pdfs/pickle，防止修改依赖备份。Ruff 当前显式使用 E4/E7/E9/F；保持异常处理粒度合理，不扩大吞异常范围。
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉、MinIO 和进程生命周期。
 - 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。读取 input 的 11 份 PDF；p2 四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
-- 2026-09-17 升级验收为 135 项常规测试；历史 PDF 覆盖范围、追加四档结果及本机切换证据统一记录在部署说明，避免多处维护测试数字。
+- 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。测试数量与部署证据统一记录在部署说明。
 - `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 standard）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
 
 ## 本机状态
 
-2026-09-17：升级合并到 main，API 7770，Docker project `mineru4-upgrade`、端口 31000、GPU 0、显存比例 0.09；API 和 四类 two-stage worker 在线。旧 MinerU 本机 vLLM 和 PM2 启动项已移除；另一仓库的 embedding 服务独立运行。回滚目录、模型缓存及验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。
-
-本次说明整理归档历史评估，修正普通任务的 query 示例和配置优先级，集中维护队列/模板说明；`deploy/secrets.example.toml` 替代原开发 TOML，私有 `.secrets/` 整体忽略。仅公共模板调整了单槽位、超时和显式队列示例，运行中的私有 `.env` 与业务代码不变。
+2026-09-17：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；默认 standard、advanced 同步请求及真实 Celery 任务通过。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。回滚与验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。

@@ -4,7 +4,7 @@
 
 ## 首次安装
 
-所有命令在仓库根目录执行。系统需要 Python 3.12、uv、Docker Compose、PM2，以及支持本机 GPU 的 NVIDIA 驱动和 Container Toolkit。Docker 需已注册 `nvidia` runtime；Compose 显式指定该 runtime，以兼容本机 CDI 模式。
+所有命令在仓库根目录执行。系统需要 Python 3.12、uv、Docker Compose 2.24.4+、PM2，以及支持本机 GPU 的 NVIDIA 驱动和 Container Toolkit。Docker 需已注册 `nvidia` runtime；Compose 显式指定该 runtime，以兼容本机 CDI 模式。
 
 ```bash
 sudo apt update
@@ -23,11 +23,11 @@ cp -n .env.example .env
 ```bash
 MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
 MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models verify --tier basic --small-backend onnx
-docker compose -f compose.mineru.yaml up -d --build
-docker compose -f compose.mineru.yaml logs -f mineru-vlm
+pm2 start ecosystem.vllm.parallele.config.json
+pm2 logs mineru-vlm-docker-parallel --lines 100
 ```
 
-容器首次启动会下载 VLM 权重并编译，等待 healthy 后再接入请求。CPU 模型可通过 `MINERU_HOME` 指定持久目录；容器模型及下载缓存保存在命名卷中。
+以上默认三卡部署要求 GPU 0、1、2 可用，单卡替代见下文。容器首次启动会下载 VLM 权重并编译，等待 healthy 后再接入请求。CPU 模型可通过 `MINERU_HOME` 指定持久目录；容器模型及下载缓存保存在命名卷中。
 
 Celery 需要 Redis。已有实例直接复用；仅在未部署时创建：
 
@@ -48,7 +48,8 @@ Python 配置优先级为 **进程环境 > `.env` > `.secrets/secrets.toml` 的�
 | `MINERU_MODEL_VLM_MODEL` | `mineru4`，容器公开的模型名 |
 | `MINERU_MODEL_VLM_API_KEY` | 可选 Bearer 认证；本机容器默认不启用认证 |
 | `MINERU_MODEL_VLM_HTTP_TIMEOUT` / `MINERU_MODEL_VLM_MAX_CONCURRENCY` | `600` 秒 / `8`，单次模型请求与并发 |
-| `MINERU_DOCKER_GPU_ID` / `MINERU_DOCKER_PORT` / `MINERU_DOCKER_GPU_MEMORY` | `0` / `30000` / `0.15`；端口须与应用 URL 一致，显存比例按空闲资源调整 |
+| `MINERU_DOCKER_GPU_ID` / `MINERU_DOCKER_PORT` / `MINERU_DOCKER_GPU_MEMORY` | GPU ID 仅单卡模板使用；三卡固定 0/1/2。三卡 PM2 env 覆盖端口/每卡显存比例为 `30000` / `0.15`，修改时同步应用 URL |
+| `MINERU_DOCKER_MODEL_VOLUME` / `MINERU_DOCKER_CACHE_VOLUME` | 三卡模型/下载缓存卷名，默认 `mineru-vlm-models` / `mineru-vlm-cache`；可复用原部署缓存；已有卷设 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，避免归入新 project 生命周期 |
 | `GPU_IDS` | 模板 `0`，现有应用调度器槽位；不决定 Docker 使用哪张卡 |
 | `VISION_*` / `VLLM_BASE_URLS` | 独立图片描述服务，按部署填写，不能指向 MinerU 解析 V1 API |
 | `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | API 与所有 worker 使用相同地址；模板为本机 Redis DB 0 |
@@ -71,12 +72,14 @@ pm2 save
 
 | 文件 | 用途 |
 | --- | --- |
-| `compose.mineru.yaml` | 默认 MinerU VLM 生命周期入口，重启策略 `unless-stopped` |
+| `ecosystem.vllm.parallele.config.json` | 三卡模型入口，PM2 进程 `mineru-vlm-docker-parallel`，单容器 DP=3 / TP=1 |
+| `deploy/mineru-vllm/serve.sh` | 前台执行 Compose，`parallel` 合并两份 YAML，project 固定为 `mineru-vlm-parallel` |
+| `compose.mineru.yaml` / `compose.mineru.parallel.yaml` | 单卡基础 / 三卡覆盖；三卡命令必须带两份文件 |
 | `ecosystem.config.json` | API `unstructured-gunicorn`，端口 7770 |
 | `ecosystem.two_stage.celery.json` | 当前部署使用的 parse/vision/dispatch/merge 四个 worker |
 | `ecosystem.celery.json` | 普通任务 worker，调用两个普通 `/task` 接口时另行启动 |
 | `ecosystem.two_stage.flower.json` / `ecosystem.celery.flower.json` | 对应 Celery app 的可选监控；都默认 5555，同时使用时须更改端口 |
-| `ecosystem.vllm*.json` | 保留的 PM2→Docker Compose 包装模板；每卡独立 project，不要与另一入口重复管理同一容器 |
+| `ecosystem.vllm.config.json` / `ecosystem.vllm.quatro.json` | 可选单卡 / 四个独立端点模板，不属于三卡内部 DP 部署 |
 | `ecosystem.quatro.json` | 多 API 实例示例，不等于自动扩容 Docker 推理服务 |
 
 API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16，保守手动启动可用 solo/1；two-stage parse 为 solo，其余为线程池，详情见各自任务说明。GPU 调度器会再创建子进程，不使用 Celery prefork 执行这类解析。
@@ -85,7 +88,7 @@ API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16�
 
 ```bash
 pm2 status
-docker compose -f compose.mineru.yaml ps
+docker compose -p mineru-vlm-parallel -f compose.mineru.yaml -f compose.mineru.parallel.yaml ps
 curl --fail http://127.0.0.1:30000/health
 curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/health
 curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/gpu/status
@@ -93,9 +96,20 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 pm2 logs unstructured-gunicorn --lines 100
 ```
 
-上例模型端口使用模板值；本机已部署实例使用下方记录的 `31000`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
+三卡服务和应用 URL 均使用 `30000`；启动脚本的 project 参数优先于 `.env` 中旧的 `COMPOSE_PROJECT_NAME`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
 
-停机分别使用 `pm2 stop ecosystem.config.json`、对应 worker 模板以及 `docker compose -f compose.mineru.yaml stop`。运行清理应定位本项目具体任务或工作目录；共享 Redis、PM2 和 GPU 上还有其他服务，不提供全局清空或按端口强杀作为日常维护步骤。结果过期不等于任务目录可以无条件删除。
+模型维护命令：
+
+```bash
+pm2 logs mineru-vlm-docker-parallel --lines 100
+pm2 restart ecosystem.vllm.parallele.config.json --update-env
+pm2 stop mineru-vlm-docker-parallel
+# 需要恢复时执行，再保存 PM2 状态
+pm2 start ecosystem.vllm.parallele.config.json
+pm2 save
+```
+
+模型重启或停止前先排空解析任务。PM2 管理前台 Compose，stop/restart 会传递至容器；容器退出窗口 60 秒，PM2 强制退出窗口 70 秒。PM2 的 online 只代表启动命令存活，须另查容器 healthy 或模型 `/health`。API 停机用 `pm2 stop ecosystem.config.json`，worker 用对应模板。运行清理应定位本项目具体任务或工作目录；共享 Redis、PM2 和 GPU 上还有其他服务，不提供全局清空或按端口强杀作为日常维护步骤。结果过期不等于任务目录可以无条件删除。
 
 ## Docker 与多卡
 
@@ -103,14 +117,24 @@ pm2 logs unstructured-gunicorn --lines 100
 
 模型为 `MinerU2.5-Pro-2605-1.2B`，容器公开名 `mineru4`，最大上下文长度按模型配置设置为 8192。端口默认仅绑定宿主 `127.0.0.1`；跨机器部署需另行配置可达地址和认证。
 
-多卡使用不同 project、端口和 GPU ID：
+当前三卡方案恢复旧部署的 **内部数据并行**：GPU 0/1/2 各一份完整模型，`--data-parallel-size 3 --tensor-parallel-size 1`，单个 API 入口由 vLLM 根据副本队列分配推理请求。它不是把同一模型切成三片，也无需配置三个应用 URL。详见 [vLLM 0.21 内部负载均衡](https://docs.vllm.ai/en/v0.21.0/serving/data_parallel_deployment/#internal-load-balancing)。
 
 ```bash
-MINERU_DOCKER_GPU_ID=0 MINERU_DOCKER_PORT=30000 docker compose -p mineru-gpu0 -f compose.mineru.yaml up -d --build
-MINERU_DOCKER_GPU_ID=1 MINERU_DOCKER_PORT=30001 docker compose -p mineru-gpu1 -f compose.mineru.yaml up -d --build
+pm2 start ecosystem.vllm.parallele.config.json
+# 排查时查看最终三卡配置（不要只使用基础 YAML）
+docker compose -p mineru-vlm-parallel -f compose.mineru.yaml -f compose.mineru.parallel.yaml config
+curl --fail http://127.0.0.1:30000/metrics
 ```
 
-应用端删除单 URL 配置，再设置 `MINERU_VLLM_SERVER_URLS`（逗号分隔或 JSON 数组）。单 URL 优先。现有选择仅为进程内轮换，没有跨任务负载均衡、端点熔断或故障重试承诺，后续工作见[多卡计划](multi_gpu_vllm_scaling_todolist.md)。
+`/metrics` 中的 `vllm:request_success_total` 应有 `engine="0"`、`"1"`、`"2"`。用 PDF 发起推理后检查三者增量，不能仅凭 nvidia-smi 有显存占用判断负载均衡生效。每卡显存比例是各自总显存的比例，部署前检查其他模型占用；应用的 `GPU_IDS=0` 是解析调度槽位，不限制容器只用 GPU 0。小文档或 flash/basic 请求未必产生足够 VLM 请求，三卡不保证每份文档平均分配或吞吐正好三倍。
+
+只有一张卡时，选择单卡模板并将应用 URL 与其端口保持一致，不要同时启动三卡模板：
+
+```bash
+pm2 start ecosystem.vllm.config.json
+```
+
+其他拓扑可使用每卡独立 Compose project 和不同端口。应用的 `MINERU_VLLM_SERVER_URLS` 列表仅进程内轮换（单 URL 优先），没有跨任务负载均衡、熔断或故障重试保证；这与当前 vLLM 内部 DP 不同。多节点容错、吞吐和队列调优见[后续工作](multi_gpu_vllm_scaling_todolist.md)。
 
 ## 验证与回归
 
@@ -129,21 +153,34 @@ MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.p
   --junitxml=output/mineru4_tdd/input-results.xml
 ```
 
+三卡真实模型回归使用 input 中的 p2 和九页论文，验证完整页号、图片资产、checkbox 和三个推理副本的计数增量：
+
+```bash
+MINERU_RUN_DP_PDFS=1 MINERU_TEST_VLM_URL=http://127.0.0.1:30000 \
+  uv run --group dev pytest tests/test_mineru_data_parallel.py -v \
+  --basetemp=output/mineru4_tdd/three-gpu/pdf-check
+```
+
+`--basetemp` 会清理指定目录，复测时换新目录保留原证据。
+
 2026-09-17 升级验收记录：
 
-- 常规测试 135 项通过，覆盖六入口 tier 默认/枚举/透传、SDK 资产与字段、MinIO、Office、视觉失败传播及调度生命周期。
+- 常规测试 138 项通过（新增三卡配置与 PM2 启动回归），覆盖六入口 tier 默认/枚举/透传、SDK 资产与字段、MinIO、Office、视觉失败传播及调度生命周期。
 - 升级阶段 11 份 PDF 的 15 项实测通过：29 个抽样页，加 p2/九页论文/46 页 fese 整本，共覆盖 79 个不同源页面；不代表 11 份长文档全部整本验收。
-- tier 补充阶段 p2 四档均通过，共形成当前 17 项可选模型测试。basic 丢失的首个 checkbox 在同页唯一完整选项组匹配时回填，并有歧义、跨页、短标签等拒绝条件测试。
+- tier 补充阶段 p2 四档均通过，形成 17 项可选模型测试；本次新增三卡测试后共 18 项。basic 丢失的首个 checkbox 在同页唯一完整选项组匹配时回填，并有歧义、跨页、短标签等拒绝条件测试。
+- 三卡实测：input 的两页 p2 与九页论文以 advanced 整本通过，engine 0/1/2 成功推理增量分别为 5/6/7；完整页号、图片文件和 p2 checkbox 均通过断言。这是负载分配验收，尚未做同负载吞吐基准。
 - 在线六入口的 schema/非法值、同步四档、真实 two-stage basic、MinIO PDF/JSON/JPEG/meta、Office→PDF、原生 DOCX 顺序通过验证；论文的一张图片完成真实视觉请求，未逐图人工评估全部视觉输出。
 
-证据仅保存在忽略的 `output/mineru4_tdd/`：`input-results-all.xml`、`tier-p2-results.xml`、`tier-pytest.log`、`tier-api-smoke.log`、`main-deployment-p2.json`。原始文档及解析资产不纳入 Git。
+证据仅保存在忽略的 `output/mineru4_tdd/`：`input-results-all.xml`、`tier-p2-results.xml`、`tier-pytest.log`、`tier-api-smoke.log`、`main-deployment-p2.json`。三卡证据位于 `three-gpu/`，包括 `red.log`、`pdf-green.xml`、`pdf-green/test_input_pdfs_reach_all_thre0/replica-requests.json` 及 PM2 生命周期日志。原始文档及解析资产不纳入 Git。
 
 ## 本机部署与回滚记录（2026-09-17）
 
-升级已合并到 `main`（`e2de2fe`），运行目录为 `/home/david/projects/TianGong-AI-Unstructure-Serve`。API 7770；Compose project `mineru4-upgrade` 由本机 `.env` 指定，模型端口 31000、GPU 0、显存比例 0.09。CPU 模型在 `/home/david/.local/share/tiangong-mineru4`，Docker 缓存使用命名卷。
+升级已合并到 `main`（`e2de2fe`），运行目录为 `/home/david/projects/TianGong-AI-Unstructure-Serve`。API 7770；当前模型由 PM2 `mineru-vlm-docker-parallel` 管理，Compose project `mineru-vlm-parallel`，端口 30000、GPU 0/1/2、DP=3 / TP=1、每卡显存比例 0.15。CPU 模型在 `/home/david/.local/share/tiangong-mineru4`；外部卷 `mineru4-upgrade_mineru-models` 和 `mineru4-upgrade_mineru-download-cache` 继续复用。
 
-API 与 四类 two-stage worker 已启动，旧 MinerU 本机 vLLM 进程和 PM2 启动项已移除，PM2 已保存。另一个仓库的 `vllm-qwen3-embedding-8b` 属于独立 embedding 服务。私有 `.env` 和已运行服务不因文档模板整理而自动改变。
+API 与四类 two-stage worker 已切换新地址并重启，默认 standard、advanced 同步解析和真实 two-stage Celery p2 任务通过。PM2 stop 实测使容器正常退出（exit 0），重新启动后健康检查和线上请求通过，已执行 `pm2 save`。原 31000 单卡容器已停止并移除，模型缓存保留；旧 MinerU 本机 vLLM 启动项已移除。另一仓库的 `vllm-qwen3-embedding-8b` 保持原进程运行。
 
 兼容层仍返回 `(content_list, artifact_dir, None)`，PDF 默认整本，保留源页号和可访问图片；业务 MinIO `parsed.json` 使用服务响应结构，不用原生 MiddleJson 替换。Office 主 JSON/MinIO 资产来自 PDF，原生 DOCX 仅用于同步 TXT 增强。
 
 旧源码、配置、PM2 快照和旧 `.venv` 保存在 `output/mineru4_tdd/rollback-20260917/`。回滚需排空或隔离在途任务，并同步恢复代码、应用环境及模型服务地址；旧虚拟环境须放回原 `.venv` 路径，避免绝对 shebang 失效。保留已完成资产与模型缓存。
+
+三卡修复前的私有 `.env`、PM2 快照和本次验证日志保存在 `output/mineru4_tdd/three-gpu/`。仅回退三卡部署时可继续使用当前 MinerU 4 应用与单卡 Docker 模板，同步更改模型 URL；不需要恢复 3.x 虚拟环境。
