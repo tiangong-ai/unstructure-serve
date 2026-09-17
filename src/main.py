@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from src.config.config import FASTAPI_AUTH, FASTAPI_BEARER_TOKEN
 from src.routers import (
     health_router,
+    guides_router,
     markdown_router,
     mineru_router,
     mineru_task_router,
@@ -61,7 +62,11 @@ def validate_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_sc
 app = FastAPI(
     title="TianGong AI Unstructure Serve",
     version="1.0",
-    description="TianGong AI Unstructure API Server",
+    description=(
+        "TianGong AI Unstructure API Server. "
+        "AI integration guide: GET /guides/ai-integration.md; index: GET /llms.txt. "
+        "Use the deployed OpenAPI for field locations and supported enums."
+    ),
     dependencies=[Depends(validate_token)] if FASTAPI_AUTH else None,
     lifespan=lifespan,
 )
@@ -76,6 +81,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router.router)
+app.include_router(guides_router.router)
 app.include_router(markdown_router.router)
 app.include_router(mineru_router.router)
 app.include_router(mineru_task_router.router)

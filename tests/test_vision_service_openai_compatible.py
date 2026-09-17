@@ -109,7 +109,17 @@ def test_vllm_vision_defaults_to_disable_thinking(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(vision_vllm, "vision_completion_openai_compatible", _fake_openai_compatible)
-    monkeypatch.delenv("VLLM_ENABLE_THINKING", raising=False)
+    # Deployment .env values must not change a test of code defaults.
+    for name in (
+        "VLLM_ENABLE_THINKING",
+        "VLLM_VISION_TEMPERATURE",
+        "VLLM_VISION_TOP_P",
+        "VLLM_VISION_TOP_K",
+        "VLLM_VISION_MIN_P",
+        "VLLM_VISION_PRESENCE_PENALTY",
+        "VLLM_VISION_REPETITION_PENALTY",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
     result = vision_vllm.vision_completion_vllm("fake.jpg")
 

@@ -8,6 +8,8 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [AI 接入指南](docs/ai-integration.md) | 纯解析/图片增强、参数、任务恢复、结果消费、OpenAPI 与远程 AI 接入 |
+| [调优指南](docs/performance-tuning.md) | 开发运维文档：硬件/模型变化后的测量与调优；不通过服务接口提供 |
 | [部署与回归](mineru_4_upgrade_usage.md) | 安装、配置优先级、Docker/PM2、验证、当前主机与回滚记录 |
 | [普通异步任务](mineru_with_images_task_usage.md) | `/mineru/task`、`/mineru_with_images/task`、普通 worker 与 MinIO |
 | [两段式任务](two_stage_task_usage.md) | `/two_stage/task`、四类 worker、队列与批量脚本 |
@@ -30,7 +32,7 @@ pm2 save
 
 上述模型模板使用 GPU 0、1、2，在一个 Docker 容器中启动三个 vLLM 副本，通过单一 `30000` 端口内部负载均衡；单卡替代步骤见部署说明。
 
-API 默认端口为 `7770`，Swagger 位于 `/docs`。普通 `/mineru/task` 和 `/mineru_with_images/task` 还需要单独启动 `ecosystem.celery.json`；仅启动 two-stage worker 不会消费普通任务。
+API 默认端口为 `7770`，Swagger 位于 `/docs`，机器可读合同为 `/openapi.json`。AI 可读取 `/llms.txt` 和 `/guides/ai-integration.md`；这两个只读路由沿用业务 Bearer 鉴权，调优指南不在服务索引和路由中。普通 `/mineru/task` 和 `/mineru_with_images/task` 还需要单独启动 `ecosystem.celery.json`；仅启动 two-stage worker 不会消费普通任务。
 
 开发时可单独启动 API：
 
