@@ -217,3 +217,26 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 | 质量与结论 | 检查项、失败样本、重复轮数、是否采用、回滚配置 |
 
 找到在质量和尾延迟约束下的稳定拐点后停止加并发；资源有空闲本身不是必须提高占用率的理由。
+
+
+## 12. 400–1000 页整本批量的专项准入
+
+接口选择与投递步骤见 [AI 指南第 5.3 节](ai-integration.md#53-多份-4001000-页-pdf-的投递流程)。原有长样本抽页测试与短文件吞吐测试不是千页整本容量验收。先单份代表性整本，再 2/3 份，覆盖扫描/图表密集样本，检查末页有效内容、各阶段耗时、RAM、磁盘、结果体积和错误/重投。
+
+2026-09-18 代码核对发现的长任务约束（本节记录问题，不代表已经修改配置）：
+
+| 层次 | 当前行为 | 千页验收要求 |
+| --- | --- | --- |
+| 提交 HTTP | 批量脚本 POST timeout=120 秒；路由会读取整份上传字节 | 依据文件体积/带宽设置客户端和网关预算，并测同时上传 RAM 峰值 |
+| 客户端轮询 | 脚本默认总等待 800 秒，GET timeout=30 秒 | 覆盖排队+完整流水线；超时续查原 ID，不能重投 |
+| 普通异步解析 | 经 scheduler 的独立子进程 hard timeout；全局代码缺省 600 秒，再受对应进程配置覆盖 | 检查普通 worker 的实际环境，不以 API PM2 的 1800 秒推定 worker 同值 |
+| two-stage parse | 直接调用 parse_doc，未走 scheduler；app 未配置 task_time_limit | 不把 scheduler 的 hard timeout 当成这里的保护；solo/threads 也不能假定具有 prefork 的终止能力 |
+| Redis 未确认消息 | two-stage late ack，当前未覆盖 Redis 默认 visibility timeout=3600 秒 | 单个消息未确认时长可能超过一小时，应先完成超长任务方案；不能仅延长客户端等待 |
+| two-stage 中间/最终结果 | 当前 app 结果过期采用 Celery 默认一天；普通 app 的 CELERY_RESULT_EXPIRES 没有直接接到此 app | 保留时间覆盖最慢图片及 chord 汇总和客户端结果获取，按运行 app 验证 |
+| 停机 | parse PM2 等待窗口 1900 秒 | 长任务超此时间时不要在活跃中重启；扩大预算须与恢复机制一起评估 |
+
+Redis visibility timeout 到期可使未确认任务被重新投递；扩大它也会延迟故障后的恢复。Celery 要求相关 broker/backend/app 设置一致，共享 broker 的应用存在较短设置时还会影响效果，见 [Celery Redis 官方说明](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html#visibility-timeout)。当前项目没有把一个 `CELERY_VISIBILITY_TIMEOUT` 环境变量自动接入所有这些配置；只在 `.env` 写一个名称不会生效。需要实现并验证一致配置，或给长任务提供已验证的独立执行/恢复方案，不能只改某个 worker 的一个参数。
+
+容量验收中应同时检查同一 task_id 的执行事件/日志，避免两个 worker 重复处理同一工作区；客户端没有重复 POST 不代表 broker 不会重投。图像任务一次 fan-out，API 也没有全局按页数/图片数/字节的准入预算；客户端在途 2 是起始实验，不是内存安全保证。若缺少可接受的任务时长上界、可靠终止或恢复能力，先补齐执行隔离/幂等与监控，再开放大规模长任务。
+
+不得直接把 PDF 切成 50/100 页后声称行为等价。若单份整本在预算内不能完成，应先调整资源/窗口、档位选择及执行机制；必须分段时另行设计源页偏移、跨段表格/段落/脚注衔接、图像去重与完整性验收。当前公共 API 不提供此类透明分段恢复能力。
