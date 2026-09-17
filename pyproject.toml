@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,37 +7,38 @@ name = "tiangong-ai-unstructure-serve"
 version = "0.1.0"
 description = "FastAPI service for TianGong AI unstructured document processing."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 license = { file = "LICENSE" }
 authors = [
     { name = "linancn" },
 ]
 dependencies = [
-    "celery[redis]",
-    "flower",
-    "fastapi==0.136.3",
-    "starlette<0.52",
-    "uvicorn[standard]",
-    "gunicorn",
-    "pydantic",
-    "python-dotenv",
-    "toml",
-    "openai",
-    "google-genai",
-    "mineru[all]>=3.0.1,<4",
-    "python-docx",
-    "pillow",
-    "loguru",
-    "torch",
-    "protobuf",
-    "minio",
+    "celery[redis]>=5.6.3",
+    "flower>=2.1.0",
+    "fastapi>=0.141.1",
+    "starlette>=1.6.0",
+    "uvicorn[standard]>=0.53.0",
+    "gunicorn>=26.2.0",
+    "uvicorn-worker>=0.4.0",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.3",
+    "toml>=0.10.2",
+    "openai>=2,<3",
+    "google-genai>=2.24.0",
+    "mineru[torch]>=4.0.0,<5",
+    "python-docx>=1.2.0",
+    "pillow>=12.3.0",
+    "loguru>=0.7.3",
+    "torch>=2.14.0",
+    "protobuf>=7.36.1",
+    "minio>=7.2.20",
 ]
 
 [dependency-groups]
 dev = [
-    "black>=25.9.0",
-    "ruff>=0.14.4",
-    "pytest>=8.4.2",
+    "black>=26.5.1",
+    "ruff>=0.16.8",
+    "pytest>=9.1.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -45,11 +46,22 @@ packages = ["src"]
 
 [tool.black]
 line-length = 100
+target-version = ["py312"]
 exclude = '''
 (
-	^/\.venv/
+    /\.venv/
+    | ^/(output|input|pdfs|pickle)/
 )
 '''
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["mineru_integration: real input PDFs and prepared MinerU model services"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# Preserve the project's previous Ruff defaults across the 0.16 rule expansion.
+select = ["E4", "E7", "E9", "F"]

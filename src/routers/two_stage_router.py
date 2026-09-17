@@ -30,7 +30,7 @@ from src.utils.file_conversion import (
     format_extension_list,
     maybe_convert_to_pdf,
 )
-from src.utils.mineru_backend import resolve_backend_from_env
+from src.utils.mineru_backend import MinerUTier
 from src.utils.mineru_support import mineru_supported_extensions
 
 router = APIRouter()
@@ -126,6 +126,10 @@ def _form_model(
 )
 async def two_stage_task(
     file: UploadFile = File(...),
+    tier: MinerUTier = Form(
+        MinerUTier.STANDARD,
+        description="MinerU parsing quality: flash, basic, standard (default), or advanced.",
+    ),
     chunk_type: bool = Form(False),
     return_txt: bool = Form(False),
     priority: TaskPriority = Form(
@@ -153,12 +157,7 @@ async def two_stage_task(
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
-    try:
-        backend_value = resolve_backend_from_env()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Invalid MINERU_DEFAULT_BACKEND: {exc}"
-        ) from exc
+    backend_value = tier.value
 
     workspace = _ensure_workspace()
     target_filename = _normalize_filename(filename, file_ext)

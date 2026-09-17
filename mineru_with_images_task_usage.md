@@ -1,5 +1,7 @@
 # /mineru_with_images/task 使用说明
 
+> MinerU 4 升级后，解析 worker 连接 Docker VLM 后端。先按 [部署与回归说明](mineru_4_upgrade_usage.md) 准备模型、`.env` 和容器；本文件中的 Celery 队列划分保持不变。
+
 本文档面向能登录本机/容器的同事，说明如何启动并使用mineru_with_images异步接口：
 
 ```text
@@ -248,6 +250,7 @@ REVOKED  任务被撤销
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `file` | 必填 | 上传 PDF、Office 或 MinerU 支持的文件类型；Markdown/TXT 不走 MinerU。 |
+| `tier` | `standard` | MinerU 拆解质量：`flash`、`basic`、`standard`、`advanced`；不传固定 standard，非法值返回 422。入队后保留所选档位。 |
 | `priority` | `normal` | `urgent` 进入 `queue_urgent`，其他值进入 `queue_normal`。 |
 | `return_txt` | `false` | 是否返回拼接后的纯文本 `txt`。 |
 | `chunk_type` | `false` | 是否保留 `type` 字段，例如 `title`、`header`、`footer`、`image`。 |

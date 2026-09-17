@@ -24,7 +24,6 @@ def _fake_submit(*args, **kwargs):
 
 
 def test_mineru_keeps_mineru_reading_order_when_chunk_type_enabled(client, monkeypatch):
-    monkeypatch.setattr(mineru_router, "resolve_backend_from_env", lambda: "vlm-http-client")
     monkeypatch.setattr(mineru_router.scheduler, "submit", _fake_submit)
 
     response = client.post(

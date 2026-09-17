@@ -6,7 +6,13 @@ from src.utils.mineru_backend import (
     normalize_backend,
     resolve_backend,
     resolve_backend_from_env,
+    resolve_tier,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_tier(monkeypatch):
+    monkeypatch.delenv("MINERU_DEFAULT_TIER", raising=False)
 
 
 def test_normalize_backend_accepts_supported_values():
@@ -52,4 +58,17 @@ def test_resolve_backend_from_env(monkeypatch):
 
     monkeypatch.setenv("MINERU_DEFAULT_BACKEND", "bogus-backend")
     with pytest.raises(ValueError):
+        resolve_backend_from_env()
+
+
+def test_tier_is_snapshotted_and_old_tasks_keep_quality(monkeypatch):
+    monkeypatch.setenv("MINERU_DEFAULT_TIER", "standard")
+    monkeypatch.setenv("MINERU_DEFAULT_BACKEND", "vlm-http-client")
+    assert resolve_backend_from_env() == "standard"
+    assert resolve_tier("vlm-http-client") == "advanced"
+    assert resolve_tier("pipeline") == "basic"
+    assert resolve_tier("hybrid-http-client") == "standard"
+    assert resolve_tier("vlm-http-client", "basic") == "basic"
+    monkeypatch.setenv("MINERU_DEFAULT_TIER", "bad-tier")
+    with pytest.raises(ValueError, match="Unsupported MinerU tier"):
         resolve_backend_from_env()

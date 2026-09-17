@@ -5,7 +5,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:7770 --timeout 1900 --graceful-timeout 1900 --keep-alive 30 --max-requests 500 --max-requests-jitter 50 src.main:app",
+      "args": "-k uvicorn_worker.UvicornWorker -w 4 -b 0.0.0.0:7770 --timeout 1900 --graceful-timeout 1900 --keep-alive 30 --max-requests 500 --max-requests-jitter 50 src.main:app",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
         "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",

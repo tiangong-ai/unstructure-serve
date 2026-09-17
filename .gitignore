@@ -157,5 +157,3 @@ download_models_hf.py
 .log
 
 /minio/
-
-uv.lock

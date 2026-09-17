@@ -56,7 +56,6 @@ def test_mineru_with_images_docx_return_txt_uses_native_docx_payload_txt(
         return future
 
     monkeypatch.setattr(router, "maybe_convert_to_pdf", fake_convert_to_pdf)
-    monkeypatch.setattr(router, "resolve_backend_from_env", lambda: "vlm-http-client")
     monkeypatch.setattr(router.scheduler, "submit", fake_submit)
 
     response = client.post(
@@ -102,7 +101,6 @@ def test_mineru_with_images_invalid_model_no_longer_returns_422(client, monkeypa
         )
         return future
 
-    monkeypatch.setattr(router, "resolve_backend_from_env", lambda: "vlm-http-client")
     monkeypatch.setattr(router.scheduler, "submit", fake_submit)
 
     response = client.post(
@@ -133,7 +131,6 @@ def test_mineru_with_images_keeps_mineru_reading_order_when_chunk_type_enabled(c
         )
         return future
 
-    monkeypatch.setattr(router, "resolve_backend_from_env", lambda: "vlm-http-client")
     monkeypatch.setattr(router.scheduler, "submit", fake_submit)
 
     response = client.post(

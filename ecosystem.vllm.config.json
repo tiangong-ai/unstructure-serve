@@ -1,20 +1,19 @@
 {
   "apps": [
     {
-      "name": "mineru-vllm-server",
+      "name": "mineru-vlm-docker-0",
       "cwd": ".",
-      "script": ".venv/bin/mineru-vllm-server",
-      "args": "--port 30000",
-      "exec_mode": "fork",
+      "script": "docker",
+      "args": "compose -p mineru-gpu0 -f compose.mineru.yaml up --build mineru-vlm",
       "interpreter": "none",
       "autorestart": true,
       "max_restarts": 5,
       "min_uptime": "60s",
       "exp_backoff_restart_delay": 10000,
-      "kill_timeout": 30000,
+      "kill_timeout": 70000,
       "env": {
-        "MINERU_MODEL_SOURCE": "modelscope",
-        "CUDA_VISIBLE_DEVICES": "0"
+        "MINERU_DOCKER_GPU_ID": "0",
+        "MINERU_DOCKER_PORT": "30000"
       }
     }
   ]
