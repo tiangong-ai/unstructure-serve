@@ -17,7 +17,9 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS": "600",
-        "MINERU_PROCESSING_WINDOW_SIZE": "512"
+        "MINERU_PROCESSING_WINDOW_SIZE": "64",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "out_file": "gunicorn.log",
       "error_file": "gunicorn.log",

@@ -7,6 +7,11 @@ services:
         VLLM_IMAGE: ${MINERU_DOCKER_BASE_IMAGE:-vllm/vllm-openai:v0.21.0}
     restart: unless-stopped
     runtime: nvidia
+    # Snap's boot-time CDI scan can run before UVM nodes are created.
+    # Explicit mappings keep CUDA available even when that scan omitted them.
+    devices:
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
     stop_grace_period: 60s
     shm_size: 8gb
     ports:

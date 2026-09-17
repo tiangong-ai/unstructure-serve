@@ -10,7 +10,7 @@
 
 | 阶段 | normal | urgent | PM2 进程 / 池 |
 | --- | --- | --- | --- |
-| parse | `queue_parse_gpu` | `queue_parse_urgent` | `celery-two-stage-parse` / solo |
+| parse | `queue_parse_gpu` | `queue_parse_urgent` | `celery-two-stage-parse`、`-2`、`-3` / 各 solo 1 |
 | vision | `queue_vision` | `queue_vision_urgent` | `celery-two-stage-vision` / threads 32 |
 | dispatch | `queue_dispatch` | `queue_dispatch_urgent` | `celery-two-stage-dispatch` / threads 4 |
 | merge | `default` | `queue_merge_urgent` | `celery-two-stage-merge` / threads 4 |
@@ -48,7 +48,9 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 pm2 status
 ```
 
-四个 worker 均需在线；模板的 `-Q` 顺序为 urgent 在前。parse 池不能使用 daemonic prefork，因为应用调度器需要再创建子进程。dispatch 使用 `self.replace` 触发 chord，不在任务内同步等待 `result.get()`；Redis result backend 必须可用。
+六个 worker（parse 三个，其余阶段各一个）均需在线；模板的 `-Q` 顺序为 urgent 在前。三个 parse 使用不同 Celery 节点名，共同消费同一队列，每个最多执行一份文档，prefetch=1。每个解析进程的 VLM 请求并发为 8，由单地址后端分配至三张卡；worker 与 GPU 没有一一绑定关系。parse 池不能使用 daemonic prefork，因为 SDK 还需要创建渲染子进程。dispatch 使用 `self.replace` 触发 chord，不在任务内同步等待 `result.get()`；Redis result backend 必须可用。
+
+parse 的 PM2 停止窗口为 1900 秒，让在途任务完成；这不是任务 hard timeout，维护前仍需等待 active/reserved 清空。API 和 parse 模板的 SDK 窗口均为 64 页，整本结果仍统一后处理。并发基准和配置选择见[部署记录](mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。
 
 需要监控时启动 `ecosystem.two_stage.flower.json`，默认 5555；普通 Celery Flower 使用另一个 app，同机同时开两个需改端口。
 
@@ -140,7 +142,7 @@ uv run python src/scripts/two_stage_enqueue.py
 
 ## 排查
 
-- 长期 PENDING：检查队列映射、四个 worker、Redis DB 和共享工作区；普通 worker 不负责 two-stage 队列。
+- 长期 PENDING：检查队列映射、四类阶段的六个 worker、Redis DB 和共享工作区；普通 worker 不负责 two-stage 队列。
 - parse 后无结果：查看 `celery-two-stage-dispatch`、`celery-two-stage-vision`、`celery-two-stage-merge` 日志及 result backend；不能仅启动 parse/vision。
 - vision 积压：检查独立 `VLLM_BASE_URLS` 服务吞吐与错误，再调整 vision 并发；增加应用并发不会扩大模型容量。
 - 422：检查 tier、priority、provider/model 枚举及字段类型。

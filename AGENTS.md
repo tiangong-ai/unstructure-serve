@@ -58,7 +58,9 @@
 - Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
 - scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
-- 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为 solo，其余线程池。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
+- 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为三个独立 solo/1 worker（名称 parse、parse-2、parse-3），均消费 urgent/normal，prefetch=1；其余线程池。每个解析 worker 的 VLM 并发为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
+- API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
+- CPU ONNX 模板每个模型会话的 intra/inter 线程数为 16/1，防止高核数机器上自动线程池过度竞争；这是本机混合 PDF 测量后的配置，不是整个进程的线程上限。VLM 并发保持 8；4 线程及 VLM 16 均有对照证据，不凭单个短文档结果扩大并发。
 
 ## 配置与运维
 
@@ -66,8 +68,9 @@
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
 - 三卡部署入口为 `ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - Docker 基线为 vLLM 0.21.0 配套 Torch/CUDA，模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
+- Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `/dev/nvidia-uvm` 和 `/dev/nvidia-uvm-tools`，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
 - PM2 API 为 `unstructured-gunicorn`，Gunicorn timeout/graceful-timeout 1900 秒。科研入口另有自己的 HTTP 等待窗口；具体超时以模板/运行环境为准。
-- `/health`、`/gpu/status` 和 `/two_stage/queue_status` 用于检查状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
+- `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/MinIO/独立视觉模型，也不执行实际推理。结合 `/gpu/status` 和 `/two_stage/queue_status` 检查任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
 - 维护先定位当前服务树和 active/reserved 任务，按具体任务清理。不要在日常说明中使用全局 PM2 删除、Redis flushdb 或无差别清空共享任务目录。
 
 ## 开发与验证
@@ -84,8 +87,9 @@ uv run --group dev pytest
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉、MinIO 和进程生命周期。
 - 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。读取 input 的 11 份 PDF；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。测试数量与部署证据统一记录在部署说明。
+- `src/scripts/benchmark_mineru.py` 对真实 PDF 做已预热 SDK 进程压测，记录批量完成、单任务服务和排队耗时；不含 Celery/独立视觉阶段。输出目录必须新建，校验整本页号、图片及 p2 关键表格/checkbox；样本与结果保持私有。脚本退出前显式收尾各进程的 DocVortex 渲染池，避免嵌套 multiprocessing 等待退出。
 - `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 advanced）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
 
 ## 本机状态
 
-2026-09-17：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；缺省档位现为 advanced。standard/advanced 同步请求及真实 Celery 任务已验收。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。回滚与验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。
+2026-09-18：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；parse 为三个独立 solo/1，其余各一个，共六个 worker。缺省档位为 advanced；ONNX 16/1、VLM 并发 8、窗口 64。standard/advanced 同步请求及真实 Celery 任务已验收。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。驱动升级重启后的 UVM 映射缺失已修复，新增 `/ready`；并发与线程对照见[优化记录](mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。回滚与验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。

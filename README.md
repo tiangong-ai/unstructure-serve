@@ -83,4 +83,4 @@ uv run --group dev pytest
 
 真实模型测试默认跳过。模型和 `input` 样本准备好后，按[PDF 回归说明](mineru_4_upgrade_usage.md#验证与回归)执行；常规测试通过不代表所有长 PDF 已完整解析。
 
-运行状态由 `/health`、`/gpu/status`、`/two_stage/queue_status` 提供。日常维护使用指定项目、容器或 PM2 进程的命令，见[运维说明](mineru_4_upgrade_usage.md#启动与维护)。
+`/health` 检查 API 存活，`/ready` 检查 MinerU 模型是否就绪；任务状态由 `/gpu/status`、`/two_stage/queue_status` 提供。日常维护使用指定项目、容器或 PM2 进程的命令，见[运维说明](mineru_4_upgrade_usage.md#启动与维护)。
