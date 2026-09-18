@@ -11,6 +11,8 @@ from src.services import mineru_service_full as service
 
 @pytest.fixture
 def sdk(monkeypatch):
+    from mineru.parser import ParseResult
+
     calls = []
     payload = {
         "schema": "docvortex.middle",
@@ -21,14 +23,15 @@ def sdk(monkeypatch):
         "is_full_document": False,
     }
 
-    class Result:
-        def save(self, writer):
-            writer.write_string("middle_json.json", json.dumps(payload))
-            writer.write("images/figure.png", b"image-bytes")
+    def save(self, writer):
+        writer.write_string("middle_json.json", json.dumps(payload))
+        writer.write("images/figure.png", b"image-bytes")
+
+    monkeypatch.setattr(ParseResult, "save", save)
 
     def parse(path, **kwargs):
         calls.append((path, kwargs))
-        return Result()
+        return ParseResult.from_dict(payload)
 
     monkeypatch.setattr(service, "mineru_parse", parse, raising=False)
     monkeypatch.setenv("MINERU_DEFAULT_TIER", "standard")
@@ -95,11 +98,11 @@ def test_missing_materialized_asset_fails_instead_of_skipping_vision(monkeypatch
 
 
 def test_missing_result_json_reports_a_parse_error(monkeypatch, tmp_path, sdk):
+    from mineru.parser import ParseResult
+
     source = tmp_path / "report.pdf"
     source.write_bytes(b"%PDF")
-    monkeypatch.setattr(
-        service, "mineru_parse", lambda *args, **kwargs: SimpleNamespace(save=lambda writer: None)
-    )
+    monkeypatch.setattr(ParseResult, "save", lambda self, writer: None)
     with pytest.raises(RuntimeError, match="materialized result"):
         service.parse_doc([source], tmp_path / "out", tier="standard")
 
@@ -142,3 +145,39 @@ def test_docker_endpoints_rotate_without_changing_global_config(monkeypatch):
 def test_invalid_page_ranges_are_rejected(start, end):
     with pytest.raises(ValueError):
         service._page_range(start, end)
+
+
+@pytest.mark.parametrize("debug", [False, True])
+def test_model_diagnostics_require_explicit_debug(monkeypatch, tmp_path, debug):
+    from mineru.parser import ParseResult
+    from mineru.types import ModelJson
+
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"%PDF")
+    metadata = {"file_suffix": "pdf", "producer": {"name": "mineru", "version": "4.0.2"}}
+    result = ParseResult.from_dict(
+        {
+            "schema": "docvortex.middle",
+            "schema_version": "2.0",
+            "metadata": metadata,
+            "extensions": {"mineru": {"tier": "flash", "parse_mode": "txt"}},
+            "pages": [{"page_idx": 0, "blocks": []}],
+            "is_full_document": True,
+        }
+    )
+    result._model_output = ModelJson.model_validate(
+        {
+            "metadata": metadata,
+            "pages": [[{"diagnostic": "private-model-trace"}]],
+            "page_index_map": [0],
+        }
+    )
+    monkeypatch.setattr(service, "mineru_parse", lambda *args, **kwargs: result)
+    items, output, _ = service.parse_doc(
+        [source], tmp_path / "out", tier="flash", dump_debug_intermediate=debug
+    )
+    assert items == []
+    assert (Path(output) / "middle_json.json").is_file()
+    assert (Path(output) / "report_content_list.json").is_file()
+    assert (Path(output) / "model_output.json").exists() is debug
+    assert result._model_output is not None, "Export must not mutate the SDK result"

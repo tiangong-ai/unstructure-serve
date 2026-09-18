@@ -302,7 +302,13 @@ def parse_doc(
             )
             if result is None:
                 raise RuntimeError(f"MinerU returned no result for {source.name}")
-            result.save(FileBasedDataWriter(str(artifact_dir)))
+            # ModelJson contains the raw analysis trace and can exceed hundreds
+            # of MB. The public ParseResult constructor preserves the materialized
+            # document/asset export while omitting that optional diagnostic.
+            exported = (
+                result if dump_debug_intermediate else ParseResult(middle_json=result.middle_json)
+            )
+            exported.save(FileBasedDataWriter(str(artifact_dir)))
             try:
                 saved = ParseResult.from_json(
                     (artifact_dir / "middle_json.json").read_text("utf-8")

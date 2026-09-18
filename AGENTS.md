@@ -40,7 +40,7 @@
 - `/mineru`、`/mineru_sci`、`/mineru_with_images` 和两个普通 `/task` 的 `chunk_type`、`return_txt` 是 **query 参数**；仅 `/two_stage/task` 将它们定义为 form。文档、curl 和脚本示例必须按真实 OpenAPI 编写。
 - 直接服务调用未指定档位时读取 `MINERU_DEFAULT_TIER`，再兼容旧 backend；两者均未配置时使用 `advanced`。旧映射：pipeline→basic、hybrid→standard、vlm→advanced。旧名称只影响档位，大模型推理仍走 Docker；不要重新引入本机引擎。
 - PDF、受支持图片和 Office 转 PDF 清单才是服务输入边界；Markdown/TXT 拒绝。不要因上游新增格式而自动扩大接口范围。
-- `parse_doc()` 使用无状态 `mineru.parser.parse`，默认 PDF `page_range=all`。零基 start/end 转成一基范围，保留源页号；返回 `(content_list, artifact_dir, None)`。先保存 MiddleJson/图片，再渲染 V1 并补齐旧字段；图片引用缺失必须失败。
+- `parse_doc()` 使用无状态 `mineru.parser.parse`，默认 PDF `page_range=all`。零基 start/end 转成一基范围，保留源页号；返回 `(content_list, artifact_dir, None)`。先保存 MiddleJson/图片，再渲染 V1 并补齐旧字段；图片引用缺失必须失败。默认通过公开 ParseResult 导出，不保存原始 model_output.json；仅 dump_debug_intermediate=True 导出该诊断，不能用丢弃 writer 输出的方式绕过前置深拷贝/序列化成本。
 - `img_caption/img_footnote`、chart/code/index/page_footnote 映射和 bbox 单位需保持下游兼容；同时写旧命名 `_content_list.json` 供诊断。异常继续冒泡，不返回空值伪装成功。
 - Office 主结果始终先经 LibreOffice 转 PDF，再使用所选 tier；每次转换使用独立 profile 并在超时后收尾。
 - 仅同步 `/mineru_with_images` 的 `.docx + return_txt=true` 使用额外原生 DOCX flash 分支生成 txt，result/页码仍来自 PDF。该分支图片按原文顺序插入严格可见内容 OCR，不附加 caption/footnote 或根据上下文推断实体。普通任务和 two-stage 不启用该分支。
@@ -70,6 +70,7 @@
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
 - scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
 - 隔离任务在成功/失败后显式关闭本任务已加载的 DocVortex 渲染池，避免 Python 等待嵌套进程导致固定退出延迟；保留原 hard timeout 与进程组收尾作为兜底，不通过缩短等待或提前返回来跳过清理。
+- `run_isolated_call` 使用 Pipe 接收线程配合子进程存活检查，子进程无结果退出时报告退出码，不等到整段 hard timeout；超时包含执行及结果传输，进程组清理可额外消耗退出窗口。大结果传输也必须持续监督，不退回先 join 再读取的死锁模式。
 - 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为三个独立 solo/1 worker（名称 parse、parse-2、parse-3），均消费 urgent/normal，prefetch=1；其余线程池。每个解析 worker 的 VLM 并发为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
 - API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
 - CPU ONNX 模板每个模型会话的 intra/inter 线程数为 16/1，防止高核数机器上自动线程池过度竞争；这是本机混合 PDF 测量后的配置，不是整个进程的线程上限。VLM 并发保持 8；4 线程及 VLM 16 均有对照证据，不凭单个短文档结果扩大并发。

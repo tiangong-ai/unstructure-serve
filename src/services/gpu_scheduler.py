@@ -1,9 +1,9 @@
 import atexit
 import ctypes
 import logging
+import math
 import multiprocessing
 import os
-import queue
 import signal
 import sys
 import tempfile
@@ -11,8 +11,8 @@ import time
 from concurrent.futures import ProcessPoolExecutor, Future
 from contextlib import suppress
 from dataclasses import dataclass
-from threading import Lock
-from typing import Dict, List, Optional
+from threading import Event, Lock, Thread
+from typing import Any, Callable, Dict, List, Optional
 
 from src.utils.text_output import build_plain_text, clean_text as _clean_text
 
@@ -226,12 +226,16 @@ def _child_worker(
     q: multiprocessing.Queue, path: str, pipeline: str, options: Optional[Dict[str, object]]
 ) -> None:
     """Wrapper run in a separate process to enforce a hard timeout."""  # pragma: no cover
+    _run_child_job(q.put, _actual_parse, (path, pipeline, options), {})
+
+
+def _run_child_job(publish, target, args, kwargs) -> None:
     _configure_parse_child_process()
     try:
-        data = _actual_parse(path, pipeline, options)
-        q.put({"ok": True, "data": data})
+        data = target(*args, **kwargs)
+        publish({"ok": True, "data": data})
     except Exception as exc:  # noqa: BLE001 - propagate failure info through queue
-        q.put({"ok": False, "error": str(exc)})
+        publish({"ok": False, "error": str(exc)})
     finally:
         # multiprocessing waits for nested children before normal atexit hooks.
         # Close only this task's already-loaded render pool, while the watchdog
@@ -245,6 +249,86 @@ def _child_worker(
                     "PDF render cleanup failed (%s); watchdog will finish cleanup",
                     type(exc).__name__,
                 )
+
+
+def _pipe_child(sender, receiver, target, args, kwargs) -> None:
+    # The parent closes its sender after start. No unrelated writer should keep
+    # EOF hidden if the task dies before returning a result.
+    receiver.close()
+    try:
+        _run_child_job(sender.send, target, args, kwargs)
+    finally:
+        sender.close()
+
+
+def run_isolated_call(target: Callable[..., Any], *args, hard_timeout: float, **kwargs) -> Any:
+    """Call a module-level function in a supervised task process group.
+
+    Arguments/results must be pickleable. The deadline covers execution and
+    result transfer. A receiver thread drains large pipe messages so the parent
+    can still observe crashes/timeouts during transfer, without Queue feeder
+    threads delaying child exit. Only this task's descendants are cleaned up.
+    """
+    if not math.isfinite(hard_timeout) or hard_timeout <= 0:
+        raise ValueError("hard_timeout must be positive and finite")
+    receiver, sender = multiprocessing.Pipe(duplex=False)
+    process = multiprocessing.Process(
+        target=_pipe_child,
+        args=(sender, receiver, target, args, kwargs),
+        daemon=False,
+    )
+    try:
+        process.start()
+    except BaseException:
+        receiver.close()
+        sender.close()
+        raise
+    sender.close()
+    received = Event()
+    outcome = {}
+
+    def receive():
+        try:
+            outcome["message"] = receiver.recv()
+        except BaseException as exc:
+            outcome["error"] = exc
+        finally:
+            received.set()
+
+    reader = Thread(target=receive, name="isolated-parse-result", daemon=True)
+    reader.start()
+    deadline = time.monotonic() + hard_timeout
+    cleaned = False
+    complete_message = False
+    try:
+        while not received.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Parse hard timeout after {hard_timeout:g}s")
+            if received.wait(min(0.05, remaining)):
+                break
+            if process.exitcode is not None and not cleaned:
+                # Descendants may have inherited the sender. Close those task
+                # processes too, allowing the reader to observe EOF promptly.
+                _cleanup_child_process(process, terminate=False)
+                cleaned = True
+
+        if "error" in outcome:
+            process.join(timeout=0.1)
+            raise RuntimeError(
+                f"Isolated parse child exited without a complete result (exit code {process.exitcode})"
+            ) from outcome["error"]
+        message = outcome["message"]
+        complete_message = True
+        if not message.get("ok"):
+            raise RuntimeError(message.get("error", "Unknown parse error"))
+        return message["data"]
+    finally:
+        if not cleaned:
+            _cleanup_child_process(process, terminate=not complete_message and process.is_alive())
+        reader.join(timeout=1)
+        receiver.close()
+        process.close()
 
 
 def _worker_process_file(
@@ -270,33 +354,10 @@ def _worker_process_file(
     else:
         hard_timeout = int(os.getenv("MINERU_DEFAULT_HARD_TIMEOUT_SECONDS", str(global_default)))
 
-    result_queue: multiprocessing.Queue = multiprocessing.Queue(maxsize=1)
-
-    proc = multiprocessing.Process(
-        target=_child_worker,
-        args=(result_queue, file_path, pipeline, options),
-        daemon=False,  # allow downstream libraries to spawn worker processes
+    payload = run_isolated_call(
+        _actual_parse, file_path, pipeline, options, hard_timeout=hard_timeout
     )
-    proc.start()
-
-    try:
-        try:
-            msg = result_queue.get(timeout=hard_timeout)
-        except queue.Empty:
-            # Timeout -> kill child
-            _cleanup_child_process(proc, terminate=True)
-            raise TimeoutError(f"Parse hard timeout after {hard_timeout}s (pipeline={pipeline})")
-
-        if not msg.get("ok"):
-            raise RuntimeError(msg.get("error", "Unknown parse error"))
-        payload = msg.get("data")
-        if isinstance(payload, list):
-            payload = {"result": payload}
-        return payload
-    finally:
-        _cleanup_child_process(proc, terminate=False)
-        result_queue.close()
-        result_queue.join_thread()
+    return {"result": payload} if isinstance(payload, list) else payload
 
 
 @dataclass

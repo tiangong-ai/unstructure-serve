@@ -63,3 +63,11 @@ def test_failed_parse_still_releases_render_resources(monkeypatch):
     scheduler._child_worker(result_queue, "unused.pdf", "default", None)
     assert result_queue.get_nowait() == {"ok": False, "error": "parse failed"}
     assert closed == [True]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux task process groups")
+def test_generic_isolated_call_closes_real_nested_render_pool():
+    scheduler = importlib.import_module("src.services.gpu_scheduler")
+    payload = scheduler.run_isolated_call(_parse_with_renderer, hard_timeout=20)
+    with pytest.raises(ProcessLookupError):
+        os.kill(payload["helper_pid"], 0)
