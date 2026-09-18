@@ -26,6 +26,12 @@ def _ensure_stub_modules():
 _ensure_stub_modules()
 
 
+@pytest.fixture(autouse=True)
+def isolated_durable_job_store(monkeypatch, tmp_path):
+    """Route tests must never write to the running service's job store."""
+    monkeypatch.setenv("MINERU_JOB_STORE_DIR", str(tmp_path / "durable-jobs"))
+
+
 @pytest.fixture(scope="session")
 def app():
     """Provide a FastAPI app instance with lightweight GPU scheduler stubs."""

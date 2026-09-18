@@ -28,7 +28,9 @@
 | `src/services/mineru_with_images_service.py` | 图片描述并发及同步 DOCX TXT 增强 |
 | `src/services/mineru_task_runner.py` / `tasks/mineru_tasks.py` | 普通 Celery 任务，复用 scheduler 与响应合同 |
 | `src/services/two_stage_pipeline.py` | 独立 Celery app 的 parse/dispatch/vision/merge |
-| `src/services/job_store.py` | 持久任务身份、原始输入、阶段锁、原子结果和过期墓碑 |
+| `src/services/job_store.py` / `durable_pipeline.py` | 持久身份、输入、阶段锁、解析/单图检查点、原子结果和过期墓碑 |
+| `src/services/job_submission.py` / `src/routers/job_router.py` | 幂等提交、轻量状态、结果下载和显式恢复 |
+| `src/scripts/manage_jobs.py` | 本地清单、发布恢复、阶段恢复和保留期清理（默认预览） |
 | `src/services/vision_service.py` / `vision_service_openai_compatible.py` | provider/model 兜底与 OpenAI-compatible 客户端池 |
 | `src/services/vision_prompts.py` | 视觉提示词；原生 DOCX 图片使用严格 OCR |
 | `src/services/pdf_text_layer_reconcile.py` | 按同页 PDF 文本层修正 checkbox 状态 |
@@ -56,8 +58,8 @@
 - 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.5 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
 - 默认 OpenAI-compatible 提示词放在 system，文档上下文作为 user 数据；自定义 prompt 保持优先。图表只提取印出的值，不根据柱高/坐标估算；流程图保留中间步骤。增强时以独立视觉结果替换 SDK 生成的图示正文，仍保留印刷标题/脚注；纯解析和被筛除图片保持 SDK 内容。
 - vLLM 视觉客户端默认单次读写阶段超时 180 秒、SDK 重试 0 次，分别由 VLLM_VISION_TIMEOUT_SECONDS/MAX_RETRIES 控制，故障继续尝试下一端点；不是整份任务的墙钟截止时间。
-- 默认图片提示词保留图中数字、单位、标签和关系，合并同类数据，避免重复 caption、无关引言和推断数值；不压缩图片或按字数硬截断。清理仅处理开头完整 thinking 段和确定的中英文套话，保留正文及不确定性。原生 DOCX 严格 OCR 不启用新增套话清理，避免误删原图文字。自定义 prompt 继续优先。
-- two-stage 保留相对面积、分辨率、体积、长宽比和每页数量筛选。所有图片增强入口仅在单文档内复用相同图片字节及相同语义上下文的请求，重复位置仍逐一回填。默认 key 只忽略生成的页位置标记，自定义 prompt/严格 OCR 保留位置；不同标题/上下文不得合并。缺资产或缺视觉结果必须失败；合并保持原位；清理视觉输出中的 Page/ChunkType 标记和固定说明前缀。
+- 默认图片提示词保留图中数字、单位、标签和关系，合并同类数据，避免重复 caption、无关引言和推断数值；不压缩图片或按字数硬截断。清理仅处理开头完整 thinking 段和确定的中英文套话，保留正文及不确定性。原生 DOCX 严格 OCR 不启用套话、Page/ChunkType 或 Image Description 标记清理，避免误删原图文字。自定义 prompt 继续优先。
+- two-stage 保留相对面积、分辨率、体积和长宽比筛选，不设每页数量截断；印刷图题独立于 SDK 生成正文，有图题的稀疏图不能仅因压缩字节少而丢弃。所有图片增强入口仅在单文档内复用相同图片字节及相同语义上下文的请求，重复位置仍逐一回填。默认 key 只忽略生成的页位置标记，自定义 prompt/严格 OCR 保留位置；不同标题/上下文不得合并。缺资产或缺视觉结果必须失败；合并保持原位；清理视觉输出中的 Page/ChunkType 标记和固定说明前缀。
 
 - 六个解析上传入口统一通过 `src/utils/upload_io.py` 在线程池内按 1 MiB 分块持久化；Office 和 broker 提交不直接阻塞事件循环。同步解析用 shield/wrap_future 等待，HTTP 超时后源文件延迟到实际任务结束再清理。Pydantic 响应直接序列化 JSON，保留 null/pretty 合同。
 
@@ -65,10 +67,15 @@
 
 - 持久任务存储通过 `MINERU_JOB_STORE_DIR` 指定，缺省仓库 `output/jobs`；所有 API/worker 必须共享同一可靠本地文件系统。任务身份绑定原始文件摘要、文件名、模式及参数；同幂等键不能替换内容。原子文件提交结果，元数据落盘失败不能抹掉已提交结果；清理须取得独占生命周期锁并保留过期墓碑，不能删除仍在执行的任务或锁文件。该存储不是跨主机分布式协调。
 
+- 三个异步 POST 支持 Idempotency-Key，保存原始输入后只发送 job_id/generation 引用，固定返回已知 ID/PENDING，不读取发布后的 Redis 状态；不明确发布返回含 ID 的 503 并保留输入。重复键与不同参数/内容冲突 409，过期墓碑 410。Office 转换在异步 parse 隔离进程内执行。
+- durable_pipeline 保存整本 parse manifest、逐图输入及结果；阶段排它锁与生命周期共享锁防重复/清理竞态。默认每波 MINERU_VISION_WAVE_SIZE=32，图片完成返回稳定小引用，全文不得再次放入 chord callback 或 Redis 结果。普通任务也复用整本与逐图结果；只有完成标记提交后才成功，工作区不在 merge 中删除。
+- GET /tasks/{id}/status 不返回全文；/result 校验摘要后流式返回业务 JSON，持锁覆盖下载/断连；POST /resume 在无活跃阶段时提升 generation，旧代消息禁止写入。旧三类 GET 先查持久存储再回退 Redis，并保留各自 null/失败码合同。旧任务不自动迁移。
+- 检查点冻结执行配置摘要（含版本、解析和实际视觉选择、prompt/采样、端点摘要），配置不一致拒绝复用；同模型别名替换权重时提升 MINERU_EXECUTION_PROFILE_REVISION。失败发生在整本解析完成前仍需重做解析；模型响应后落盘前退出也可能重算该图，不承诺 exactly-once 或按页续算。
+- manage_jobs recover 仅原代重发 publication=pending/uncertain；resume 提升代次复用已完成阶段；gc --retention-days 7 缺省预览，--apply 才清理已结束且无活跃租约的任务。未配置自动定时清理；运维必须规划磁盘和保留策略，不清理在途工作区。
 - 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`；普通 worker 不消费 two-stage 的解析/视觉/default merge 队列，防止不同 Celery app 抢到未注册任务。
 - two-stage 部署显式配置 normal 队列 `queue_parse_gpu/queue_vision/queue_dispatch/default`；四类 urgent 为 `queue_parse_urgent/queue_vision_urgent/queue_dispatch_urgent/queue_merge_urgent`。API 与每个 worker 必须配置一致，不能只改 worker 的 `-Q`。
 - 未配置时代码的 parse 回退到普通队列，dispatch/merge 回退到 default；`.env.example` 显式列出与 PM2 匹配的队列，详细规则见 two-stage 文档。
-- 两个 Celery app 共用 `celery_runtime.py`：Redis 的 broker/backend/app visibility_timeout 一致读取 `CELERY_VISIBILITY_TIMEOUT`（代码 3600 秒、模板 21600 秒），`CELERY_RESULT_EXPIRES` 同时控制两类结果（代码/模板 86400 秒，TOML/环境可覆盖）。普通 worker 同样使用 priority 队列顺序。所有共享 broker 的 worker 必须一同配置；延长确认期限会延迟崩溃后重投，并不提供幂等或断点恢复。
+- 两个 Celery app 共用 `celery_runtime.py`：Redis 的 broker/backend/app visibility_timeout 一致读取 `CELERY_VISIBILITY_TIMEOUT`（代码 3600 秒、模板 21600 秒），`CELERY_RESULT_EXPIRES` 同时控制两类结果（代码/模板 86400 秒，TOML/环境可覆盖）。普通 worker 同样使用 priority 队列顺序。所有共享 broker 的 worker 必须一同配置；延长确认期限会延迟崩溃后重投，恢复依靠持久阶段锁/检查点，而非此参数本身。
 - Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
 - scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
@@ -114,7 +121,7 @@ uv run --group dev pytest
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。验收须说明模型拓扑、样本范围和证据位置。
 - `src/scripts/benchmark_mineru.py` 对真实 PDF 做已预热 SDK 进程压测，记录批量完成、单任务服务和排队耗时；不含 Celery/独立视觉阶段。输出目录必须新建，校验整本页号、图片及 p2 关键表格/checkbox；样本与结果保持私有。脚本退出前显式收尾各进程的 DocVortex 渲染池，避免嵌套 multiprocessing 等待退出。
 - `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 advanced）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
-- 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，统一 CLI 默认在途 2、等待 21600 秒，兼容脚本为 6/800 秒；两者均不作千页容量承诺。已完成合成 400/1000 页及原生 1016 页的整本 SDK 实测，另完成 400 页普通解析、90 页 two-stage 和 111 页普通图片任务的 HTTP/Celery 验收，包含客户端超时续查；不同业务样本仍需容量验收；two-stage 直接 parse_doc 不走 scheduler hard timeout，late ack 仍需核对实际 visibility timeout 及所有共享 broker 的消费者，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
+- 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，统一 CLI 默认在途 2、等待 21600 秒，兼容脚本为 6/800 秒；两者均不作千页容量承诺。已完成合成 400/1000 页及原生 1016 页的整本 SDK 实测，另完成 400 页普通解析、90 页 two-stage 和 111 页普通图片任务的 HTTP/Celery 验收，包含客户端超时续查；不同业务样本仍需容量验收；新持久 two-stage parse 使用独立子进程与 MINERU_TWO_STAGE_HARD_TIMEOUT_SECONDS（默认回退任务预算 1800 秒），普通及 two-stage late ack 仍须核对实际 visibility timeout 与所有共享 broker 的消费者，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
 - 兼容 two-stage 脚本采用滚动在途窗口（`TWO_STAGE_MAX_IN_FLIGHT`，默认 6），输出目录 `.tasks` 原子保存任务 ID/文件摘要/请求参数，重启续查已有任务。查询故障或本地等待超时不重投；只有服务端确认 FAILURE/REVOKED 才有界重试。提交响应丢失时保留 SUBMITTING 并明确停止，不能假定服务器未接收。单输出目录由文件锁限制一个 CLI 写入进程。脚本认证优先环境/.env，再回退本地 TOML 的 FASTAPI.BEARER_TOKEN，不记录令牌。
 - 新批次优先 `uv run python -m src.scripts.batch_parse`，`--mode parse/images/two-stage` 覆盖全部三个异步 API；缺省 advanced、在途 2、等待 21600 秒、尝试 1 次、chunk_type=true、return_txt=false。上传/查询/连接超时独立可配置，HTTPX 流式 multipart；网络阶段超时不是服务端任务期限。普通模式 query 与 two-stage form 自动区分，普通任务 HTTP 500 的 FAILURE/REVOKED 作为终态处理。详见 [统一批量说明](docs/batch-processing.md)。
 - 新 CLI 上传/查询线程上限分别为 `--upload-concurrency=2` / `--query-concurrency=4`，在途窗口包含上传中的文件；仅主线程写 journal。上传从经原摘要校验的匿名快照读取，故障收尾仍保存其他已发请求返回的 ID；identity version 1 保持，改变并发预算允许续跑。幂等键由批次、输入相对身份和尝试次数导出，不含凭证；兼容 requests 脚本保留串行网络行为。

@@ -4,6 +4,8 @@
 
 本文件覆盖 `POST /mineru/task` 和 `POST /mineru_with_images/task`；后者额外进行图片视觉识别。两者使用 Celery app `src.services.celery_app`，分别运行 `mineru.parse` / `mineru.parse_images`，通过同路径的 `GET .../{task_id}` 查询结果。
 
+两个 POST 均支持 `Idempotency-Key`。新任务保存原始输入、完成的整本解析和单图结果；发布结果不明仍返回可恢复 ID，不删除文件。可用统一 `/tasks/{id}/status`、`/result`、`/resume` 做轻量查询、下载与显式阶段恢复，合同见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。普通失败查询仍为 HTTP 500 状态体，成功结果继续省略 null。
+
 环境、模型和 Docker 准备见[部署说明](mineru_4_upgrade_usage.md)。使用本文件接口时需启动普通 worker。
 
 ## Worker 与队列
@@ -13,7 +15,7 @@
 | `urgent` | `queue_urgent` | `CELERY_TASK_URGENT_QUEUE` |
 | 其他值或不传 | `queue_normal` | `CELERY_TASK_MINERU_QUEUE` |
 
-普通 worker 只监听 urgent/normal，不消费 two-stage merge 使用的 `default`。它与 [two-stage](two_stage_task_usage.md) 的解析、视觉和调度队列不同。API 与 worker 必须共享 broker、result backend，以及同一路径下的 `MINERU_TASK_STORAGE_DIR`。
+普通 worker 只监听 urgent/normal，不消费 two-stage merge 使用的 `default`。它与 [two-stage](two_stage_task_usage.md) 的解析、视觉和调度队列不同。API 与 worker 必须共享 broker、result backend，以及同一路径下的 `MINERU_JOB_STORE_DIR`；旧任务另需原 `MINERU_TASK_STORAGE_DIR`。
 
 在仓库根目录启动：
 

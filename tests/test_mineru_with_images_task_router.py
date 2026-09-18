@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
-from src.routers import mineru_with_images_task_router as router
+from src.services import job_store
+from src.services.tasks import mineru_tasks
 
 
 def test_mineru_with_images_task_rejects_markdown(client, monkeypatch):
@@ -11,7 +12,7 @@ def test_mineru_with_images_task_rejects_markdown(client, monkeypatch):
         called = True
         raise AssertionError("task should not be queued for Markdown uploads")
 
-    monkeypatch.setattr(router.run_mineru_with_images_task, "apply_async", fake_apply_async)
+    monkeypatch.setattr(mineru_tasks.run_mineru_with_images_task, "apply_async", fake_apply_async)
 
     response = client.post(
         "/mineru_with_images/task",
@@ -26,12 +27,12 @@ def test_mineru_with_images_task_rejects_markdown(client, monkeypatch):
 def test_mineru_with_images_task_invalid_model_no_longer_returns_422(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_apply_async(*, args, queue):
+    def fake_apply_async(*, args, queue, task_id):
         captured["payload"] = args[0]
         captured["queue"] = queue
         return SimpleNamespace(id="task-123", state="PENDING")
 
-    monkeypatch.setattr(router.run_mineru_with_images_task, "apply_async", fake_apply_async)
+    monkeypatch.setattr(mineru_tasks.run_mineru_with_images_task, "apply_async", fake_apply_async)
 
     response = client.post(
         "/mineru_with_images/task",
@@ -40,6 +41,9 @@ def test_mineru_with_images_task_invalid_model_no_longer_returns_422(client, mon
     )
 
     assert response.status_code == 200
-    assert response.json() == {"task_id": "task-123", "state": "PENDING"}
-    assert captured["payload"]["vision_provider"] == "missing-provider"
-    assert captured["payload"]["vision_model"] == "missing-model"
+    job_id = response.json()["task_id"]
+    assert response.json()["state"] == "PENDING"
+    assert captured["payload"] == {"job_id": job_id, "generation": 0}
+    options = job_store.read_job(job_id)["options"]
+    assert options["vision_provider"] == "missing-provider"
+    assert options["vision_model"] == "missing-model"

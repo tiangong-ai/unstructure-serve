@@ -1,22 +1,18 @@
 import hashlib
-import re
 from typing import Optional
 
-_POSITION_MARKERS = re.compile(r"\[Page\s+\d+\]|(?m:^Image (?:caption|footnote)) \(Page \d+\)")
+VISION_CACHE_CONTEXT_VERSION = 2
 
 
-def vision_request_key(image_digest: str, context: str, *, keep_positions: bool = False) -> str:
+def vision_request_key(image_digest: str, context: str) -> str:
     """Reuse only equal pixels and equal semantic context within one document.
 
-    Default extraction ignores generated page-position metadata. Custom prompts
-    and strict OCR retain it because their interpretation can depend on position.
-    Printed numbers, captions and surrounding prose are never removed from keys.
+    The caller builds context from source blocks, omitting generated positional
+    metadata only when appropriate. This function never rewrites supplied text:
+    literal printed [Page N] references must remain distinct.
     """
-    if not keep_positions:
-        context = _POSITION_MARKERS.sub(
-            lambda m: "" if m.group().startswith("[") else m.group().split(" (Page")[0], context
-        )
-    return hashlib.sha256((image_digest + "\0" + context).encode("utf-8")).hexdigest()
+    payload = f"{VISION_CACHE_CONTEXT_VERSION}\0{image_digest}\0{context}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 DEFAULT_VISION_PROMPT = """You transcribe and organize visible image content. Output only the extracted content in the

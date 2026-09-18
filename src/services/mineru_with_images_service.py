@@ -128,11 +128,13 @@ def list_text(item: Dict) -> str:
     return clean_text(item.get("text", ""))
 
 
-def _format_context_line(page_idx: int, text: str, is_title: bool = False) -> str:
+def _format_context_line(
+    page_idx: int, text: str, is_title: bool = False, *, include_positions: bool = True
+) -> str:
     if not text:
         return ""
     prefixes: List[str] = []
-    if page_idx is not None and page_idx >= 0:
+    if include_positions and page_idx is not None and page_idx >= 0:
         prefixes.append(f"[Page {int(page_idx) + 1}]")
     chunk_marker = "[ChunkType=Title]" if is_title else "[ChunkType=Body]"
     prefixes.append(chunk_marker)
@@ -141,7 +143,9 @@ def _format_context_line(page_idx: int, text: str, is_title: bool = False) -> st
     return text
 
 
-def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
+def get_prev_context(
+    context_elements: List[Dict], cur_idx: int, n: int, *, include_positions: bool = True
+) -> str:
     """获取前 n 个非空上下文块文本，倒序拼接。"""
     if cur_idx is None or cur_idx < 0 or not context_elements:
         return ""
@@ -156,13 +160,16 @@ def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
                     block.get("page_idx", -1),
                     text,
                     block.get("is_title", False),
+                    include_positions=include_positions,
                 )
                 res.insert(0, formatted)
         j -= 1
     return "\n".join(res)
 
 
-def get_next_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
+def get_next_context(
+    context_elements: List[Dict], cur_idx: int, n: int, *, include_positions: bool = True
+) -> str:
     """获取后 n 个非空上下文块文本，正序拼接。"""
     if cur_idx is None or not context_elements:
         return ""
@@ -177,6 +184,7 @@ def get_next_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
                     block.get("page_idx", -1),
                     text,
                     block.get("is_title", False),
+                    include_positions=include_positions,
                 )
                 res.append(formatted)
         j += 1
@@ -244,7 +252,11 @@ def _reindex_blocks(blocks: List[Dict]) -> Dict[int, int]:
 
 
 def _resolve_context_windows(
-    working_blocks: List[Dict], cur_idx: Optional[int], item: Dict
+    working_blocks: List[Dict],
+    cur_idx: Optional[int],
+    item: Dict,
+    *,
+    include_positions: bool = True,
 ) -> Dict[str, str]:
     before_ctx = ""
     after_ctx = ""
@@ -252,8 +264,12 @@ def _resolve_context_windows(
         return {"before": before_ctx, "after": after_ctx}
 
     if cur_idx is not None and 0 <= cur_idx < len(working_blocks):
-        before_ctx = get_prev_context(working_blocks, cur_idx, n=CONTEXT_WINDOW)
-        after_ctx = get_next_context(working_blocks, cur_idx, n=CONTEXT_WINDOW)
+        before_ctx = get_prev_context(
+            working_blocks, cur_idx, n=CONTEXT_WINDOW, include_positions=include_positions
+        )
+        after_ctx = get_next_context(
+            working_blocks, cur_idx, n=CONTEXT_WINDOW, include_positions=include_positions
+        )
         return {"before": before_ctx, "after": after_ctx}
 
     current_page = item.get("page_idx", -1)
@@ -266,15 +282,25 @@ def _resolve_context_windows(
             break
 
     if ref_idx is not None:
-        before_ctx = get_prev_context(working_blocks, ref_idx + 1, n=CONTEXT_WINDOW)
-        after_ctx = get_next_context(working_blocks, ref_idx, n=CONTEXT_WINDOW)
+        before_ctx = get_prev_context(
+            working_blocks, ref_idx + 1, n=CONTEXT_WINDOW, include_positions=include_positions
+        )
+        after_ctx = get_next_context(
+            working_blocks, ref_idx, n=CONTEXT_WINDOW, include_positions=include_positions
+        )
     else:
-        after_ctx = get_next_context(working_blocks, -1, n=CONTEXT_WINDOW)
+        after_ctx = get_next_context(
+            working_blocks, -1, n=CONTEXT_WINDOW, include_positions=include_positions
+        )
     return {"before": before_ctx, "after": after_ctx}
 
 
 def _build_vision_prompt(
-    item: Dict, contexts: Dict[str, str], *, include_image_notes: bool = True
+    item: Dict,
+    contexts: Dict[str, str],
+    *,
+    include_image_notes: bool = True,
+    include_positions: bool = True,
 ) -> Tuple[str, List[Tuple[str, str]]]:
     captions = (
         "\n".join(_image_captions(item, include_generated=False)) if include_image_notes else ""
@@ -282,7 +308,11 @@ def _build_vision_prompt(
     footnotes = "\n".join(_image_footnotes(item)) if include_image_notes else ""
     prompt_parts: List[Tuple[str, str]] = []
     page_idx = item.get("page_idx", -1)
-    page_suffix = f" (Page {int(page_idx) + 1})" if page_idx is not None and page_idx >= 0 else ""
+    page_suffix = (
+        f" (Page {int(page_idx) + 1})"
+        if include_positions and page_idx is not None and page_idx >= 0
+        else ""
+    )
     if captions.strip():
         prompt_parts.append((f"Image caption{page_suffix}", captions))
     if footnotes.strip():
@@ -293,6 +323,21 @@ def _build_vision_prompt(
         prompt_parts.append(("Context after", contexts["after"]))
     prompt_lines = [f"{label}: {value}" for label, value in prompt_parts]
     return "\n".join(prompt_lines), prompt_parts
+
+
+def _build_vision_cache_context(
+    blocks: List[Dict],
+    cur_idx: Optional[int],
+    item: Dict,
+    *,
+    keep_positions: bool = False,
+    include_image_notes: bool = True,
+) -> str:
+    """Omit only metadata we generate; never pattern-rewrite source text."""
+    contexts = _resolve_context_windows(blocks, cur_idx, item, include_positions=keep_positions)
+    return _build_vision_prompt(
+        item, contexts, include_image_notes=include_image_notes, include_positions=keep_positions
+    )[0]
 
 
 def _log_vision_prompt(
@@ -379,8 +424,13 @@ def _run_image_vision(
                 file_hashes[img_path] = hashlib.file_digest(stream, "sha256").hexdigest()
         key = vision_request_key(
             file_hashes[img_path],
-            context_payload,
-            keep_positions=strict_ocr_only or prompt_override is not None,
+            _build_vision_cache_context(
+                context_blocks,
+                cur_idx,
+                item,
+                keep_positions=strict_ocr_only or prompt_override is not None,
+                include_image_notes=include_image_notes,
+            ),
         )
         if key in seen_requests:
             seen_requests[key]["items"].append(item)

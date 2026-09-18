@@ -4,7 +4,7 @@ Requires a local filesystem shared by every process on this host. Messages carry
 IDs only. File locks protect execution; atomic files protect completed outputs.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import fcntl
 import hashlib
 import json
@@ -135,6 +135,16 @@ def update_job(job_id, **values):
         return record
 
 
+def start_job(job_id):
+    """Promote a queued job without overwriting a concurrent terminal state."""
+    with stage_lock(job_id, "metadata"):
+        record = read_job(job_id)
+        if record["state"] == "PENDING":
+            record.update(state="STARTED", updated_at=time.time())
+            atomic_json(job_dir(job_id) / "job.json", record)
+        return record
+
+
 def create_job(mode, source, options, *, idempotency_key=None):
     if mode not in {"parse", "images", "two-stage"}:
         raise ValueError("Invalid job mode")
@@ -175,6 +185,11 @@ def create_job(mode, source, options, *, idempotency_key=None):
             with target.open("rb") as stream:
                 copied_digest = hashlib.file_digest(stream, "sha256").hexdigest()
                 os.fsync(stream.fileno())
+            fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
             if copied_digest != digest:
                 raise JobConflict("Input changed while preparing the job")
             now = time.time()
@@ -279,10 +294,14 @@ def publish_job(job_id, publisher):
             return record
         try:
             publisher(record)
+            return update_job(job_id, publication="published")
         except Exception as exc:
-            update_job(job_id, publication="uncertain")
+            # A broker response or the subsequent metadata write may fail after
+            # acceptance. Always preserve the known ID in the API error even
+            # when the filesystem cannot record the uncertain state.
+            with suppress(OSError):
+                update_job(job_id, publication="uncertain")
             raise PublishUncertain(job_id) from exc
-        return update_job(job_id, publication="published")
 
 
 def resume_job(job_id):
@@ -308,6 +327,13 @@ def fail_job(job_id, exc):
         update_job(job_id, state="FAILURE", error=f"{type(exc).__name__}: {exc}")
 
 
+def retention_timestamp(record):
+    marker = job_dir(record["job_id"]) / "complete.json"
+    if record["state"] != "EXPIRED" and marker.is_file():
+        return read_json(marker)["completed_at"]
+    return record["updated_at"]
+
+
 def collect_job(job_id, *, retention_seconds):
     if retention_seconds < 0:
         raise ValueError("retention_seconds must be nonnegative")
@@ -316,7 +342,7 @@ def collect_job(job_id, *, retention_seconds):
             record = read_job(job_id)
             if status(job_id)["state"] not in {"SUCCESS", "FAILURE"}:
                 return False
-            if time.time() - record["updated_at"] < retention_seconds:
+            if time.time() - retention_timestamp(record) < retention_seconds:
                 return False
             # Keep the stable identity tombstone, so a reused key never silently resubmits.
             update_job(job_id, state="EXPIRED", stage="expired")

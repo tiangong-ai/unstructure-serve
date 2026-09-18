@@ -69,9 +69,9 @@ def sanitize_vision_text(text: str, *, strip_boilerplate: bool = True) -> str:
         if cleaned.lower().startswith("<think>"):
             raise ValueError("Incomplete vision reasoning block")
         cleaned = _BOILERPLATE_PREFIX_RE.sub("", cleaned)
-    cleaned = _IMAGE_PREFIX_RE.sub("", cleaned)
-    cleaned = _PAGE_MARKER_RE.sub("", cleaned)
-    cleaned = _CHUNK_MARKER_RE.sub("", cleaned)
+        cleaned = _IMAGE_PREFIX_RE.sub("", cleaned)
+        cleaned = _PAGE_MARKER_RE.sub("", cleaned)
+        cleaned = _CHUNK_MARKER_RE.sub("", cleaned)
     lines = [line.strip() for line in cleaned.splitlines()]
     result = "\n".join(lines).strip()
     if strip_boilerplate and not result:

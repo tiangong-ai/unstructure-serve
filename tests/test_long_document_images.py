@@ -86,10 +86,9 @@ def test_position_metadata_reuse_keeps_printed_context_and_custom_prompts():
 
     first = "Image caption (Page 1): measured 52%\n[Page 1] literal Page 4"
     second = first.replace("(Page 1)", "(Page 9)").replace("[Page 1]", "[Page 9]")
-    assert vision_request_key("pixels", first) == vision_request_key("pixels", second)
-    assert vision_request_key("pixels", first) != vision_request_key(
-        "pixels", second, keep_positions=True
-    )
+    # The hash no longer guesses which substrings are generated metadata.
+    # Callers construct position-free context from source blocks when safe.
+    assert vision_request_key("pixels", first) != vision_request_key("pixels", second)
     assert vision_request_key("pixels", first) != vision_request_key(
         "pixels", first.replace("52%", "53%")
     )

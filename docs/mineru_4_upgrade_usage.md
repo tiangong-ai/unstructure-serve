@@ -51,7 +51,9 @@ uv run mineru-kit models verify --tier basic --small-backend onnx
 | MINERU_SCHEDULER_WORKERS / GPU_IDS | 模板 3 / 0 | 每个应用调度池的派发进程数 / 池标识；不控制 Docker GPU |
 | CELERY_BROKER_URL / CELERY_RESULT_BACKEND | 模板为本机 Redis DB 0 | API 与 worker 必须一致 |
 | CELERY_VISIBILITY_TIMEOUT / CELERY_RESULT_EXPIRES | 模板 21600 / 86400 秒 | 两个 app 共用的 Redis 消息确认期限 / 结果保留时间；不是任务执行期限 |
-| MINERU_TASK_STORAGE_DIR | 未设置时使用系统临时目录中的 tiangong_mineru_tasks | API 与 worker 共用上传工作区 |
+| MINERU_TASK_STORAGE_DIR | 未设置时使用系统临时目录中的 tiangong_mineru_tasks | 旧任务临时工作区 |
+| MINERU_JOB_STORE_DIR | 未设置时使用仓库 output/jobs | 新任务的持久输入、检查点和结果，所有 API/worker 共用 |
+| MINERU_VISION_WAVE_SIZE | 代码及模板 32 | two-stage 每波派发的缺失图片数 |
 | VLLM_BASE_URLS / VISION_* | 按部署填写 | 独立图片描述模型；采样与并发见调优指南 |
 
 HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 backend 仅用于映射档位，不恢复本机大模型引擎。完整依赖维护方法见[依赖指南](dependencies.md)。
@@ -61,9 +63,34 @@ HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 ba
 - scheduler 的全局 hard timeout 代码缺省为 600 秒；.env.example 将普通/图片解析设为 1800 秒。API PM2 env 也显式设为 1800 秒；普通 worker 读取自身环境及 .env，不能从 API 配置推定其有效值。
 - 科研 API 模板的 HTTP 等待为 110 秒、子进程 hard timeout 为 300 秒；Office 转换模板为 600 秒。
 - Gunicorn timeout/graceful_timeout 缺省为 1900 秒，API PM2 停止窗口为 1900 秒。worker PM2 停止窗口也为 1900 秒，模型 PM2 为 70 秒、容器为 60 秒。
-- two-stage parse 直接调用 parse_doc，不走 scheduler 的 hard timeout；客户端等待时间和 PM2 停止窗口都不是其执行期限。千页任务还需检查消息确认和结果保存期限，见[长任务准入](performance-tuning.md#12-4001000-页整本批量的专项准入)。
+- 持久 two-stage 的转换/parse 通过隔离子进程执行，MINERU_TWO_STAGE_HARD_TIMEOUT_SECONDS 缺省回退任务预算 1800 秒；普通/图片任务分别读取对应 hard timeout。该预算包含排队槽位和结果传输，不含所有后续图片请求；客户端等待和 PM2 停止窗口均不能替代执行期限。千页任务还需检查消息确认和结果保存期限，见[长任务准入](performance-tuning.md#12-4001000-页整本批量的专项准入)。
 
 ## 启动与维护
+
+### 持久任务恢复与磁盘保留
+
+新异步任务将原始输入、整本解析检查点、单图结果及最终业务 JSON 保存在 `MINERU_JOB_STORE_DIR`，缺省仓库 `output/jobs`。部署应使用可靠持久磁盘，API 和全部 worker 解析到同一路径；备份时包含该目录。旧任务仍使用原临时工作区和 Redis 结果，不自动迁移。
+
+恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以复用解析及已完成图片。模型、默认 prompt、采样或其他执行配置变化会拒绝复用不匹配的检查点；应恢复原配置再续算，或明确创建新任务。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
+
+```bash
+# 仅显示身份、状态和阶段，不打印原文、请求参数或错误正文
+uv run python -m src.scripts.manage_jobs list
+
+# 已保存任务但 broker 发布结果未确认：沿用原代次重发
+uv run python -m src.scripts.manage_jobs recover "$TASK_ID"
+
+# 修复失败原因并确认没有活跃阶段后：增加代次，复用完成阶段
+uv run python -m src.scripts.manage_jobs resume "$TASK_ID"
+
+# 默认仅预览；核对保留策略与已下载结果后再 --apply
+uv run python -m src.scripts.manage_jobs gc --retention-days 7
+uv run python -m src.scripts.manage_jobs gc --retention-days 7 --apply
+```
+
+recover 不会重新提交已标记 published 的任务；需要显式恢复时用 resume。resume 遇到活跃阶段、已成功或已过期任务会拒绝，不是取消接口。broker 仍不可用时保留已知任务身份，恢复连接后再处理。
+
+清理仅处理超过保留期的 SUCCESS/FAILURE，执行中或下载中的共享租约会阻止删除；保留身份墓碑，避免旧幂等键意外创建新任务。默认未配置自动定时清理；需要周期执行时由运维按容量设置，不能无差别删除共享目录。失败且需要续算的任务应在保留期内恢复。Redis 的 `CELERY_RESULT_EXPIRES` 控制阶段引用/chord 与旧任务结果，不控制新任务的磁盘保留期。
 
 统一入口为 deploy/manage.sh。start 跳过已 online/launching 的组件；修改代码或配置后使用 restart。配置从 deploy/pm2 的模板读取，日志进入 output/logs。
 

@@ -25,8 +25,10 @@ flowchart LR
 - `gpu_scheduler.py` 为同步/普通任务提供独立解析子进程、hard timeout 和进程组收尾。Future 用异步包装等待；HTTP 超时后先保留源文件，任务结束再删除。
 - `parse_capacity.py` 在所有本机解析入口共享 Linux 文件锁容量。API worker 数量只改变 HTTP 容量；缺省解析上限仍为 3。不同机器/不共享锁目录的容器不受同一上限约束。
 - `mineru_service_full.py` 是上游 SDK 适配层，保存资产后归一化业务字段、页码、阅读顺序与 checkbox。新 MinerU 输出变化优先在此吸收。
-- Office 转换的执行位置不同：同步和 two-stage 在解析/入队前转换，普通任务在 worker 内转换；图中为逻辑阶段，不能据此推定提交耗时。
-- two-stage 的 parse/dispatch/vision/merge 是独立阶段，使用 chord 汇总，不在 Celery task 内阻塞等待其他 task。独立图片模型的并发与解析槽位分开。
+- Office 转换的执行位置不同：同步在解析前转换，三个持久异步入口均在隔离的 parse 阶段转换；图中为逻辑阶段，不能据此推定提交耗时。
+- two-stage 的 parse/dispatch/vision/merge 是独立阶段，队列仅传任务与图片引用，全文和检查点保存在持久目录；默认每波 32 张缺失图片，用 chord 触发下一波，最后合并。任务内不阻塞等待其他 task。独立图片模型的并发与解析槽位分开。
+- `job_store.py` 管理输入身份、文件锁、原子完成标记及过期墓碑；`durable_pipeline.py` 管理整本解析/逐图检查点和执行配置摘要。`job_submission.py` 负责保存后发布，HTTP 发布结果不明也保留已知 ID；`job_router.py` 提供轻量状态、流式结果和显式恢复。新代次拒绝旧消息写入，恢复不删除已完成阶段。
+- vLLM 图片调用通过 `vision_capacity.py` 共用本机端点容量、轮换与故障冷却；不同 API/worker 的线程窗口不能绕过相同端点的共享上限。配置及锁目录必须一致；跨主机仍需独立协调设计。
 
 ## 目录
 

@@ -2,26 +2,20 @@
 
 import json
 import os
-import shutil
-import uuid
 from enum import Enum
-from pathlib import Path
 from typing import Optional
 
 from celery import states
 from celery.result import AsyncResult
-from starlette.concurrency import run_in_threadpool
 
-from src.utils.upload_io import persist_upload
+from src.services.job_submission import durable_payload, submit_upload
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 
-from src.config.config import MINERU_TASK_STORAGE_DIR
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.two_stage_pipeline import (
     celery_app,
     resolve_two_stage_queues,
-    submit_two_stage_job,
 )
 from src.services.vision_service import (
     AVAILABLE_MODEL_VALUES,
@@ -32,7 +26,6 @@ from src.services.vision_service import (
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
     format_extension_list,
-    maybe_convert_to_pdf,
 )
 from src.utils.mineru_backend import MinerUTier
 from src.utils.mineru_support import mineru_supported_extensions
@@ -72,21 +65,6 @@ def _extract_unacked_queue_name(raw_entry: bytes | str) -> Optional[str]:
     if isinstance(queue_name, str) and queue_name:
         return queue_name
     return None
-
-
-def _normalize_filename(filename: str, fallback_ext: str) -> str:
-    candidate = os.path.basename(filename or "")
-    if candidate:
-        return candidate
-    return f"upload{fallback_ext}"
-
-
-def _ensure_workspace() -> Path:
-    root = Path(MINERU_TASK_STORAGE_DIR)
-    root.mkdir(parents=True, exist_ok=True)
-    workspace = root / uuid.uuid4().hex
-    workspace.mkdir(parents=True, exist_ok=False)
-    return workspace
 
 
 def _form_provider(
@@ -130,6 +108,7 @@ def _form_model(
 )
 async def two_stage_task(
     file: UploadFile = File(...),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     tier: MinerUTier = Form(
         MinerUTier.ADVANCED,
         description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
@@ -163,60 +142,20 @@ async def two_stage_task(
 
     backend_value = tier.value
 
-    workspace = _ensure_workspace()
-    target_filename = _normalize_filename(filename, file_ext)
-    target_path = workspace / target_filename
-
-    try:
-        await run_in_threadpool(persist_upload, file, target_path)
-    except Exception:
-        shutil.rmtree(workspace, ignore_errors=True)
-        raise HTTPException(
-            status_code=500, detail="Failed to persist uploaded file for Celery job."
-        )
-
-    processing_path = str(target_path)
-    extra_cleanup: set[str] = set()
-
-    if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
-        try:
-            processing_path, cleanup_paths = await run_in_threadpool(
-                maybe_convert_to_pdf, str(target_path), file_ext
-            )
-            extra_cleanup.update(cleanup_paths)
-        except Exception as exc:
-            shutil.rmtree(workspace, ignore_errors=True)
-            raise HTTPException(status_code=500, detail=f"Office conversion failed: {exc}") from exc
-
-    queue_names = resolve_two_stage_queues(priority)
-    try:
-        async_result = await run_in_threadpool(
-            submit_two_stage_job,
-            processing_path,
-            backend=backend_value,
-            chunk_type=chunk_type,
-            return_txt=return_txt,
-            provider=provider,
-            model=model,
-            prompt=prompt,
-            workspace=str(workspace),
-            cleanup_source=False,
-            extra_cleanup=list(extra_cleanup),
-            parse_queue=queue_names["parse"],
-            vision_queue=queue_names["vision"],
-            dispatch_queue=queue_names["dispatch"],
-            merge_queue=queue_names["merge"],
-        )
-    except Exception as exc:
-        shutil.rmtree(workspace, ignore_errors=True)
-        raise HTTPException(
-            status_code=503, detail=f"Failed to enqueue two-stage task: {exc}"
-        ) from exc
-
-    return {
-        "task_id": async_result.id,
-        "state": await run_in_threadpool(lambda: async_result.state),
-    }
+    return await submit_upload(
+        file,
+        "two-stage",
+        {
+            "backend": backend_value,
+            "chunk_type": chunk_type,
+            "return_txt": return_txt,
+            "priority": priority.value,
+            "vision_provider": provider.value if provider else None,
+            "vision_model": model.value if model else None,
+            "prompt": prompt.strip() if prompt and prompt.strip() else None,
+        },
+        idempotency_key,
+    )
 
 
 @router.get(
@@ -224,6 +163,18 @@ async def two_stage_task(
     summary="Fetch two-stage MinerU+vision task status/result",
 )
 def two_stage_task_status(task_id: str):
+    stored = durable_payload(task_id)
+    if stored is not None:
+        state = stored["state"]
+        if state == states.SUCCESS:
+            return {
+                "task_id": task_id,
+                "state": state,
+                "result": ResponseWithPageNum(**stored["result"]),
+            }
+        if state in {states.FAILURE, states.REVOKED}:
+            return {"task_id": task_id, "state": state, "error": stored.get("error", state)}
+        return {"task_id": task_id, "state": state}
     try:
         async_result = AsyncResult(task_id, app=celery_app)
         state = async_result.state

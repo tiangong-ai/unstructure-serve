@@ -11,11 +11,11 @@ from starlette.datastructures import UploadFile
 from src.routers import (
     mineru_router,
     mineru_sci_router,
-    mineru_task_router,
     mineru_with_images_router,
-    mineru_with_images_task_router,
-    two_stage_router,
 )
+
+
+from src.services import job_store, job_submission
 
 
 @pytest.mark.parametrize(
@@ -51,23 +51,10 @@ def test_pdf_upload_never_materializes_whole_file(client, monkeypatch, tmp_path,
     for module in (mineru_router, mineru_sci_router, mineru_with_images_router):
         monkeypatch.setattr(module, "scheduler", SimpleNamespace(submit=submit))
 
-    def enqueue(*, args, queue):
-        captured.append(Path(args[0]["source_path"]).read_bytes())
-        return SimpleNamespace(id="upload-test", state="PENDING")
+    def publish(record):
+        captured.append(job_store.source_path(record["job_id"]).read_bytes())
 
-    for module, task_name in [
-        (mineru_task_router, "run_mineru_task"),
-        (mineru_with_images_task_router, "run_mineru_with_images_task"),
-    ]:
-        monkeypatch.setattr(module, "MINERU_TASK_STORAGE_DIR", str(tmp_path))
-        monkeypatch.setattr(module, task_name, SimpleNamespace(apply_async=enqueue))
-
-    def two_stage_submit(path, **kwargs):
-        captured.append(Path(path).read_bytes())
-        return SimpleNamespace(id="upload-test", state="PENDING")
-
-    monkeypatch.setattr(two_stage_router, "MINERU_TASK_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setattr(two_stage_router, "submit_two_stage_job", two_stage_submit)
+    monkeypatch.setattr(job_submission, "publish_record", publish)
     with source.open("rb") as file:
         response = client.post(endpoint, files={"file": ("p2.pdf", file, "application/pdf")})
     assert response.status_code == 200, response.text
@@ -89,16 +76,7 @@ def test_broker_submission_runs_outside_event_loop(client, monkeypatch, tmp_path
             called_in_loop.append(True)
         return SimpleNamespace(id="nonblocking-test", state="PENDING")
 
-    for module, task_name in [
-        (mineru_task_router, "run_mineru_task"),
-        (mineru_with_images_task_router, "run_mineru_with_images_task"),
-    ]:
-        monkeypatch.setattr(module, "MINERU_TASK_STORAGE_DIR", str(tmp_path))
-        monkeypatch.setattr(
-            module, task_name, SimpleNamespace(apply_async=lambda **kw: assert_thread())
-        )
-    monkeypatch.setattr(two_stage_router, "MINERU_TASK_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setattr(two_stage_router, "submit_two_stage_job", lambda *a, **kw: assert_thread())
+    monkeypatch.setattr(job_submission, "publish_record", lambda record: assert_thread())
     response = client.post(endpoint, files={"file": ("p2.pdf", b"%PDF-1.4", "application/pdf")})
     assert response.status_code == 200, response.text
     assert called_in_loop == [False]

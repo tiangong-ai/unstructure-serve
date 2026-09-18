@@ -3,9 +3,10 @@
 import importlib
 from concurrent.futures import Future
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+
+from src.services import job_store, job_submission
 
 ROUTES = (
     ("/mineru", "mineru_router"),
@@ -39,27 +40,12 @@ def submissions(client, monkeypatch, tmp_path, route):
             return future
 
         monkeypatch.setattr(module.scheduler, "submit", submit)
-    elif route[0] == "/two_stage/task":
-
-        def submit(source, **kwargs):
-            record(source, kwargs.get("backend"))
-            return SimpleNamespace(id="tier-test", state="PENDING")
-
-        monkeypatch.setattr(module, "_ensure_workspace", lambda: tmp_path)
-        monkeypatch.setattr(module, "submit_two_stage_job", submit)
     else:
 
-        def apply_async(*, args, queue):
-            record(args[0]["source_path"], args[0]["backend_value"])
-            return SimpleNamespace(id="tier-test", state="PENDING")
+        def publish(record_data):
+            record(job_store.source_path(record_data["job_id"]), record_data["options"]["backend"])
 
-        task = (
-            module.run_mineru_task
-            if route[0] == "/mineru/task"
-            else module.run_mineru_with_images_task
-        )
-        monkeypatch.setattr(module, "_ensure_storage_root", lambda: tmp_path)
-        monkeypatch.setattr(task, "apply_async", apply_async)
+        monkeypatch.setattr(job_submission, "publish_record", publish)
     return captured
 
 

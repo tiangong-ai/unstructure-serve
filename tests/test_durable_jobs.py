@@ -1,4 +1,5 @@
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -113,3 +114,39 @@ def test_resume_refuses_inflight_publication(store):
     with job_store.stage_lock(job["job_id"], "publication"):
         with pytest.raises(job_store.JobBusy):
             job_store.resume_job(job["job_id"])
+
+
+@pytest.mark.parametrize("broker_fails", [False, True])
+def test_publishing_keeps_known_id_when_status_disk_write_fails(store, monkeypatch, broker_fails):
+    job = create(store)
+
+    def publisher(_record):
+        if broker_fails:
+            raise ConnectionError("broker response lost")
+
+    def disk_full(*_args, **_kwargs):
+        raise OSError("metadata volume full")
+
+    monkeypatch.setattr(job_store, "update_job", disk_full)
+    with pytest.raises(job_store.PublishUncertain) as error:
+        job_store.publish_job(job["job_id"], publisher)
+    assert error.value.job_id == job["job_id"]
+    assert job_store.source_path(job["job_id"]).is_file()
+
+
+def test_retention_uses_completion_time_even_if_metadata_stays_old(store, monkeypatch):
+    job = create(store)
+    job["updated_at"] = time.time() - 10 * 86400
+    job_store.atomic_json(job_store.job_dir(job["job_id"]) / "job.json", job)
+    monkeypatch.setattr(job_store, "update_job", lambda *_a, **_k: None)
+    job_store.save_result(job["job_id"], {"result": []})
+    assert not job_store.collect_job(job["job_id"], retention_seconds=7 * 86400)
+
+
+def test_start_does_not_clear_a_concurrent_failure(store):
+    job = create(store)
+    job_store.start_job(job["job_id"])
+    assert job_store.status(job["job_id"])["state"] == "STARTED"
+    job_store.fail_job(job["job_id"], RuntimeError("other image failed"))
+    job_store.start_job(job["job_id"])
+    assert job_store.status(job["job_id"])["state"] == "FAILURE"

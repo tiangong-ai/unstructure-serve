@@ -1,9 +1,10 @@
 """
 Two-stage MinerU+vision Celery pipeline (解析队列 + 视觉队列 + 汇总).
 
-- 解析任务只占用 GPU 队列，产出 content_list + 图片元数据，不做视觉调用。
-- 视觉任务在独立队列并发调用 vision_completion。
-- merge 任务按 seq 回填视觉结果并清理临时目录。
+- 持久任务将 content_list/图片清单写入检查点，消息只携带任务引用。
+- 视觉任务在独立队列分波调用 vision_completion，完成结果按图片保存。
+- merge 按 seq 回填并原子保存最终结果，持久目录按保留策略清理。
+- 旧 payload 分支仅用于升级前已发布消息的兼容。
 
 环境变量：
   CELERY_TASK_PARSE_QUEUE（默认使用 CELERY_TASK_MINERU_QUEUE 或 queue_parse_gpu）
@@ -21,11 +22,11 @@ import hashlib
 import os
 import shutil
 import uuid
-from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
 from celery import Celery, chord, chain
+from celery.exceptions import Ignore
 from loguru import logger
 from PIL import Image
 
@@ -41,7 +42,10 @@ from src.models.models import TextElementWithPageNum
 from src.services.celery_runtime import runtime_options
 from src.services.mineru_service_full import parse_doc
 from src.services.mineru_with_images_service import (
+    _image_captions,
+    _image_footnotes,
     _build_context_blocks,
+    _build_vision_cache_context,
     _build_vision_prompt,
     _reindex_blocks,
     _resolve_context_windows,
@@ -58,10 +62,8 @@ MIN_IMAGE_AREA_RATIO = 0.01
 MIN_IMAGE_AREA_RATIO_WITH_CAPTION = 0.005
 MAX_IMAGE_ASPECT_RATIO = 10.0
 MIN_IMAGE_BYTES = 10 * 1024
-MIN_IMAGE_BYTES_WITH_CAPTION = 2 * 1024
 MIN_IMAGE_MIN_DIM = 96
 MIN_IMAGE_PIXEL_AREA = MIN_IMAGE_MIN_DIM * MIN_IMAGE_MIN_DIM
-PER_PAGE_IMAGE_LIMIT = 5
 
 
 def _queue_env(name: str, default: str) -> str:
@@ -141,7 +143,6 @@ def _build_image_jobs(
     idx_map = _reindex_blocks(context_blocks)
     image_jobs: List[Dict] = []
     seq = 1
-    per_page_counts: Dict[int, int] = defaultdict(int)
     seen_requests: Dict[str, int] = {}
 
     def _extract_bbox(item: Dict) -> Optional[tuple[float, float, float, float]]:
@@ -231,7 +232,7 @@ def _build_image_jobs(
             raise FileNotFoundError(f"Missing image asset: {img_path}")
 
         page_number = int(item.get("page_idx", 0)) + 1
-        has_caption = bool(item.get("img_caption") or item.get("img_footnote"))
+        has_caption = bool(_image_captions(item, include_generated=False) or _image_footnotes(item))
         area_ratio = _image_area_ratio(item)
         aspect_ratio = _aspect_ratio(item)
         dim_w, dim_h = _image_dims(img_path)
@@ -290,8 +291,10 @@ def _build_image_jobs(
                     )
                     continue
 
-        min_bytes = MIN_IMAGE_BYTES_WITH_CAPTION if has_caption else MIN_IMAGE_BYTES
-        if file_size and file_size < min_bytes and not has_caption:
+        # Compression is not semantic content: a printed caption can identify
+        # a useful sparse diagram even when PNG encodes it in under 2 KiB.
+        min_bytes = MIN_IMAGE_BYTES
+        if file_size < min_bytes and not has_caption:
             logger.debug(
                 "Skip image (size {}B < {}B) at {} page {}",
                 file_size,
@@ -301,25 +304,20 @@ def _build_image_jobs(
             )
             continue
 
-        if per_page_counts[page_number] >= PER_PAGE_IMAGE_LIMIT:
-            logger.debug(
-                "Skip image due to per-page limit {} at page {} ({})",
-                PER_PAGE_IMAGE_LIMIT,
-                page_number,
-                img_path,
-            )
-            continue
-
         cur_idx = idx_map.get(id(item))
         contexts = _resolve_context_windows(context_blocks, cur_idx, item)
         context_payload, _ = _build_vision_prompt(item, contexts)
 
         key = (
-            vision_request_key(file_hash, context_payload, keep_positions=keep_positions)
+            vision_request_key(
+                file_hash,
+                _build_vision_cache_context(
+                    context_blocks, cur_idx, item, keep_positions=keep_positions
+                ),
+            )
             if file_hash
             else None
         )
-        per_page_counts[page_number] += 1
         if key in seen_requests:
             item["__image_seq"] = seen_requests[key]
             continue
@@ -435,6 +433,10 @@ def _normalize_prompt(prompt: Optional[str]) -> Optional[str]:
 @celery_app.task(name="two_stage.parse", acks_late=True)
 def parse_task(payload: Dict[str, object]) -> Dict[str, object]:
     """Stage 1: MinerU parse only, no vision calls."""
+    if "job_id" in payload:
+        from src.services.durable_pipeline import ensure_parsed
+
+        return ensure_parsed(payload)
     source_path = Path(payload["source_path"])
     backend = payload.get("backend")
     chunk_type = bool(payload.get("chunk_type"))
@@ -505,6 +507,10 @@ def vision_task(
     prompt: Optional[str] = None,
 ) -> Dict[str, object]:  # type: ignore[override]
     """Stage 2 header: run vision model for one image."""
+    if "job_id" in job:
+        from src.services.durable_pipeline import run_vision
+
+        return run_vision(job)
     seq = job.get("seq")
     prompt_override = _normalize_prompt(prompt)
     try:
@@ -530,6 +536,10 @@ def merge_task(
     vision_results: Sequence[Dict], parse_payload: Dict[str, object]
 ) -> Dict[str, object]:
     """Stage 2 body: merge vision outputs back into parsed content."""
+    if "job_id" in parse_payload:
+        from src.services.durable_pipeline import assemble
+
+        return assemble(parse_payload)
     items, txt_text = _merge_content(
         parse_payload["content_list"],
         vision_results,
@@ -566,8 +576,37 @@ def dispatch(
     prompt: Optional[str] = None,
     vision_queue: Optional[str] = None,
     merge_queue: Optional[str] = None,
+    dispatch_queue: Optional[str] = None,
 ) -> Dict[str, object]:  # type: ignore[override]
     """Kick off vision fan-out + merge without blocking inside a task."""
+    if "job_id" in parse_payload:
+        from src.services.durable_pipeline import mark_failure, pending_vision
+
+        ref = {"job_id": parse_payload["job_id"], "generation": parse_payload["generation"]}
+        try:
+            pending = pending_vision(ref, limit=int(os.getenv("MINERU_VISION_WAVE_SIZE", "32")))
+            if isinstance(pending, dict) and pending.get("stale"):
+                return pending
+            if not pending:
+                raise self.replace(merge_task.s([], ref).set(queue=merge_queue or MERGE_QUEUE))
+            header = [
+                vision_task.s({**ref, "seq": seq}).set(queue=vision_queue or VISION_QUEUE)
+                for seq in pending
+            ]
+            callback = dispatch.si(
+                ref,
+                vision_queue=vision_queue,
+                merge_queue=merge_queue,
+                dispatch_queue=dispatch_queue,
+            ).set(queue=dispatch_queue or DISPATCH_QUEUE)
+            # Immutable callback ignores per-image results; each wave reads
+            # durable files, so a retry schedules only missing work.
+            raise self.replace(chord(header, callback))
+        except Ignore:
+            raise  # Celery's successful replacement control flow.
+        except Exception as exc:
+            mark_failure(ref, exc)
+            raise
     image_jobs: List[Dict[str, object]] = parse_payload.get("image_jobs") or []
     prompt_override = _normalize_prompt(prompt)
     resolved_vision_queue = vision_queue or VISION_QUEUE
@@ -626,5 +665,26 @@ def submit_two_stage_job(
             vision_queue=resolved_vision_queue,
             merge_queue=resolved_merge_queue,
         ).set(queue=resolved_dispatch_queue),
+    )
+    return workflow.apply_async()
+
+
+def submit_durable_two_stage(
+    ref: Dict[str, object],
+    *,
+    parse_queue: Optional[str] = None,
+    vision_queue: Optional[str] = None,
+    dispatch_queue: Optional[str] = None,
+    merge_queue: Optional[str] = None,
+):
+    """Publish a reference-only workflow whose final Celery ID is the job ID."""
+    reference = {"job_id": ref["job_id"], "generation": ref["generation"]}
+    workflow = chain(
+        parse_task.si(reference).set(queue=parse_queue or PARSE_QUEUE),
+        dispatch.s(
+            vision_queue=vision_queue or VISION_QUEUE,
+            merge_queue=merge_queue or MERGE_QUEUE,
+            dispatch_queue=dispatch_queue or DISPATCH_QUEUE,
+        ).set(queue=dispatch_queue or DISPATCH_QUEUE, task_id=reference["job_id"]),
     )
     return workflow.apply_async()

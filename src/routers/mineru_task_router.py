@@ -1,17 +1,12 @@
 import os
-import shutil
-import uuid
-from pathlib import Path
 
 from celery import states
 from celery.result import AsyncResult
-from starlette.concurrency import run_in_threadpool
 
-from src.utils.upload_io import persist_upload
+from src.services.job_submission import durable_payload, submit_upload
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 
-from src.config.config import MINERU_TASK_STORAGE_DIR
 from src.models.models import (
     MineruTaskStatusResponse,
     MineruTaskSubmitResponse,
@@ -19,7 +14,6 @@ from src.models.models import (
     TextElementWithPageNum,
 )
 from src.services.celery_app import celery_app
-from src.services.tasks.mineru_tasks import run_mineru_task
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
     format_extension_list,
@@ -27,26 +21,12 @@ from src.utils.file_conversion import (
 from src.utils.mineru_backend import MinerUTier
 from src.utils.mineru_support import mineru_supported_extensions
 from src.utils.response_utils import json_response, pretty_response_flag
-from src.config.config import CELERY_TASK_MINERU_QUEUE, CELERY_TASK_URGENT_QUEUE
 
 router = APIRouter()
 
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
 ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
-
-
-def _normalize_filename(filename: str, fallback_ext: str) -> str:
-    candidate = os.path.basename(filename or "")
-    if candidate:
-        return candidate
-    return f"upload{fallback_ext}"
-
-
-def _ensure_storage_root() -> Path:
-    storage_root = Path(MINERU_TASK_STORAGE_DIR)
-    storage_root.mkdir(parents=True, exist_ok=True)
-    return storage_root
 
 
 @router.post(
@@ -61,6 +41,7 @@ def _ensure_storage_root() -> Path:
 )
 async def mineru_task(
     file: UploadFile = File(...),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     tier: MinerUTier = Form(
         MinerUTier.ADVANCED,
         description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
@@ -89,50 +70,18 @@ async def mineru_task(
         )
     backend_value = tier.value
 
-    storage_root = _ensure_storage_root()
-    workspace = storage_root / uuid.uuid4().hex
-    workspace.mkdir(parents=True, exist_ok=False)
-    target_filename = _normalize_filename(filename, file_ext)
-    target_path = workspace / target_filename
-
-    try:
-        await run_in_threadpool(persist_upload, file, target_path)
-    except Exception:
-        shutil.rmtree(workspace, ignore_errors=True)
-        raise HTTPException(
-            status_code=500, detail="Failed to persist uploaded file for Celery job."
-        )
-
-    queue_name = (
-        CELERY_TASK_URGENT_QUEUE if priority.lower() == "urgent" else CELERY_TASK_MINERU_QUEUE
+    submission = await submit_upload(
+        file,
+        "parse",
+        {
+            "backend": backend_value,
+            "chunk_type": chunk_type,
+            "return_txt": return_txt,
+            "priority": "urgent" if priority.lower() == "urgent" else "normal",
+        },
+        idempotency_key,
     )
-
-    try:
-        async_result = await run_in_threadpool(
-            run_mineru_task.apply_async,
-            args=[
-                {
-                    "source_path": str(target_path),
-                    "workspace": str(workspace),
-                    "original_filename": filename,
-                    "chunk_type": chunk_type,
-                    "return_txt": return_txt,
-                    "backend_value": backend_value,
-                }
-            ],
-            queue=queue_name,
-        )
-    except Exception as exc:
-        # Clean up on enqueue failure
-        shutil.rmtree(workspace, ignore_errors=True)
-        raise HTTPException(
-            status_code=503, detail=f"Failed to enqueue MinerU task: {exc}"
-        ) from exc
-
-    response_model = MineruTaskSubmitResponse(
-        task_id=async_result.id, state=await run_in_threadpool(lambda: async_result.state)
-    )
-    return json_response(response_model, pretty)
+    return json_response(MineruTaskSubmitResponse(**submission), pretty)
 
 
 @router.get(
@@ -141,6 +90,18 @@ async def mineru_task(
     response_model=MineruTaskStatusResponse,
 )
 def mineru_task_status(task_id: str, pretty: bool = Depends(pretty_response_flag)):
+    stored = durable_payload(task_id)
+    if stored is not None:
+        state = stored["state"]
+        response = MineruTaskStatusResponse(
+            task_id=task_id,
+            state=state,
+            result=ResponseWithPageNum(**stored["result"]) if state == states.SUCCESS else None,
+            error=stored.get("error"),
+        )
+        return json_response(
+            response, pretty, status_code=500 if state in {states.FAILURE, states.REVOKED} else 200
+        )
     try:
         async_result = AsyncResult(task_id, app=celery_app)
         state = async_result.state

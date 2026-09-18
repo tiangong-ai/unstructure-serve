@@ -4,7 +4,9 @@
 
 入口为 `POST /two_stage/task`、`GET /two_stage/task/{task_id}` 和 `GET /two_stage/queue_status`，使用 Celery app `src.services.two_stage_pipeline`。它与[普通异步任务](mineru_with_images_task_usage.md)分别使用自己的任务和队列。
 
-处理顺序：保存文件 → MinerU parse → dispatch 分发图片 → vision 并行识别 → merge 按原阅读顺序回填并清理工作区。模型和环境准备见[部署说明](mineru_4_upgrade_usage.md)。
+处理顺序：保存文件 → MinerU parse → dispatch 分发图片 → vision 并行识别 → merge 按原阅读顺序回填并原子保存结果；工作区按保留策略清理。模型和环境准备见[部署说明](mineru_4_upgrade_usage.md)。
+
+POST 支持 `Idempotency-Key`；统一状态、下载及恢复入口见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。新任务在磁盘保存全文和逐图检查点，队列消息仅带 ID；`MINERU_VISION_WAVE_SIZE` 缺省 32，完成一波后再派发下一波缺失图片。进度中的图片数是去重后的请求数，不是页数或所有图片位置数。任一阶段失败保留已完成内容，修复原因后显式 resume；解析中途失败仍重做整本解析。
 
 ## 队列与配置
 
@@ -50,7 +52,7 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 pm2 status
 ```
 
-图片任务默认提示词优先提取图中事实，避免重复 caption；固定前缀清理不代替内容校验。空响应或截断的 OpenAI-compatible 输出会导致失败。采样和实测见[图片服务调优](performance-tuning.md#8-独立多模态图片服务调优)。`VISION_BATCH_SIZE` 只影响同步/普通图片任务，two-stage 的图片并发由 vision worker 的 `-c 32` 控制。
+图片任务默认提示词优先提取图中事实，避免重复 caption；固定前缀清理不代替内容校验。空响应或截断的 OpenAI-compatible 输出会导致失败。采样和实测见[图片服务调优](performance-tuning.md#8-独立多模态图片服务调优)。`VISION_BATCH_SIZE` 只影响同步/普通图片任务，two-stage 受 vision worker 的 `-c 32`、每波派发数及本机共享端点槽位共同约束。
 
 六个 worker（parse 三个，其余阶段各一个）均需在线；模板的 `-Q` 顺序为 urgent 在前。三个 parse 使用不同 Celery 节点名，共同消费同一队列，每个最多执行一份文档，prefetch=1。每个解析进程的 VLM 请求并发为 8，由单地址后端分配至三张卡；worker 与 GPU 没有一一绑定关系。parse 池不能使用 daemonic prefork，因为 SDK 还需要创建渲染子进程。dispatch 使用 `self.replace` 触发 chord，不在任务内同步等待 `result.get()`；Redis result backend 必须可用。
 
@@ -65,7 +67,7 @@ curl --fail-with-body "$API_BASE/two_stage/queue_status" \
 pm2 logs celery-two-stage-parse --lines 100
 ```
 
-`queue_status` 在 Redis broker 下返回 `queues`（ready）及 `unacked`（已取走未确认）的逐队列计数，可作为调整投递窗口的参考；它不自动实施全局限流，也不能当作每个任务的最终状态。API/worker 跨容器时，共享 `MINERU_TASK_STORAGE_DIR` 且容器内路径一致。
+`queue_status` 在 Redis broker 下返回 `queues`（ready）及 `unacked`（已取走未确认）的逐队列计数，可作为调整投递窗口的参考；它不自动实施全局限流，也不能当作每个任务的最终状态。API/worker 跨容器时，共享 `MINERU_JOB_STORE_DIR` 且容器内路径一致；旧任务另共享 `MINERU_TASK_STORAGE_DIR`。
 
 ## 请求字段
 
@@ -81,7 +83,7 @@ pm2 logs celery-two-stage-parse --lines 100
 | `provider` / `model` | 可选，通常使用服务配置；未知值会在此接口返回 422 |
 | `prompt` | 可选图片提示词；空白串视为未设置 |
 
-此接口不启用同步 DOCX 的原生 TXT-only 分支。图片先按面积、分辨率、体积、长宽比及同页数量筛选。相同图片字节及相同语义上下文只请求一次，结果仍回填到每个保留位置；标题或上下文不同则分别识别。任一实际视觉请求失败会使任务失败，不用 caption/base_text 降级。
+此接口不启用同步 DOCX 的原生 TXT-only 分支。图片先按面积、分辨率、体积和长宽比筛选，不设每页图片数截断；印刷图题与 SDK 生成正文分别处理。相同图片字节及相同语义上下文只请求一次，结果仍回填到每个保留位置；标题或上下文不同则分别识别。任一实际视觉请求失败会使任务失败，不用 caption/base_text 降级。
 
 ## 提交和结果
 
@@ -166,5 +168,5 @@ uv run python src/scripts/two_stage_enqueue.py
 - parse 后无结果：查看 `celery-two-stage-dispatch`、`celery-two-stage-vision`、`celery-two-stage-merge` 日志及 result backend；不能仅启动 parse/vision。
 - vision 积压：检查独立 `VLLM_BASE_URLS` 服务吞吐与错误，再调整 vision 并发；增加应用并发不会扩大模型容量。
 - 422：检查 tier、priority、provider/model 枚举及字段类型。
-- FAILURE：查看返回 error，检查 `MINERU_MODEL_VLM_SERVER_URL`、CPU 模型、生成的 MiddleJson/图片、LibreOffice；two-stage 不使用普通 scheduler 的 hard timeout，长期无结果还须检查阶段 worker 和消息确认期限。
+- FAILURE：查看返回 error，检查 `MINERU_MODEL_VLM_SERVER_URL`、CPU 模型、生成的 MiddleJson/图片、LibreOffice；持久 parse 有独立子进程及 hard timeout，长期无结果还须检查阶段 worker、持久状态和消息确认期限。
 - 停机或清理前使用 `inspect active` / `inspect reserved` 核对当前任务；只处理确认结束的具体任务目录，避免删除普通任务共用的工作区。

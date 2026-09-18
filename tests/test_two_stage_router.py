@@ -1,7 +1,7 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 from src.routers import two_stage_router
+from src.services import job_store, two_stage_pipeline
 from src.services.vision_service import VisionModel, VisionProvider
 
 
@@ -14,64 +14,18 @@ def test_two_stage_rejects_missing_extension(client):
     assert "extension" in resp.json()["detail"].lower()
 
 
-def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
-    workspace_root = tmp_path / "workspace"
+def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch):
     provider_value = next(iter(VisionProvider))
     model_value = next(iter(VisionModel))
-
-    def fake_ensure_workspace() -> Path:
-        workspace_root.mkdir(parents=True, exist_ok=True)
-        return workspace_root
-
-    monkeypatch.setattr(two_stage_router, "_ensure_workspace", fake_ensure_workspace)
-
     captured = {}
 
-    class DummyAsyncResult:
-        def __init__(self) -> None:
-            self.id = "fake-task-id"
-            self.state = "PENDING"
+    def publish(ref, **queues):
+        captured.update(ref=ref, queues=queues)
+        return SimpleNamespace(id="internal-celery-id")
 
-    def fake_submit_two_stage_job(
-        processing_path: str,
-        *,
-        backend=None,
-        chunk_type=False,
-        return_txt=False,
-        provider=None,
-        model=None,
-        prompt=None,
-        workspace=None,
-        cleanup_source=False,
-        extra_cleanup=None,
-        parse_queue=None,
-        vision_queue=None,
-        dispatch_queue=None,
-        merge_queue=None,
-    ):
-        captured.update(
-            {
-                "processing_path": processing_path,
-                "backend": backend,
-                "chunk_type": chunk_type,
-                "return_txt": return_txt,
-                "provider": provider,
-                "model": model,
-                "prompt": prompt,
-                "workspace": workspace,
-                "cleanup_source": cleanup_source,
-                "extra_cleanup": extra_cleanup,
-                "parse_queue": parse_queue,
-                "vision_queue": vision_queue,
-                "dispatch_queue": dispatch_queue,
-                "merge_queue": merge_queue,
-            }
-        )
-        return DummyAsyncResult()
-
-    monkeypatch.setattr(two_stage_router, "submit_two_stage_job", fake_submit_two_stage_job)
+    monkeypatch.setattr(two_stage_pipeline, "submit_durable_two_stage", publish, raising=False)
     monkeypatch.setattr(
-        two_stage_router,
+        two_stage_pipeline,
         "resolve_two_stage_queues",
         lambda priority: {
             "parse": "queue_parse_urgent",
@@ -80,7 +34,6 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
             "merge": "queue_merge_urgent",
         },
     )
-
     resp = client.post(
         "/two_stage/task",
         data={
@@ -94,19 +47,21 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
         files={"file": ("sample.pdf", b"%PDF-1.4 content", "application/pdf")},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"task_id": "fake-task-id", "state": "PENDING"}
-
-    assert captured["workspace"] == str(workspace_root)
-    assert captured["processing_path"].endswith("sample.pdf")
-    assert captured["chunk_type"] is True
-    assert captured["return_txt"] is True
-    assert captured["provider"] == provider_value
-    assert captured["model"] == model_value
-    assert captured["prompt"] == "describe"
-    assert captured["parse_queue"] == "queue_parse_urgent"
-    assert captured["vision_queue"] == "queue_vision_urgent"
-    assert captured["dispatch_queue"] == "queue_dispatch_urgent"
-    assert captured["merge_queue"] == "queue_merge_urgent"
+    job_id = resp.json()["task_id"]
+    assert resp.json()["state"] == "PENDING"
+    assert captured["ref"] == {"job_id": job_id, "generation": 0}
+    options = job_store.read_job(job_id)["options"]
+    assert options["chunk_type"] is True
+    assert options["return_txt"] is True
+    assert options["vision_provider"] == provider_value.value
+    assert options["vision_model"] == model_value.value
+    assert options["prompt"] == "describe"
+    assert captured["queues"] == {
+        "parse_queue": "queue_parse_urgent",
+        "vision_queue": "queue_vision_urgent",
+        "dispatch_queue": "queue_dispatch_urgent",
+        "merge_queue": "queue_merge_urgent",
+    }
 
 
 def test_two_stage_queue_status_reports_redis_backlog(client, monkeypatch):

@@ -15,6 +15,8 @@ uv run --group dev pytest
 
 常规测试用替身隔离外部依赖，覆盖路由参数、SDK 适配、资产完整性、阅读顺序、视觉失败、上传清理、共享解析槽和批量恢复；不代表模型解析质量或生产容量已验证。
 
+持久任务的针对性测试包括 `test_durable_jobs.py`、`test_durable_pipeline.py`、`test_job_api.py` 和 `test_manage_jobs.py`：覆盖发布结果不明、元数据落盘失败、旧代消息、逐阶段复用、文件校验、下载租约与保留期清理。共享视觉容量包含真实 fork/spawn/进程死亡，以及本地 HTTP fixture；只有显式模型回归才算实际推理。
+
 Black 排除任意层级的 `.venv` 和根目录的 input/output/pdfs/pickle，避免格式化模型环境或结果。Ruff 规则以 `pyproject.toml` 为准。
 
 ## 真实 PDF 回归
@@ -25,6 +27,7 @@ Black 排除任意层级的 `.venv` 和根目录的 input/output/pdfs/pickle，�
 | --- | --- | --- |
 | `test_mineru_input_pdfs.py` | `MINERU_RUN_INPUT_PDFS=1` | 固定样本清单的首页、第 11 页或末页；p2 缺省及四档整本；九页论文与 46 页 fese 整本 |
 | `test_vision_input_pdf.py` | `MINERU_RUN_VISION_PDFS=1` | 论文第五页的实际图片，验证描述中的关键数值和单位 |
+| `test_durable_input_pdfs.py` | `MINERU_RUN_DURABLE_PDFS=1` | input/p2 三类真实异步任务、重复幂等键、轻量状态、文件下载和旧结果合同 |
 | `test_mineru_data_parallel.py` | `MINERU_RUN_DP_PDFS=1` | p2、九页论文整本及三个 engine 的成功请求增量 |
 | `test_live_api_pdfs.py` | `MINERU_RUN_API_PDFS=1` | 部署 API 的同步/普通任务/two-stage，以及从 p2 文本构造的 DOCX 转换 |
 | `test_batch_input_pdfs.py` | `MINERU_RUN_BATCH_PDFS=1` | 三个批量模式的 p2/九页论文整本、JSON 结果及续跑 |
@@ -88,4 +91,4 @@ uv run python -m src.scripts.benchmark_vision \
   --concurrency 3 --repetitions 3
 ```
 
-`--prompt-file` 替换默认提示词用于对照；采样由 `VLLM_VISION_*` 环境覆盖。输出目录必须新建，保存清单/图像摘要、逐请求原始响应、检查结果、token 和耗时；出现空/截断响应或检查失败时退出非零。该工具直接调用已配置图片模型，轮流测试端点，不测完整 PDF/Celery。人工复核数字归属、流程关系与遗漏，不能只凭正则通过采用更短的提示词。上下文、响应和图像均保持私有。
+`--prompt-file` 替换默认提示词用于对照；采样由 `VLLM_VISION_*` 环境覆盖。输出目录必须新建，保存清单/图像摘要、逐请求原始响应、检查结果、token 和耗时；出现空/截断响应或检查失败时退出非零。每张图遍历每个配置端点及每个 seed，随机化执行顺序；记录分端点耗时与容量等待，不启用故障切换掩盖单端点问题。该工具直接调用图片模型，不测完整 PDF/Celery。人工复核数字归属、流程关系与遗漏，不能只凭正则通过采用更短的提示词。上下文、响应和图像均保持私有。

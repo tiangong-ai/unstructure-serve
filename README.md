@@ -22,7 +22,7 @@
 先读 AGENTS.md、README.md 和部署说明，检查本项目 PM2/容器状态、端口、日志、GPU/CUDA、Redis、独立图片模型，定位故障。先检查在途任务及队列，再决定哪些故障组件需要重启；健康组件保持运行。
 复用现有 .venv、uv.lock、私有配置和缓存。通过 deploy/manage.sh start model 补起模型并验证健康，再 start app、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
 如驱动升级后 GPU 可见但推理失败，按部署说明检查 UVM/CDI 和容器内 CUDA，不以 nvidia-smi 正常作为修复完成的依据。
-核对 API、三个解析 worker、视觉/调度/合并 worker、普通 worker 和三卡模型，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录，需要恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
+核对 API、三个解析 worker、视觉/调度/合并 worker、普通 worker 和三卡模型，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录及持久任务清单（uv run python -m src.scripts.manage_jobs list），发布不明确的任务按部署说明 recover；失败任务修复原因并确认没有活跃阶段后才按原 ID resume。恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
 完成后 pm2 save，说明原因、修复内容、验证结果和仍未恢复的依赖，不输出密钥。
 ```
 
@@ -37,7 +37,7 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 最后报告已停止的组件、保留的共享依赖，以及下次恢复应执行的步骤。
 ```
 
-把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表。支持单文件同步调用和可续查的异步任务。
+把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表。支持单文件同步调用，以及带提交幂等、阶段恢复和结果下载的异步任务。
 
 当前技术栈：**Python 3.13.15 · MinerU 4.0.2 · CPU ONNX · Docker vLLM 0.21.0 · FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
