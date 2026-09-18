@@ -52,7 +52,7 @@
 
 - 默认视觉 provider 为 vLLM；OpenAI/Gemini 实现仍可显式配置。未知 provider/model 在同步图片接口及普通图片任务中宽松接收，由服务兜底；two-stage 则在路由层校验枚举并可返回 422。
 - vLLM 必须有 `VLLM_BASE_URL(S)` 才可用，API key 可选。此地址是独立图片描述模型，与 `MINERU_MODEL_VLM_SERVER_URL` 不同。
-- OpenAI/vLLM 复用客户端池；多个视觉 endpoint 会顺序尝试。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
+- OpenAI/vLLM 复用客户端池。vLLM 通过 vision_capacity.py 在本机共享端点轮换和槽位，缺省每端点 16、等待 180 秒、临时故障冷却 30 秒。所有调用方共用 VLLM_VISION_SLOT_DIR；槽数变更须排空并统一新目录，不能删除在用锁。等价 URL 去重，不同 DNS 别名指向同一服务需配置方确认。连接/超时/408/429/5xx 可冷却切换，400 等请求错误直接失败；请求只编码一次。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
 - 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.5 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
 - 默认 OpenAI-compatible 提示词放在 system，文档上下文作为 user 数据；自定义 prompt 保持优先。图表只提取印出的值，不根据柱高/坐标估算；流程图保留中间步骤。增强时以独立视觉结果替换 SDK 生成的图示正文，仍保留印刷标题/脚注；纯解析和被筛除图片保持 SDK 内容。
 - vLLM 视觉客户端默认单次读写阶段超时 180 秒、SDK 重试 0 次，分别由 VLLM_VISION_TIMEOUT_SECONDS/MAX_RETRIES 控制，故障继续尝试下一端点；不是整份任务的墙钟截止时间。

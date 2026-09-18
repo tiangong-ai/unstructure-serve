@@ -4,6 +4,12 @@ import src.services.vision_service_openai_compatible as openai_compatible
 import src.services.vision_service_vllm as vision_vllm
 
 
+@pytest.fixture(autouse=True)
+def isolate_shared_vision_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("VLLM_VISION_SLOT_DIR", str(tmp_path / "slots"))
+    monkeypatch.setattr(vision_vllm, "prepare_vision_request", lambda *args, **kwargs: {})
+
+
 class _DummyMessage:
     def __init__(self, content: str):
         self.content = content
@@ -58,6 +64,17 @@ def test_vllm_client_timeout_and_sdk_retry_budget_reach_each_endpoint(monkeypatc
     )
     assert len(pool.get_clients_in_priority_order()) == 2
     assert all(k["timeout"] == 125 and k["max_retries"] == 0 for k in kwargs_seen)
+
+
+def test_duplicate_endpoint_spellings_do_not_create_extra_clients(monkeypatch):
+    kwargs_seen = []
+    monkeypatch.setattr(
+        openai_compatible, "OpenAI", lambda **kwargs: kwargs_seen.append(kwargs) or object()
+    )
+    pool = openai_compatible.OpenAICompatibleClientPool(
+        "test-key", ["http://example.com/v1", "HTTP://Example.COM:80/v1/"]
+    )
+    assert len(kwargs_seen) == len(pool.get_endpoint_clients()) == 1
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
@@ -116,6 +133,9 @@ class _DummyVllmPool:
 
     def get_clients_in_priority_order(self):
         return list(self.clients)
+
+    def get_endpoint_clients(self):
+        return [(f"{index:064x}", client) for index, client in enumerate(self.clients)]
 
 
 def test_vllm_vision_defaults_to_disable_thinking(monkeypatch):
