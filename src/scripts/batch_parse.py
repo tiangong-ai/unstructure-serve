@@ -7,11 +7,13 @@ import argparse
 from contextlib import nullcontext
 from dataclasses import dataclass
 import fcntl
+import hashlib
 import json
 import logging
 import math
 import os
 from pathlib import Path
+import tempfile
 import tomllib
 from urllib.parse import quote, urlsplit
 import uuid
@@ -19,7 +21,7 @@ import uuid
 from dotenv import load_dotenv
 import httpx
 
-from src.scripts.batch_runner import _atomic_write, run_batch
+from src.scripts.batch_runner import InputChangedBeforeUpload, _atomic_write, run_batch
 from src.utils.file_conversion import CONVERTIBLE_OFFICE_EXTENSIONS
 from src.utils.mineru_support import mineru_supported_extensions
 
@@ -48,6 +50,8 @@ class Options:
     extensions: str = "pdf"
     max_in_flight: int = 2
     max_attempts: int = 1
+    upload_concurrency: int = 2
+    query_concurrency: int = 4
     poll_interval: float = 5
     poll_timeout: float = 21600
     upload_timeout: float = 600
@@ -68,6 +72,8 @@ def validate(opts):
     for name in (
         "max_in_flight",
         "max_attempts",
+        "upload_concurrency",
+        "query_concurrency",
         "poll_timeout",
         "upload_timeout",
         "query_timeout",
@@ -76,6 +82,9 @@ def validate(opts):
         value = getattr(opts, name)
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be positive and finite")
+        if name in {"max_in_flight", "max_attempts", "upload_concurrency", "query_concurrency"}:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer")
     if not math.isfinite(opts.poll_interval) or opts.poll_interval < 0:
         raise ValueError("poll_interval must be non-negative and finite")
     url = urlsplit(opts.base_url)
@@ -144,15 +153,38 @@ class TaskAPI:
     def identity(self):
         return {"url": self.url, "params": self.params, "form": self.form, "format": "json"}
 
-    def submit(self, client, path, token):
+    def submit(
+        self,
+        client,
+        path,
+        token,
+        *,
+        idempotency_key=None,
+        expected_sha256=None,
+        snapshot_dir=None,
+    ):
         form = dict(self.form)
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        with path.open("rb") as stream:
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        if snapshot_dir is not None:
+            Path(snapshot_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Keep the bytes actually uploaded identical to the journal's fingerprint,
+        # even if a producer replaces or modifies the source while HTTP is slow.
+        with tempfile.TemporaryFile(dir=snapshot_dir) as snapshot:
+            digest = hashlib.sha256()
+            with path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+                    snapshot.write(chunk)
+            if expected_sha256 and digest.hexdigest() != expected_sha256:
+                raise InputChangedBeforeUpload(f"Input changed before upload: {path}")
+            snapshot.seek(0)
             response = client.post(
                 self.url,
                 params=self.params,
                 data=form,
-                files={"file": (path.name, stream, "application/octet-stream")},
+                files={"file": (path.name, snapshot, "application/octet-stream")},
                 headers=headers,
                 timeout=httpx.Timeout(self.opts.upload_timeout, connect=self.opts.connect_timeout),
             )
@@ -225,7 +257,8 @@ def run(opts, *, client=None, token=None):
             if manifest["identity"] != identity:
                 raise ValueError("Input directory or request changed; use a new output directory")
         else:
-            _atomic_write(manifest_path, {"identity": identity, "batch_id": uuid.uuid4().hex})
+            manifest = {"identity": identity, "batch_id": uuid.uuid4().hex}
+            _atomic_write(manifest_path, manifest)
         with (
             nullcontext(client) if client is not None else httpx.Client(follow_redirects=False)
         ) as session:
@@ -245,6 +278,9 @@ def run(opts, *, client=None, token=None):
                 output_format="json",
                 strict=True,
                 resume_only=opts.resume_only,
+                batch_id=manifest["batch_id"],
+                upload_concurrency=opts.upload_concurrency,
+                query_concurrency=opts.query_concurrency,
             )
 
 
@@ -275,7 +311,12 @@ def main(argv=None):
         action="store_true",
         help="Collect existing tasks only; do not submit or retry files",
     )
-    for name, default in (("max-in-flight", 2), ("max-attempts", 1)):
+    for name, default in (
+        ("max-in-flight", 2),
+        ("max-attempts", 1),
+        ("upload-concurrency", 2),
+        ("query-concurrency", 4),
+    ):
         parser.add_argument("--" + name, type=int, default=default)
     for name, default in (
         ("poll-interval", 5),

@@ -8,10 +8,15 @@ import pickle
 import tempfile
 import time
 from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 import httpx
 import requests
+
+
+class InputChangedBeforeUpload(ValueError):
+    """A verified local failure that occurred before any POST was sent."""
 
 
 def _atomic_write(path: Path, value, *, binary=False):
@@ -55,13 +60,23 @@ def run_batch(
     output_format="pickle",
     strict=False,
     resume_only=False,
+    batch_id=None,
+    upload_concurrency=1,
+    query_concurrency=1,
 ):
     """Feed a bounded window, retaining task IDs across restarts and poll errors.
 
     The CLI holds an exclusive output-directory lock. A timeout stops local
     waiting; it never cancels or resubmits a possibly running server task.
     """
-    if max_in_flight < 1 or poll_timeout <= 0 or poll_interval < 0 or max_attempts < 1:
+    if (
+        max_in_flight < 1
+        or poll_timeout <= 0
+        or poll_interval < 0
+        or max_attempts < 1
+        or upload_concurrency < 1
+        or query_concurrency < 1
+    ):
         raise ValueError("Invalid batch limits")
     output_dir = Path(output_dir)
     state_dir = output_dir / ".tasks"
@@ -114,6 +129,7 @@ def run_batch(
                 summary["skipped"] += 1
                 continue
         record = {
+            "key": key,
             "path": path,
             "state_path": state_path,
             "state": state,
@@ -132,6 +148,29 @@ def run_batch(
             "Previously journaled input is missing or filtered out; restore the input selection before resuming"
         )
 
+    if batch_id is not None:
+        return _run_parallel(
+            session,
+            token,
+            output_dir,
+            waiting,
+            active,
+            summary,
+            batch_id=batch_id,
+            max_in_flight=max_in_flight,
+            max_attempts=max_attempts,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
+            upload_concurrency=upload_concurrency,
+            query_concurrency=query_concurrency,
+            submit=submit,
+            fetch=fetch,
+            output_format=output_format,
+            strict=strict,
+            resume_only=resume_only,
+        )
+
+    # Preserve the legacy requests.Session contract: it is not shared by threads.
     while waiting or active:
         while waiting and len(active) < max_in_flight:
             record = waiting.popleft()
@@ -212,4 +251,190 @@ def run_batch(
         # in a fixed batch. Otherwise limit the status-query rate.
         if active and not (finished and waiting and len(active) < max_in_flight):
             time.sleep(poll_interval)
+    return summary
+
+
+def _run_parallel(
+    session,
+    token,
+    output_dir,
+    waiting,
+    active,
+    summary,
+    *,
+    batch_id,
+    max_in_flight,
+    max_attempts,
+    poll_interval,
+    poll_timeout,
+    upload_concurrency,
+    query_concurrency,
+    submit,
+    fetch,
+    output_format,
+    strict,
+    resume_only,
+):
+    """Only the caller writes journals; independent bounded pools perform HTTP.
+
+    In-progress uploads occupy the same document window as accepted jobs. If any
+    operation fails, stop issuing work and retain IDs from uploads already sent.
+    """
+    uploads = {}
+    queries = {}
+    querying = set()
+
+    def accept_upload(future, record):
+        try:
+            task_id = future.result()
+        except InputChangedBeforeUpload:
+            record["state"] = record.pop("before_submit")
+            _atomic_write(record["state_path"], record["state"])
+            raise
+        except Exception as exc:
+            raise RuntimeError(
+                f"Submission outcome unknown for {record['path']}; "
+                f"journal: {record['state_path']}"
+            ) from exc
+        state = record["state"]
+        state.update(state="SUBMITTED", task_id=task_id)
+        _atomic_write(record["state_path"], state)
+        record.pop("before_submit", None)
+        record["deadline"] = time.monotonic() + poll_timeout
+        record["next_poll"] = 0
+        if task_id in active:
+            raise RuntimeError(f"Server returned duplicate task ID for different inputs: {task_id}")
+        active[task_id] = record
+
+    def accept_query(future, task_id):
+        record = active[task_id]
+        try:
+            data = future.result()
+        except (requests.RequestException, httpx.HTTPError) as exc:
+            response = getattr(exc, "response", None)
+            if response is not None and response.status_code not in {408, 429, 500, 502, 503, 504}:
+                raise
+            logging.warning("Status query failed for %s; retaining the task ID", task_id)
+            data = {"state": "PENDING"}
+        status = data.get("state")
+        if status == "SUCCESS":
+            result = data.get("result")
+            if result is None:
+                raise RuntimeError(f"Task {task_id} succeeded without a result")
+            _atomic_write(record["result_path"], result, binary=output_format == "pickle")
+            if strict:
+                with record["result_path"].open("rb") as stream:
+                    record["state"]["result_sha256"] = hashlib.file_digest(
+                        stream, "sha256"
+                    ).hexdigest()
+            record["state"]["state"] = "SUCCESS"
+            _atomic_write(record["state_path"], record["state"])
+            summary["successes"] += 1
+            logging.info("Saved %s (task %s)", record["result_path"], task_id)
+            del active[task_id]
+        elif status in {"FAILURE", "REVOKED"}:
+            record["state"]["state"] = "FAILED"
+            _atomic_write(record["state_path"], record["state"])
+            logging.error("Task %s failed for %s", task_id, record["path"])
+            del active[task_id]
+            if resume_only:
+                summary["failures"] += 1
+            else:
+                waiting.append(record)
+        elif status not in {"PENDING", "STARTED", "RETRY", "RECEIVED"}:
+            raise RuntimeError(f"Unexpected state {status!r} for task {task_id}")
+        else:
+            record["next_poll"] = time.monotonic() + poll_interval
+
+    with (
+        ThreadPoolExecutor(max_workers=min(upload_concurrency, max_in_flight)) as upload_pool,
+        ThreadPoolExecutor(max_workers=query_concurrency) as query_pool,
+    ):
+        try:
+            while waiting or active or uploads or queries:
+                # Persist completed operations before submitting replacements.
+                pending_queries = False
+                for future in list(uploads):
+                    if future.done():
+                        accept_upload(future, uploads.pop(future))
+                for future in list(queries):
+                    if future.done():
+                        task_id = queries.pop(future)
+                        querying.remove(task_id)
+                        accept_query(future, task_id)
+                        pending_queries |= task_id in active
+
+                for task_id, record in active.items():
+                    if time.monotonic() >= record["deadline"]:
+                        raise TimeoutError(
+                            f"Stopped waiting for {task_id}; server task was not cancelled. "
+                            "Run again with the same output directory to resume."
+                        )
+
+                while (
+                    waiting
+                    and len(active) + len(uploads) < max_in_flight
+                    and len(uploads) < upload_concurrency
+                ):
+                    record = waiting.popleft()
+                    state = record["state"]
+                    if state["attempts"] >= max_attempts:
+                        summary["failures"] += 1
+                        logging.error("Attempt limit reached for %s", record["path"])
+                        continue
+                    record["before_submit"] = dict(state)
+                    if state.get("task_id"):
+                        state["previous_task_ids"] = [
+                            *state.get("previous_task_ids", []),
+                            state["task_id"],
+                        ]
+                    state.update(state="SUBMITTING", attempts=state["attempts"] + 1, task_id=None)
+                    identity = json.dumps(
+                        [batch_id, record["key"], state["attempts"]], separators=(",", ":")
+                    )
+                    state["idempotency_key"] = hashlib.sha256(identity.encode()).hexdigest()
+                    _atomic_write(record["state_path"], state)
+                    future = upload_pool.submit(
+                        submit,
+                        session,
+                        record["path"],
+                        token,
+                        idempotency_key=state["idempotency_key"],
+                        expected_sha256=state["sha256"],
+                        snapshot_dir=output_dir / ".uploads",
+                    )
+                    uploads[future] = record
+
+                # Poll fairly by due time, rather than repeatedly preferring the
+                # first document when more IDs exist than query threads.
+                for task_id, record in sorted(
+                    active.items(), key=lambda item: item[1].get("next_poll", 0)
+                ):
+                    if len(queries) >= query_concurrency:
+                        break
+                    if task_id not in querying and record.get("next_poll", 0) <= time.monotonic():
+                        queries[query_pool.submit(fetch, session, task_id, token)] = task_id
+                        querying.add(task_id)
+
+                futures = [*uploads, *queries]
+                if futures:
+                    wait(futures, timeout=0.05, return_when=FIRST_COMPLETED)
+                    if pending_queries and poll_interval == 0:
+                        time.sleep(0)
+                elif active:
+                    now = time.monotonic()
+                    next_wake = min(
+                        min(record.get("next_poll", 0), record["deadline"])
+                        for record in active.values()
+                    )
+                    time.sleep(min(0.05, max(0, next_wake - now)))
+        finally:
+            # An upload in another thread may have succeeded after an error or
+            # Ctrl-C. Wait for its bounded HTTP call and preserve its ID before
+            # releasing the output lock. Never submit another task here.
+            for future, record in list(uploads.items()):
+                try:
+                    accept_upload(future, record)
+                except Exception:
+                    logging.warning("Retained submission journal for %s", record["path"])
     return summary
