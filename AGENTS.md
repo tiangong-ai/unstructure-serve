@@ -55,6 +55,8 @@
 - `/mineru`、`/mineru_with_images` 及两个普通任务支持 MinIO；科研/two-stage 不支持。保存转换后的 source.pdf、服务 parsed.json、逐页 JPEG 和可选 meta.txt。`chunk_type=true` 时 JSON 保留类型，`save_to_minio=false` 时忽略 minio_meta。
 - MinIO prefix 保留 Unicode/中文标点，空格和不可打印字符规范化；通用上传还支持 base64，空内容返回 400。不要用原生 MiddleJson 覆盖业务 parsed.json。
 
+- 六个解析上传入口统一通过 `src/utils/upload_io.py` 在线程池内按 1 MiB 分块持久化；Office、MinIO 和 broker 提交不直接阻塞事件循环。同步解析用 shield/wrap_future 等待，HTTP 超时后源文件延迟到实际任务结束再清理。Pydantic 响应直接序列化 JSON，保留 null/pretty 合同。
+
 ## 队列与进程
 
 - 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal,default`；普通 worker 不消费 two-stage 的解析/视觉队列。
