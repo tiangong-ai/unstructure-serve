@@ -46,11 +46,31 @@ class _DummyPool:
         return self._client
 
 
+def test_vllm_client_timeout_and_sdk_retry_budget_reach_each_endpoint(monkeypatch):
+    kwargs_seen = []
+    monkeypatch.setattr(
+        openai_compatible, "OpenAI", lambda **kwargs: kwargs_seen.append(kwargs) or object()
+    )
+    monkeypatch.setenv("VLLM_VISION_TIMEOUT_SECONDS", "125")
+    monkeypatch.setenv("VLLM_VISION_MAX_RETRIES", "0")
+    pool = openai_compatible.OpenAICompatibleClientPool(
+        "test-key", ["http://one/v1", "http://two/v1"], **vision_vllm._client_budgets()
+    )
+    assert len(pool.get_clients_in_priority_order()) == 2
+    assert all(k["timeout"] == 125 and k["max_retries"] == 0 for k in kwargs_seen)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_vision_timeout_must_be_finite_and_positive(monkeypatch, value):
+    monkeypatch.setenv("VLLM_VISION_TIMEOUT_SECONDS", value)
+    with pytest.raises(ValueError):
+        vision_vllm._client_budgets()
+
+
 def test_openai_compatible_passes_extra_body(monkeypatch):
     completions = _DummyCompletions()
     pool = _DummyPool(_DummyClient(completions))
     monkeypatch.setattr(openai_compatible, "encode_image", lambda _path: "YmFzZTY0")
-    monkeypatch.setattr(openai_compatible, "build_vision_prompt", lambda context, prompt: "prompt")
 
     result = openai_compatible.vision_completion_openai_compatible(
         "fake.jpg",
@@ -76,7 +96,6 @@ def test_openai_compatible_omits_extra_body_when_empty(monkeypatch):
     completions = _DummyCompletions()
     pool = _DummyPool(_DummyClient(completions))
     monkeypatch.setattr(openai_compatible, "encode_image", lambda _path: "YmFzZTY0")
-    monkeypatch.setattr(openai_compatible, "build_vision_prompt", lambda context, prompt: "prompt")
 
     openai_compatible.vision_completion_openai_compatible(
         "fake.jpg",

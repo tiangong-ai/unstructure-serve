@@ -124,10 +124,21 @@ def _build_extra_body() -> Dict[str, Any]:
 
 
 _RESOLVED_BASE_URLS = _resolve_base_urls()
+
+
+def _client_budgets() -> dict:
+    timeout = float(os.getenv("VLLM_VISION_TIMEOUT_SECONDS", "180"))
+    retries = int(os.getenv("VLLM_VISION_MAX_RETRIES", "0"))
+    if not 0 < timeout < float("inf") or retries < 0:
+        raise ValueError("Vision timeout must be finite and positive; retries must be nonnegative")
+    return {"timeout": timeout, "max_retries": retries}
+
+
 _CLIENT_POOL = OpenAICompatibleClientPool(
     api_key=_resolve_api_key() if _RESOLVED_BASE_URLS else "",
     base_urls=_RESOLVED_BASE_URLS,
     fallback_api_key=_FALLBACK_API_KEY if _RESOLVED_BASE_URLS else None,
+    **_client_budgets(),
 )
 
 

@@ -14,7 +14,7 @@ Two-stage MinerU+vision Celery pipeline (解析队列 + 视觉队列 + 汇总).
   CELERY_TASK_DISPATCH_URGENT_QUEUE（默认 queue_dispatch_urgent）
   CELERY_TASK_MERGE_QUEUE（默认 CELERY_TASK_DEFAULT_QUEUE 或 default）
   CELERY_TASK_MERGE_URGENT_QUEUE（默认 queue_merge_urgent）
-  MINERU_TASK_STORAGE_DIR（默认 /tmp/tiangong_mineru_tasks）
+  MINERU_TASK_STORAGE_DIR（默认系统临时目录内的 tiangong_mineru_tasks）
 """
 
 import hashlib
@@ -51,6 +51,7 @@ from src.services.mineru_with_images_service import (
     table_text,
 )
 from src.services.vision_service import VisionModel, VisionProvider, vision_completion
+from src.services.vision_prompts import vision_request_key
 from src.utils.text_output import build_plain_text, sanitize_vision_text
 
 MIN_IMAGE_AREA_RATIO = 0.01
@@ -132,14 +133,16 @@ def _ensure_workspace(existing: Optional[str] = None) -> Path:
     return workspace
 
 
-def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[Dict], List[Dict]]:
+def _build_image_jobs(
+    content_list: List[Dict], output_dir: str, *, keep_positions: bool = False
+) -> tuple[List[Dict], List[Dict]]:
     """Prepare image jobs with context and stable seq, and annotate content_list with seq."""
     context_blocks = _build_context_blocks(content_list)
     idx_map = _reindex_blocks(context_blocks)
     image_jobs: List[Dict] = []
     seq = 1
     per_page_counts: Dict[int, int] = defaultdict(int)
-    seen_hashes: set[str] = set()
+    seen_requests: Dict[str, int] = {}
 
     def _extract_bbox(item: Dict) -> Optional[tuple[float, float, float, float]]:
         bbox = item.get("bbox")
@@ -213,22 +216,19 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
         hash_value: Optional[str] = None
         try:
             with open(path, "rb") as fh:
-                digest = hashlib.md5()
-                for chunk in iter(lambda: fh.read(8192), b""):
-                    digest.update(chunk)
-                hash_value = digest.hexdigest()
+                hash_value = hashlib.file_digest(fh, "sha256").hexdigest()
         except OSError:
             hash_value = None
         return size, hash_value
 
     for item in content_list:
+        item.pop("__image_seq", None)
         if item.get("type") != "image" or not (item.get("img_path") and item["img_path"].strip()):
             continue
 
         img_path = os.path.join(output_dir, item["img_path"])
         if not os.path.exists(img_path):
-            logger.info("Skipping missing image at %s", img_path)
-            continue
+            raise FileNotFoundError(f"Missing image asset: {img_path}")
 
         page_number = int(item.get("page_idx", 0)) + 1
         has_caption = bool(item.get("img_caption") or item.get("img_footnote"))
@@ -301,10 +301,6 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
             )
             continue
 
-        if file_hash and file_hash in seen_hashes:
-            logger.debug("Skip duplicate image hash %s at %s", file_hash, img_path)
-            continue
-
         if per_page_counts[page_number] >= PER_PAGE_IMAGE_LIMIT:
             logger.debug(
                 "Skip image due to per-page limit %d at page %s (%s)",
@@ -318,6 +314,16 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
         contexts = _resolve_context_windows(context_blocks, cur_idx, item)
         context_payload, _ = _build_vision_prompt(item, contexts)
 
+        key = (
+            vision_request_key(file_hash, context_payload, keep_positions=keep_positions)
+            if file_hash
+            else None
+        )
+        per_page_counts[page_number] += 1
+        if key in seen_requests:
+            item["__image_seq"] = seen_requests[key]
+            continue
+
         item["__image_seq"] = seq
         image_jobs.append(
             {
@@ -326,13 +332,12 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
                 "is_title": bool(item.get("text_level") is not None),
                 "img_path": img_path,
                 "context_payload": context_payload,
-                "base_text": image_text(item),
+                "base_text": image_text(item, include_generated=False),
             }
         )
         seq += 1
-        per_page_counts[page_number] += 1
-        if file_hash:
-            seen_hashes.add(file_hash)
+        if key:
+            seen_requests[key] = item["__image_seq"]
 
     return image_jobs, content_list
 
@@ -353,8 +358,10 @@ def _merge_content(
 
         if item.get("type") == "image" and item.get("img_path") and item["img_path"].strip():
             seq = item.get("__image_seq")
-            base_text = image_text(item)
+            base_text = image_text(item, include_generated=seq is None)
             vision_text = vision_map.get(seq, "")
+            if seq is not None and (not isinstance(vision_text, str) or not vision_text.strip()):
+                raise RuntimeError(f"Missing or empty vision result for seq={seq}")
             if base_text and vision_text:
                 combined_text = f"{base_text}\n{vision_text}"
             elif base_text:
@@ -472,7 +479,11 @@ def parse_task(payload: Dict[str, object]) -> Dict[str, object]:
     if content_list is None:
         raise RuntimeError("parse_doc returned empty content_list.")
 
-    image_jobs, annotated_content = _build_image_jobs(content_list, output_dir or str(workspace))
+    image_jobs, annotated_content = _build_image_jobs(
+        content_list,
+        output_dir or str(workspace),
+        keep_positions=bool(payload.get("custom_vision_prompt")),
+    )
     logger.info("Parsed %s: %d images found", target_path, len(image_jobs))
 
     return {
@@ -604,6 +615,7 @@ def submit_two_stage_job(
         "upload_workspace": workspace,
         "cleanup_source": cleanup_source,
         "extra_cleanup": list(extra_cleanup or []),
+        "custom_vision_prompt": bool(_normalize_prompt(prompt)),
     }
     workflow = chain(
         parse_task.s(payload).set(queue=resolved_parse_queue),

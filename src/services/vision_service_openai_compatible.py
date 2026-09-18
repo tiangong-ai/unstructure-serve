@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from openai import OpenAI
 
-from src.services.vision_prompts import build_vision_prompt
+from src.services.vision_prompts import build_vision_messages
 
 
 def encode_image(image_path: str) -> str:
@@ -20,24 +20,31 @@ class OpenAICompatibleClientPool:
         api_key: str,
         base_urls: Optional[Sequence[str]] = None,
         fallback_api_key: Optional[str] = None,
+        timeout: float = 600,
+        max_retries: int = 2,
     ):
         resolved_urls = [url.strip() for url in base_urls or [] if url and url.strip()]
         resolved_key = (api_key or "").strip()
         if resolved_urls and not resolved_key and fallback_api_key is not None:
             resolved_key = fallback_api_key
 
-        self._clients = self._build_clients(resolved_key, resolved_urls)
+        self._clients = self._build_clients(resolved_key, resolved_urls, timeout, max_retries)
         self._single = self._clients[0] if len(self._clients) == 1 else None
         self._next_index = 0
         self._lock = Lock()
 
     @staticmethod
-    def _build_clients(api_key: str, base_urls: List[str]) -> List[OpenAI]:
+    def _build_clients(
+        api_key: str, base_urls: List[str], timeout: float, max_retries: int
+    ) -> List[OpenAI]:
         clients: List[OpenAI] = []
         if base_urls:
-            clients = [OpenAI(api_key=api_key, base_url=url) for url in base_urls]
+            clients = [
+                OpenAI(api_key=api_key, base_url=url, timeout=timeout, max_retries=max_retries)
+                for url in base_urls
+            ]
         elif api_key:
-            clients = [OpenAI(api_key=api_key)]
+            clients = [OpenAI(api_key=api_key, timeout=timeout, max_retries=max_retries)]
         return clients
 
     def has_clients(self) -> bool:
@@ -71,23 +78,13 @@ def vision_completion_openai_compatible(
     request_options: Optional[Dict[str, Any]] = None,
 ) -> str:
     base64_image = encode_image(image_path)
-    prompt_text = build_vision_prompt(context, prompt)
 
     client = client_pool.get_client()
     request_payload = {
         "model": model or default_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                    },
-                ],
-            }
-        ],
+        "messages": build_vision_messages(
+            context, prompt, f"data:image/jpeg;base64,{base64_image}"
+        ),
     }
     if extra_body:
         request_payload["extra_body"] = extra_body

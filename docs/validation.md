@@ -61,7 +61,7 @@ MINERU_RUN_API_PDFS=1 MINERU_RUN_BATCH_PDFS=1 \
 
 可复现的 API 派发对照保留在[调优指南](performance-tuning.md#13-api-与解析容量分离)。其短样本结果不能外推为 Python 升级收益，也不能作为单卡/三卡的完整吞吐对照。
 
-千页样本目前只在固定页抽样用例中覆盖，尚未承诺千页整本并发或 20 万页批量容量。正式处理前按[大文档流程](ai-integration.md#53-多份-4001000-页-pdf-的投递流程)先做整本单文件，再测试 2、3 个在途文件及故障恢复。
+已完成合成 400/1000 页与原生 1016 页整本 SDK 实测，条件和结果见[调优指南](performance-tuning.md#14-长文档与图片回归测量)。固定 input pytest 清单仍按上述范围执行，不能把 SDK 测量等同于所有入口或 20 万页批量容量承诺。正式处理前按[大文档流程](ai-integration.md#53-多份-4001000-页-pdf-的投递流程)先做整本单文件，再测试 2、3 个在途文件及故障恢复。
 
 ## 长文档样本构造
 
@@ -73,3 +73,19 @@ uv run python -m src.scripts.build_pdf_case --sources input/p2.pdf input/fese.pd
 ```
 
 复制扩页用于检查页号、重复图片、内存和任务生命周期，不等同于同规模不同内容文档的性能；须同时测试原生长文档。质量断言应从实际源页建立，不能只要求返回 SUCCESS。
+
+## 私有图片提示词对照
+
+从真实 PDF 的解析资产选图，逐张核对后编写 JSON 数组清单。图片路径相对仓库根目录，`required`/`forbidden` 为 Python 正则；同一清单对所有候选使用同一规则，保留失败结果。示例仅示意结构，实际数字必须来自原图：
+
+```json
+[{"name":"figure-a","image":"output/cases/figure.jpg","context":"原文标题及相邻正文","required":["52\\s*%"],"forbidden":["Image Description:"]}]
+```
+
+```bash
+uv run python -m src.scripts.benchmark_vision \
+  --cases output/cases/vision.json --output output/vision-benchmark \
+  --concurrency 3 --repetitions 3
+```
+
+`--prompt-file` 替换默认提示词用于对照；采样由 `VLLM_VISION_*` 环境覆盖。输出目录必须新建，保存清单/图像摘要、逐请求原始响应、检查结果、token 和耗时；出现空/截断响应或检查失败时退出非零。该工具直接调用已配置图片模型，轮流测试端点，不测完整 PDF/Celery。人工复核数字归属、流程关系与遗漏，不能只凭正则通过采用更短的提示词。上下文、响应和图像均保持私有。

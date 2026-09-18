@@ -1,6 +1,7 @@
 import os
 import tempfile
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import hashlib
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from loguru import logger
@@ -82,16 +83,25 @@ def _coerce_text_parts(value: object) -> List[str]:
     return [cleaned] if cleaned.strip() else []
 
 
-def _image_captions(item: Dict) -> List[str]:
-    return _coerce_text_parts(item.get("img_caption") or item.get("image_caption"))
+def _image_captions(item: Dict, *, include_generated: bool = True) -> List[str]:
+    captions = _coerce_text_parts(item.get("img_caption") or item.get("image_caption"))
+    if not include_generated:
+        # The SDK adapter appends model-generated chart/diagram content to the
+        # legacy caption field. Keep the printed caption separate for vision.
+        for field in ("image_caption", "chart_caption"):
+            if field in item:
+                return _coerce_text_parts(item[field])
+        if captions and captions[-1] == item.get("content"):
+            captions = captions[:-1]
+    return captions
 
 
 def _image_footnotes(item: Dict) -> List[str]:
     return _coerce_text_parts(item.get("img_footnote") or item.get("image_footnote"))
 
 
-def image_text(item: Dict) -> str:
-    captions = _image_captions(item)
+def image_text(item: Dict, *, include_generated: bool = True) -> str:
+    captions = _image_captions(item, include_generated=include_generated)
     footnotes = _image_footnotes(item)
     text = "\n".join([*captions, *footnotes])
     return clean_text(text)
@@ -210,7 +220,7 @@ def _build_context_blocks(
                     "is_title": False,
                 }
         elif item["type"] == "image":
-            img_txt = image_text(item) if include_image_notes else ""
+            img_txt = image_text(item, include_generated=False) if include_image_notes else ""
             has_image_payload = bool(item.get("img_path") and item["img_path"].strip())
             if img_txt.strip() or has_image_payload:
                 block = {
@@ -266,7 +276,9 @@ def _resolve_context_windows(
 def _build_vision_prompt(
     item: Dict, contexts: Dict[str, str], *, include_image_notes: bool = True
 ) -> Tuple[str, List[Tuple[str, str]]]:
-    captions = "\n".join(_image_captions(item)) if include_image_notes else ""
+    captions = (
+        "\n".join(_image_captions(item, include_generated=False)) if include_image_notes else ""
+    )
     footnotes = "\n".join(_image_footnotes(item)) if include_image_notes else ""
     prompt_parts: List[Tuple[str, str]] = []
     page_idx = item.get("page_idx", -1)
@@ -286,6 +298,8 @@ def _build_vision_prompt(
 def _log_vision_prompt(
     page_number: int, contexts: Dict[str, str], prompt_parts: Sequence[Tuple[str, str]]
 ) -> None:
+    if os.getenv("VISION_LOG_PROMPTS", "false").strip().lower() not in {"1", "true", "yes"}:
+        return
     before_ctx = contexts.get("before", "").strip() or "<empty>"
     after_ctx = contexts.get("after", "").strip() or "<empty>"
     logger.debug(
@@ -296,9 +310,9 @@ def _log_vision_prompt(
     )
     if prompt_parts:
         formatted = "\n".join(f"  {label}: {value}" for label, value in prompt_parts)
-        logger.info(f"Vision prompt payload for page {page_number}:\n{formatted}")
+        logger.debug(f"Vision prompt payload for page {page_number}:\n{formatted}")
     else:
-        logger.info(f"Vision prompt payload for page {page_number}: <empty>")
+        logger.debug(f"Vision prompt payload for page {page_number}: <empty>")
 
 
 def _normalize_prompt_override(vision_prompt: Optional[str]) -> Optional[str]:
@@ -338,6 +352,10 @@ def _run_image_vision(
     )
 
     image_jobs: List[Dict[str, object]] = []
+    from src.services.vision_prompts import vision_request_key
+
+    seen_requests = {}
+    file_hashes = {}
     for item in content_list:
         if not (item["type"] == "image" and item.get("img_path") and item["img_path"].strip()):
             continue
@@ -345,8 +363,7 @@ def _run_image_vision(
         img_path = os.path.join(output_dir, item["img_path"])
         page_number = int(item.get("page_idx", 0)) + 1
         if not os.path.exists(img_path):
-            logger.info(f"Skipping image on page {page_number}: file not found at {img_path}")
-            continue
+            raise FileNotFoundError(f"Missing image asset on page {page_number}: {img_path}")
 
         cur_idx = item_to_block_idx.get(id(item))
         contexts = _resolve_context_windows(context_blocks, cur_idx, item)
@@ -357,6 +374,18 @@ def _run_image_vision(
         )
         _log_vision_prompt(page_number, contexts, prompt_parts)
 
+        if img_path not in file_hashes:
+            with open(img_path, "rb") as stream:
+                file_hashes[img_path] = hashlib.file_digest(stream, "sha256").hexdigest()
+        key = vision_request_key(
+            file_hashes[img_path],
+            context_payload,
+            keep_positions=strict_ocr_only or prompt_override is not None,
+        )
+        if key in seen_requests:
+            seen_requests[key]["items"].append(item)
+            continue
+
         logger.info(
             f"Queueing image {len(image_jobs) + 1} "
             f"(page {page_number}, batch size {VISION_BATCH_SIZE})..."
@@ -365,12 +394,14 @@ def _run_image_vision(
         image_jobs.append(
             {
                 "item": item,
+                "items": [item],
                 "img_path": img_path,
                 "page_number": page_number,
                 "context_payload": context_payload,
-                "base_text": "" if strict_ocr_only else image_text(item),
+                "base_text": "" if strict_ocr_only else image_text(item, include_generated=False),
             }
         )
+        seen_requests[key] = image_jobs[-1]
 
     for idx, job in enumerate(image_jobs, start=1):
         job["seq"] = idx
@@ -413,7 +444,8 @@ def _run_image_vision(
                             part for part in (str(job["base_text"]), vision_result) if part
                         )
                         if combined_text:
-                            image_results[id(job["item"])] = clean_text(combined_text)
+                            for item in job["items"]:
+                                image_results[id(item)] = clean_text(combined_text)
                         logger.info(f"Vision analysis complete for image {seq}/{total_images}")
                     except Exception as exc:  # noqa: BLE001 - vision call can fail
                         raise RuntimeError(

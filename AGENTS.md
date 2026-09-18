@@ -52,9 +52,11 @@
 - 默认视觉 provider 为 vLLM；OpenAI/Gemini 实现仍可显式配置。未知 provider/model 在同步图片接口及普通图片任务中宽松接收，由服务兜底；two-stage 则在路由层校验枚举并可返回 422。
 - vLLM 必须有 `VLLM_BASE_URL(S)` 才可用，API key 可选。此地址是独立图片描述模型，与 `MINERU_MODEL_VLM_SERVER_URL` 不同。
 - OpenAI/vLLM 复用客户端池；多个视觉 endpoint 会顺序尝试。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
-- 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.5 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.7/0.8/20/1.5，通用代码默认仍为 1/1/40/2。
+- 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.5 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
+- 默认 OpenAI-compatible 提示词放在 system，文档上下文作为 user 数据；自定义 prompt 保持优先。图表只提取印出的值，不根据柱高/坐标估算；流程图保留中间步骤。增强时以独立视觉结果替换 SDK 生成的图示正文，仍保留印刷标题/脚注；纯解析和被筛除图片保持 SDK 内容。
+- vLLM 视觉客户端默认单次读写阶段超时 180 秒、SDK 重试 0 次，分别由 VLLM_VISION_TIMEOUT_SECONDS/MAX_RETRIES 控制，故障继续尝试下一端点；不是整份任务的墙钟截止时间。
 - 默认图片提示词保留图中数字、单位、标签和关系，合并同类数据，避免重复 caption、无关引言和推断数值；不压缩图片或按字数硬截断。清理仅处理开头完整 thinking 段和确定的中英文套话，保留正文及不确定性。原生 DOCX 严格 OCR 不启用新增套话清理，避免误删原图文字。自定义 prompt 继续优先。
-- two-stage 图片筛选按相对面积、分辨率、体积、长宽比、每页数量及哈希去重，合并保持原位；清理视觉输出中的 Page/ChunkType 标记和固定说明前缀。
+- two-stage 保留相对面积、分辨率、体积、长宽比和每页数量筛选。所有图片增强入口仅在单文档内复用相同图片字节及相同语义上下文的请求，重复位置仍逐一回填。默认 key 只忽略生成的页位置标记，自定义 prompt/严格 OCR 保留位置；不同标题/上下文不得合并。缺资产或缺视觉结果必须失败；合并保持原位；清理视觉输出中的 Page/ChunkType 标记和固定说明前缀。
 
 - 六个解析上传入口统一通过 `src/utils/upload_io.py` 在线程池内按 1 MiB 分块持久化；Office 和 broker 提交不直接阻塞事件循环。同步解析用 shield/wrap_future 等待，HTTP 超时后源文件延迟到实际任务结束再清理。Pydantic 响应直接序列化 JSON，保留 null/pretty 合同。
 
@@ -83,7 +85,7 @@
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `nvidia-uvm` 和 `nvidia-uvm-tools` 设备节点，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
 - PM2 API 为 `unstructured-gunicorn`，Gunicorn timeout/graceful-timeout 1900 秒。科研入口另有自己的 HTTP 等待窗口；具体超时以模板/运行环境为准。
 - 远程 AI 使用实际部署 `/openapi.json` 与 `/guides/ai-integration.md`，`/llms.txt` 仅为文档索引，不是 MCP。两个文档路由继承业务鉴权；FastAPI 自动 `/openapi.json`、`/docs`、`/redoc` 不自动继承业务 Depends 保护，需私有时由网关额外限制。索引链接保留 root_path 前缀，不链接调优文档。
-- `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/独立视觉模型，也不执行实际推理。通过 `/two_stage/queue_status` 及 Celery inspect 检查队列，按 task_id 查询任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
+- `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/独立视觉模型，也不执行实际推理。通过 `/two_stage/queue_status` 及 Celery inspect 检查队列，按 task_id 查询任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅在显式 VISION_LOG_PROMPTS=true 时写 DEBUG，默认不输出上下文；不输出密钥或完整 PM2 环境。
 - 维护先定位当前服务树和 active/reserved 任务，按具体任务清理。不要在日常说明中使用全局 PM2 删除、Redis flushdb 或无差别清空共享任务目录。
 
 - 统一批量 CLI 将进度日志写入 stderr、汇总 JSON 写入 stdout；需要文件日志时由调用方重定向。只有兼容 two-stage 脚本默认写入 output/logs，接受 TWO_STAGE_LOG_FILE。不要将兼容脚本的日志位置、6 个在途或 800 秒等待写成统一客户端默认值。
@@ -101,13 +103,14 @@ uv run --group dev pytest
 - Black 必须排除任意层级 `.venv` 及根目录 output/input/pdfs/pickle，防止修改依赖备份。Ruff 当前显式使用 E4/E7/E9/F；保持异常处理粒度合理，不扩大吞异常范围。
 - `test_guides_router.py` 验证只读 AI 指南与带 root_path 的索引，确保调优资料不被服务提供。视觉代码默认值测试必须隔离本机 `VLLM_VISION_*` 环境覆盖。
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉和进程生命周期。
+- `src/scripts/benchmark_vision.py` 对私有图片/上下文/正则检查清单进行真实多端点重复测量，保存图像摘要、原始响应、质量检查和 token/耗时；正则通过不等于完整语义正确，仍需人工对图核验。
 - `src/scripts/build_pdf_case.py` 构造私有扩页 PDF，保存逐页来源与摘要，禁止覆盖；合成重复页与原生长文档分别记录，不把缓存命中收益外推到新内容。
 - 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。按测试中的固定 PDF_NAMES 清单读取 input，新增文件不自动进入回归；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
 - 视觉真实回归：`MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.py -v` 从 input 论文第五页真实解析图像并请求已配置多模态模型，检查图中关键数值及单位；需同时具备 MinerU 与图片模型服务，不用替身。
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。验收须说明模型拓扑、样本范围和证据位置。
 - `src/scripts/benchmark_mineru.py` 对真实 PDF 做已预热 SDK 进程压测，记录批量完成、单任务服务和排队耗时；不含 Celery/独立视觉阶段。输出目录必须新建，校验整本页号、图片及 p2 关键表格/checkbox；样本与结果保持私有。脚本退出前显式收尾各进程的 DocVortex 渲染池，避免嵌套 multiprocessing 等待退出。
 - `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 advanced）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
-- 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，统一 CLI 默认在途 2、等待 21600 秒，兼容脚本为 6/800 秒；两者均不作千页容量承诺。当前长样本仅抽页验证；two-stage 直接 parse_doc 不走 scheduler hard timeout，late ack 仍需核对实际 visibility timeout 及所有共享 broker 的消费者，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
+- 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，统一 CLI 默认在途 2、等待 21600 秒，兼容脚本为 6/800 秒；两者均不作千页容量承诺。已完成合成 400/1000 页及原生 1016 页的整本 SDK 实测，HTTP/Celery 与容量边界另行验收；two-stage 直接 parse_doc 不走 scheduler hard timeout，late ack 仍需核对实际 visibility timeout 及所有共享 broker 的消费者，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
 - 兼容 two-stage 脚本采用滚动在途窗口（`TWO_STAGE_MAX_IN_FLIGHT`，默认 6），输出目录 `.tasks` 原子保存任务 ID/文件摘要/请求参数，重启续查已有任务。查询故障或本地等待超时不重投；只有服务端确认 FAILURE/REVOKED 才有界重试。提交响应丢失时保留 SUBMITTING 并明确停止，不能假定服务器未接收。单输出目录由文件锁限制一个 CLI 写入进程。脚本认证优先环境/.env，再回退本地 TOML 的 FASTAPI.BEARER_TOKEN，不记录令牌。
 - 新批次优先 `uv run python -m src.scripts.batch_parse`，`--mode parse/images/two-stage` 覆盖全部三个异步 API；缺省 advanced、在途 2、等待 21600 秒、尝试 1 次、chunk_type=true、return_txt=false。上传/查询/连接超时独立可配置，HTTPX 流式 multipart；网络阶段超时不是服务端任务期限。普通模式 query 与 two-stage form 自动区分，普通任务 HTTP 500 的 FAILURE/REVOKED 作为终态处理。详见 [统一批量说明](docs/batch-processing.md)。
 - 新批量输出 `results/<相对路径及扩展名>.json`，`.batch.json` 记录批次身份，`.tasks` 记录输入/请求/结果摘要和任务 ID；完成后仍校验输入，输入或请求改变、已记录文件被筛除时拒绝混用。结果缺失/损坏只重取原 ID；SUBMITTING 不重投；改变等待预算允许续跑，改变工作流或档位需新目录。旧脚本保留 pickle/旧记录合同，不与新脚本混用输出目录。

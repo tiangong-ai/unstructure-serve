@@ -70,7 +70,7 @@ def test_image_window_refills_before_slow_first_image_finishes(monkeypatch, tmp_
     active = peak = 0
     contents = []
     for i in range(3):
-        (tmp_path / f"{i}.jpg").write_bytes(b"image")
+        (tmp_path / f"{i}.jpg").write_bytes(f"distinct image {i}".encode())
         contents.append({"type": "image", "img_path": f"{i}.jpg", "page_idx": 0})
     monkeypatch.setattr(images, "VISION_BATCH_SIZE", 2)
 
