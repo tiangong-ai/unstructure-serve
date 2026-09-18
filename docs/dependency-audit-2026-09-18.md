@@ -1,5 +1,7 @@
 # 依赖与 Python 版本审计（2026-09-18）
 
+这是升级前的审计快照；后续已执行的 Python 3.13/MinerU 4.0.2 部署见[部署验收](mineru_4_upgrade_usage.md#python-313-与-mineru-402-部署验收2026-09-18)。
+
 本报告是开发维护资料，正常提交 Git，不通过 FastAPI 文档路由或 llms.txt 提供。核对源包括当前 pyproject/uv.lock、实际应用和 Docker 环境、PyPI 稳定版本元数据、上游源码与发行说明。
 
 **结论：不应为了四档安装 MinerU `[all]`。当前应用可评估改用基础包；MinerU/DocVortex 和一批兼容更新已在隔离环境验证。Python 3.13 是可进一步灰度的候选，3.14 暂不切换。** 本轮没有替换线上 `.venv`、Python、容器镜像或运行依赖，现有 MinerU 4.0.0 / Python 3.12 部署仍有效。

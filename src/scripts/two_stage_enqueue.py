@@ -21,7 +21,10 @@ API_BASE = (
     or "http://localhost:8770"
 ).rstrip("/")
 SUBMIT_URL = f"{API_BASE}/two_stage/task"
-LOG_FILE = "celery_two_stage.log"
+LOG_FILE = Path(
+    os.environ.get("TWO_STAGE_LOG_FILE")
+    or Path(__file__).resolve().parents[2] / "output/logs/celery_two_stage.log"
+)
 DEFAULT_INPUT_DIR = Path("pdfs")
 DEFAULT_OUTPUT_DIR = Path("pickle")
 DEFAULT_INTERVAL = float(os.environ.get("TWO_STAGE_POLL_INTERVAL", 1))
@@ -259,6 +262,7 @@ def run_batch(
 def main() -> None:
     import fcntl
 
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         filename=LOG_FILE,
         level=logging.INFO,

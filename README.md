@@ -59,7 +59,7 @@ curl --fail http://127.0.0.1:30000/health
 pm2 save
 ```
 
-`app` 包含 API 和六个 two-stage worker；`ordinary` 启动普通 worker。统一脚本可从任意目录用绝对路径调用。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
+`app` 包含 API 和六个 two-stage worker；`ordinary` 启动普通 worker。统一脚本可从任意目录用绝对路径调用；重复 start 会跳过已在线进程，修改配置请使用 restart。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
 
 ## 重启后恢复与日常维护
 
