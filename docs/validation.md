@@ -17,6 +17,10 @@ uv run --group dev pytest
 
 持久任务的针对性测试包括 `test_durable_jobs.py`、`test_durable_pipeline.py`、`test_job_api.py` 和 `test_manage_jobs.py`：覆盖发布结果不明、元数据落盘失败、旧代消息、逐阶段复用、文件校验、下载租约与保留期清理。共享视觉容量包含真实 fork/spawn/进程死亡，以及本地 HTTP fixture；只有显式模型回归才算实际推理。
 
+故障回归须保留故障前后的输入摘要、任务 ID/generation、parse manifest 和已完成图片的 SHA256/mtime。实测九页论文在指定单图请求前注入一次失败，恢复后原解析及三张已完成图片未改变，六张最终图片各实际调用模型一次。另对真实 SDK 子进程定点 SIGKILL，检查快速失败、同 ID 恢复及任务进程组收尾。注入故障与上游实际超时分开报告，不全局停止共享模型或清空队列。
+
+持久流水线更新后，生产 API 与七个 worker 已完成真实 p2 的三类幂等任务、轻量下载及旧响应合同，以及同步 p2、普通任务、含图论文和 Office 转换验收；之后生产队列及 active/reserved/scheduled 为空。三卡 Docker 模型与独立 embedding 进程未重启，PM2 已保存。该验收不代表低清图片语义或长期满载测试通过，具体质量与长文档边界见调优指南。
+
 Black 排除任意层级的 `.venv` 和根目录的 input/output/pdfs/pickle，避免格式化模型环境或结果。Ruff 规则以 `pyproject.toml` 为准。
 
 ## 真实 PDF 回归
