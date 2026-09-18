@@ -15,7 +15,20 @@ case "$group" in
   *) echo "Unknown group: $group" >&2; exit 2 ;;
 esac
 case "$action" in
-  start) pm2 start "$config" --only "$names" ;;
+  start)
+    pending=$(pm2 jlist | node -e '
+      let data=""; process.stdin.on("data", chunk => data += chunk);
+      process.stdin.on("end", () => {
+        const live = new Map(JSON.parse(data).map(p => [p.name, p.pm2_env.status]));
+        console.log(process.argv[1].split(",").filter(name =>
+          !["online", "launching"].includes(live.get(name))).join(","));
+      });' "$names")
+    if [[ -n "$pending" ]]; then
+      pm2 start "$config" --only "$pending"
+    else
+      echo "Selected project processes are already running."
+    fi
+    ;;
   restart) pm2 restart "$config" --only "$names" --update-env ;;
   stop) IFS=, read -ra targets <<< "$names"; for target in "${targets[@]}"; do pm2 stop "$target"; done ;;
   status) pm2 status ;;

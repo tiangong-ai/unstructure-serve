@@ -1,6 +1,6 @@
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。目标部署基线是 MinerU 4.0.2 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。本轮运行切换状态以部署记录为准。
+仓库为 `tiangong-ai/unstructure-serve`。当前运行基线是 MinerU 4.0.2 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。当前部署验收见部署记录的 Python 3.13 / 4.0.2 章节。
 
 ## 文档与修改约定
 
@@ -12,7 +12,7 @@
 - `.env`、`.secrets/`、输入文件、模型、结果、日志和回滚环境保持私有。公共配置骨架为 `deploy/secrets.example.toml`；不要在 PM2 模板写凭证或实际视觉服务地址。
 - README 保持功能和入口简明；部署细节集中到部署说明，队列/字段细节集中到对应任务文档。例子中的默认值必须区分代码缺省、模板值和本机覆盖。
 
-- 根目录文档只保留 README.md 与 AGENTS.md；专题说明位于 docs，PM2 模板位于 deploy/pm2，Compose/Docker 位于 deploy/mineru-vllm。统一运维入口为 deploy/manage.sh，PM2 cjs 解析绝对项目路径；直接调用 JSON 模板必须在仓库根目录。Gunicorn 参数集中 deploy/gunicorn.conf.py，缺省 4 worker、5000+0..500 请求回收，PM2 退出窗口 1900 秒。
+- 根目录文档只保留 README.md 与 AGENTS.md；专题说明位于 docs，PM2 模板位于 deploy/pm2，Compose/Docker 位于 deploy/mineru-vllm。统一运维入口为 deploy/manage.sh，start 跳过已 online/launching 的进程，更新配置用 restart；PM2 cjs 解析绝对项目路径；直接调用 JSON 模板必须在仓库根目录。Gunicorn 参数集中 deploy/gunicorn.conf.py，缺省 4 worker、5000+0..500 请求回收，PM2 退出窗口 1900 秒。
 
 ## 主要入口
 
@@ -86,6 +86,8 @@
 - `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/MinIO/独立视觉模型，也不执行实际推理。结合 `/gpu/status` 和 `/two_stage/queue_status` 检查任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
 - 维护先定位当前服务树和 active/reserved 任务，按具体任务清理。不要在日常说明中使用全局 PM2 删除、Redis flushdb 或无差别清空共享任务目录。
 
+- 批量 CLI 日志缺省写入 output/logs，可用 TWO_STAGE_LOG_FILE 覆盖；tests 仅保留真正测试，已移除会在 pytest 收集时重置全局日志并一次性批量提交的旧 test_celery.py 脚本（历史可从 Git 查询）。
+
 ## 开发与验证
 
 修改后运行：
@@ -117,3 +119,6 @@ uv run --group dev pytest
 2026-09-18 第二轮：三个 parse worker（solo/1，prefetch=1）、ONNX 16/1、VLM 并发 8 和 64 页窗口保持；修复同步隔离任务渲染池退出等待。批量脚本采用 6 个在途任务并保存可续跑日志。图片请求继续关闭 thinking，本机和公开 Qwen3.5 模板采样 0.7/0.8/20/1.5；同步窗口仍 3、two-stage vision threads/32。API 和六个 two-stage worker 已重载，九页论文与 6 张图的真实任务通过，PM2 已保存。性能证据和限制见[第二轮记录](docs/mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)及[图片描述优化](docs/mineru_4_upgrade_usage.md#图片描述优化)。
 
 2026-09-18 文档入口：两份完整指南位于 `docs/ai-integration.md`、`docs/performance-tuning.md`，均提交 Git；只有前者经 `/guides/ai-integration.md` 与 `/llms.txt` 提供给调用者。API 已重载、鉴权与调优文档不暴露已验收，177 项常规测试通过。没有新增公网域名或 MCP 服务。
+
+
+2026-09-18 Python 3.13 / 4.0.2：应用已切换 Python 3.13.15、MinerU 4.0.2、DocVortex 0.4.12；基础 mineru/ONNX，无应用 Torch/vLLM。Docker 镜像也升级 MinerU 4.0.2，保留 vLLM 0.21.0 + Torch 2.11.0/CUDA 13。API 4 worker，每 scheduler 池派发 3，共享解析容量 3；普通 worker 新增上线，只消费 urgent/normal，避免抢 two-stage merge 的 default。API、七个 Celery worker 与三卡模型均在线并已 pm2 save。198 项常规测试通过；20 项真实模型与 5 项真实 HTTP/Celery/Office/MinIO 验收通过。重建容器暴露的 Docker Snap CDI 过期 EGL 挂载已在备份后最小修复，三卡 CUDA 实测通过，未重启共享 Docker，其他 PM2 进程 PID 未变化。详细证据、限制与回滚见部署记录；临时/历史日志归入 output。

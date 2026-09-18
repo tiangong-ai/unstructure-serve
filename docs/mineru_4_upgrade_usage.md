@@ -316,9 +316,9 @@ API 与六个 two-stage worker 已重载并完成整本线上验收：同一九�
 
 本次 177 项常规测试通过、20 项模型测试默认跳过；只变更说明与文档只读入口，未重跑模型性能基准。API 已重载，PM2 状态已保存；两个文档入口带凭证 200、无凭证 401，调优文件路径 404，`/health` 与 `/ready` 为 200。轮询示例另验证了成功、普通任务 HTTP 500 失败、two-stage HTTP 200 失败及代理路径前缀。
 
-## Python 3.13 与 MinerU 4.0.2 维护（实施中）
+## Python 3.13 与 MinerU 4.0.2 部署验收（2026-09-18）
 
-应用目标为 Python 3.13.15、MinerU 4.0.2 基础包、DocVortex 0.4.12；不安装应用 Torch/vLLM。直接使用的 HTTP/PDF/Celery/上传依赖显式声明，uv.lock 锁定兼容稳定更新。Docker 单独更新 MinerU 至 4.0.2，保留 vLLM 0.21.0 的 Torch/CUDA 组合。此节在部署验收完成前不代表线上版本已经切换。
+应用已切换为 Python 3.13.15、MinerU 4.0.2 基础包、DocVortex 0.4.12；不安装应用 Torch/vLLM。直接使用的 HTTP/PDF/Celery/上传依赖显式声明，uv.lock 锁定兼容稳定更新。Docker 单独更新 MinerU 至 4.0.2，保留 vLLM 0.21.0 的 Torch/CUDA 组合。本节记录已完成的运行环境切换。
 
 
 ### 统一部署入口与队列隔离
@@ -328,3 +328,35 @@ API 与六个 two-stage worker 已重载并完成整本线上验收：同一九�
 普通 worker 现在只消费 queue_urgent/queue_normal，不消费 default；default 留给 two-stage merge，避免两个 Celery app 抢到对方未注册任务。手动向普通 app 的 default 投递不属于这些 API 的提交路径，也不会由普通模板消费。API、各 worker 和 .env 的队列配置必须保持一致。
 
 应用、worker、模型的启动/停止/恢复命令见仓库 README。API HTTP 容量与解析容量独立配置，具体压测与边界见调优指南第 13 节。配置变更后应重启对应组件并验证实际进程参数，而不只修改模板。
+
+
+### 已部署状态与证据
+
+- 代码主里程碑：b923502（依赖）、dbc75c3（上传/非阻塞/文件生命周期）、ad64ea9（共享容量）、6cd1962（部署/文档/HTTP 派发），首次部署合并 c74ba5c；后续验收及收尾提交见 Git 历史。
+- 应用 Python 3.13.15、MinerU 4.0.2、DocVortex 0.4.12，Linux 实际安装 149 个发行包，uv pip check 与 uv sync --locked --check 通过；uv 工具升级至 0.12.16。
+- Docker `tiangong/mineru-vlm:4.0.2-vllm0.21.0`，本机 image ID `sha256:81d7eea61765bf796c5c481250155ed1ce22bf1d75ff901465169149f662a025`；MinerU/DocVortex 4.0.2/0.4.12，vLLM 0.21.0，Torch 2.11.0+cu130、torchvision 0.26.0+cu130。GPU 0/1/2 的实际张量计算均成功，缓存卷复用。
+- API 7770、4 个 Uvicorn worker；普通 worker 与 六个 two-stage worker 全部在线。队列检查确认普通仅消费 queue_urgent/queue_normal，merge 消费 queue_merge_urgent/default。共享解析槽位 3；每 scheduler 池派发 3。
+- 最终常规测试 198 通过、25 个外部服务用例默认跳过。仍有 TestClient/AnyIO/fork 弃用警告，不等于零告警；未采用 Python 3.14。
+- 新容器上线后的 20 项真实模型用例全部通过：11 份 input 的既定 18 项回归、图片关键数字/单位、三卡推理计数。三 engine 成功请求增量分别为 6/7/5。
+- 另有 5 项真实部署验收全部通过：同步 p2、普通 Celery p2、two-stage 九页论文（含真实图片描述）、由 p2 文本构造的 DOCX 转换、MinIO PDF/JSON/两张逐页 JPEG。MinIO 用例只创建并清理随机测试桶。
+- /health、/ready、鉴权后的 AI 指南返回 200；无凭证指南 401；调优/架构文件通过 HTTP 访问为 404。PM2 状态已保存，其他项目 PM2 进程 PID 保持不变。
+
+真实 HTTP 验收命令：
+
+```bash
+MINERU_RUN_API_PDFS=1 uv run --group dev pytest tests/test_live_api_pdfs.py -v
+```
+
+MinIO 子项需要私有 `MINERU_TEST_MINIO_ADDRESS`（host:port）、`MINERU_TEST_MINIO_ACCESS_KEY`、`MINERU_TEST_MINIO_SECRET_KEY`，仅用于可信本机 HTTP MinIO 测试。缺少时该子项明确跳过。不要把凭证写入命令历史、仓库或测试输出。运行端口可用 `MINERU_TEST_API_URL` 指定；这些测试会真实提交任务，只在维护窗口执行。
+
+### 本次遇到的 Docker Snap CDI 过期记录
+
+apt 升级删除了旧 EGL Wayland 库与对应 JSON，但 `/var/snap/docker/current/etc/cdi/nvidia.yaml` 仍包含它们；新容器因挂载源不存在启动失败。核对整份描述后，只有这两条源失效，新 Wayland2 与 CUDA 驱动文件仍存在。已备份描述，原子移除两条过期挂载并验证 YAML 的其他内容完全不变，再启动本项目容器。未重启 Docker daemon 或修改 GPU 绑定。不要将这个案例泛化为删除所有缺失的驱动挂载；驱动/设备变化应由管理员按实际安装方式刷新 CDI，参考 [NVIDIA CDI 说明](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html)。
+
+### 私有记录与回滚
+
+本轮私有记录集中在 `output/releases/python313-20260918/`：部署前 PM2/配置备份、CDI 前后文件、模型验收结果和实验日志。配置备份包含凭证，不能公开。当前 `.venv` 是指向该目录下 `.venv` 的符号链接，uv lock 保持仓库可复现；不要删除正在被引用的 release 环境。
+
+旧 Python 3.12 环境保留为 `output/releases/python313-20260918/python312-venv`，原镜像 `tiangong/mineru-vlm:4.0.0-vllm0.21.0` 保留。部署前代码为 5612c38。回滚需先停止接收新任务并等 active/reserved 收敛，停止本项目 API/worker，再一起恢复对应代码、`.venv` 链接、模型镜像和 PM2 入口；不能只更换 Python 链接却保留不兼容的新依赖声明。旧 PM2 备份使用旧的根目录配置路径，必须与旧代码配套。恢复后执行真实 PDF、队列和 readiness 验证再保存 PM2。不要用 git reset --hard 或删除共享模型卷作为回滚步骤。
+
+此次长文件仍按既定抽页边界验证，未宣称 400–1000 页整本批量已经完成容量准入；长任务 Redis visibility timeout 等限制仍需专项配置与实测。HTTP 并发的短 PDF 对照见调优指南第 13 节。

@@ -198,3 +198,41 @@ def test_pm2_config_has_absolute_paths_from_any_directory(tmp_path):
         assert app["cwd"] == str(ROOT)
         assert Path(app["script"]).is_absolute()
         assert Path(app["out_file"]).is_absolute()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node required by PM2 launcher")
+@pytest.mark.parametrize("state", ["online", "launching", "stopped"])
+def test_manage_start_does_not_restart_healthy_api(tmp_path, state):
+    fake = tmp_path / "pm2"
+    fake.write_text("""#!/usr/bin/python3
+import json,os,sys
+if sys.argv[1]=='jlist':
+ print(json.dumps([{'name':'unstructured-gunicorn','pm2_env':{'status':os.environ['TEST_PM2_STATE']}}]))
+else:
+ with open(os.environ['TEST_PM2_CAPTURE'],'w') as f: json.dump(sys.argv[1:],f)
+""")
+    fake.chmod(0o755)
+    capture = tmp_path / "calls.json"
+    subprocess.run(
+        ["bash", str(ROOT / "deploy/manage.sh"), "start", "api"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f'{tmp_path}:{os.environ["PATH"]}',
+            "TEST_PM2_STATE": state,
+            "TEST_PM2_CAPTURE": str(capture),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if state in {"online", "launching"}:
+        assert not capture.exists()
+    else:
+        args = json.loads(capture.read_text())
+        assert args == [
+            "start",
+            str(ROOT / "deploy/pm2/ecosystem.config.cjs"),
+            "--only",
+            "unstructured-gunicorn",
+        ]
