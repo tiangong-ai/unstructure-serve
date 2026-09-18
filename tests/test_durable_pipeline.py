@@ -14,6 +14,35 @@ def _pipeline():
     return importlib.import_module("src.services.durable_pipeline")
 
 
+def test_conversion_tempdir_keeps_default_host_parse_capacity(monkeypatch, tmp_path):
+    import os
+    import tempfile
+
+    from src.services import parse_capacity
+
+    pipeline = _pipeline()
+    shared_directory = tmp_path / "host-capacity"
+    monkeypatch.delenv("MINERU_PARSE_SLOT_DIR", raising=False)
+    monkeypatch.setenv("MINERU_PARSE_SLOTS", "1")
+    monkeypatch.setattr(parse_capacity, "_DEFAULT_SLOT_DIRECTORY", shared_directory, raising=False)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"private-pdf")
+    attempt = tmp_path / "attempt"
+    original_tempdir = tempfile.tempdir
+
+    def parsed(*_args, **_kwargs):
+        assert Path(tempfile.gettempdir()).is_relative_to(attempt)
+        with parse_capacity.parse_slot(wait_seconds=0.1):
+            lock_paths = [Path(os.readlink(f"/proc/self/fd/{fd}")) for fd in parse_capacity._fds]
+            assert lock_paths
+            assert all(path.parent == shared_directory for path in lock_paths)
+        return [], str(attempt), None
+
+    monkeypatch.setattr(pipeline, "parse_doc", parsed)
+    assert pipeline._parse_input(source, attempt, backend="advanced") == ([], str(attempt), None)
+    assert tempfile.tempdir == original_tempdir
+
+
 @pytest.fixture
 def prepared(monkeypatch, tmp_path):
     monkeypatch.setenv("MINERU_JOB_STORE_DIR", str(tmp_path / "jobs"))

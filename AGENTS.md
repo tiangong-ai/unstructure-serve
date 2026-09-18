@@ -65,10 +65,10 @@
 
 ## 队列与进程
 
-- 持久任务存储通过 `MINERU_JOB_STORE_DIR` 指定，缺省仓库 `output/jobs`；所有 API/worker 必须共享同一可靠本地文件系统。任务身份绑定原始文件摘要、文件名、模式及参数；同幂等键不能替换内容。原子文件提交结果，元数据落盘失败不能抹掉已提交结果；清理须取得独占生命周期锁并保留过期墓碑，不能删除仍在执行的任务或锁文件。该存储不是跨主机分布式协调。
+- 持久任务存储通过 `MINERU_JOB_STORE_DIR` 指定，缺省仓库 `output/jobs`；所有 API/worker 必须共享同一可靠本地文件系统。任务身份绑定原始文件摘要、文件名、模式及参数；同幂等键不能替换内容。原子文件提交结果，元数据落盘失败不能抹掉已提交结果；清理按 publication→lifetime 顺序取得独占锁并保留过期墓碑，不能删除仍在发布/执行的任务或锁文件。该存储不是跨主机分布式协调。
 
 - 三个异步 POST 支持 Idempotency-Key，保存原始输入后只发送 job_id/generation 引用，固定返回已知 ID/PENDING，不读取发布后的 Redis 状态；不明确发布返回含 ID 的 503 并保留输入。重复键与不同参数/内容冲突 409，过期墓碑 410。Office 转换在异步 parse 隔离进程内执行。
-- durable_pipeline 保存整本 parse manifest、逐图输入及结果；阶段排它锁与生命周期共享锁防重复/清理竞态。默认每波 MINERU_VISION_WAVE_SIZE=32，图片完成返回稳定小引用，全文不得再次放入 chord callback 或 Redis 结果。普通任务也复用整本与逐图结果；只有完成标记提交后才成功，工作区不在 merge 中删除。
+- durable_pipeline 保存整本 parse manifest、逐图输入及结果；阶段排它锁与生命周期共享锁防重复/清理竞态。默认每波 MINERU_VISION_WAVE_SIZE=32，整波完成才发下一波，慢图会阻塞后续波次；不是逐图滚动补位。图片完成返回稳定小引用，全文不得再次放入 chord callback 或 Redis 结果。普通任务也复用整本与逐图结果；只有完成标记提交后才成功，工作区不在 merge 中删除。
 - GET /tasks/{id}/status 不返回全文；/result 校验摘要后流式返回业务 JSON，持锁覆盖下载/断连；POST /resume 在无活跃阶段时提升 generation，旧代消息禁止写入。旧三类 GET 先查持久存储再回退 Redis，并保留各自 null/失败码合同。旧任务不自动迁移。
 - 检查点冻结执行配置摘要（含版本、解析和实际视觉选择、prompt/采样、端点摘要），配置不一致拒绝复用；同模型别名替换权重时提升 MINERU_EXECUTION_PROFILE_REVISION。失败发生在整本解析完成前仍需重做解析；模型响应后落盘前退出也可能重算该图，不承诺 exactly-once 或按页续算。
 - manage_jobs recover 仅原代重发 publication=pending/uncertain；resume 提升代次复用已完成阶段；gc --retention-days 7 缺省预览，--apply 才清理已结束且无活跃租约的任务。未配置自动定时清理；运维必须规划磁盘和保留策略，不清理在途工作区。
@@ -85,7 +85,7 @@
 - API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
 - CPU ONNX 模板每个模型会话的 intra/inter 线程数为 16/1，防止高核数机器上自动线程池过度竞争；这是本机混合 PDF 测量后的配置，不是整个进程的线程上限。VLM 并发保持 8；4 线程及 VLM 16 均有对照证据，不凭单个短文档结果扩大并发。
 
-- `parse_capacity.py` 通过 Linux flock 在同一主机的 API 子进程/普通任务/two-stage 间共享解析槽，缺省 `MINERU_PARSE_SLOTS=3`、等待上限 1800 秒；目录由 `MINERU_PARSE_SLOT_DIR` 指定，缺省系统临时目录下 `tiangong_mineru_parse_slots`。所有参与进程必须使用相同目录/槽数；不是跨主机分布式锁。不删除正在使用的锁文件；fork 的渲染子进程关闭继承租约，进程退出自动释放。scheduler hard timeout 包括等待槽位时间。
+- `parse_capacity.py` 通过 Linux flock 在同一主机的 API 子进程/普通任务/two-stage 间共享解析槽，缺省 `MINERU_PARSE_SLOTS=3`、等待上限 1800 秒；目录由 `MINERU_PARSE_SLOT_DIR` 指定，缺省系统临时目录下 `tiangong_mineru_parse_slots`，在模块加载时固定，不能跟随每任务 Office 转换临时目录改变。所有参与进程必须使用相同目录/槽数；不是跨主机分布式锁。不删除正在使用的锁文件；fork 的渲染子进程关闭继承租约，进程退出自动释放。scheduler hard timeout 包括等待槽位时间。
 
 ## 配置与运维
 
@@ -125,6 +125,7 @@ uv run --group dev pytest
 - 兼容 two-stage 脚本采用滚动在途窗口（`TWO_STAGE_MAX_IN_FLIGHT`，默认 6），输出目录 `.tasks` 原子保存任务 ID/文件摘要/请求参数，重启续查已有任务。查询故障或本地等待超时不重投；只有服务端确认 FAILURE/REVOKED 才有界重试。提交响应丢失时保留 SUBMITTING 并明确停止，不能假定服务器未接收。单输出目录由文件锁限制一个 CLI 写入进程。脚本认证优先环境/.env，再回退本地 TOML 的 FASTAPI.BEARER_TOKEN，不记录令牌。
 - 新批次优先 `uv run python -m src.scripts.batch_parse`，`--mode parse/images/two-stage` 覆盖全部三个异步 API；缺省 advanced、在途 2、等待 21600 秒、尝试 1 次、chunk_type=true、return_txt=false。上传/查询/连接超时独立可配置，HTTPX 流式 multipart；网络阶段超时不是服务端任务期限。普通模式 query 与 two-stage form 自动区分，普通任务 HTTP 500 的 FAILURE/REVOKED 作为终态处理。详见 [统一批量说明](docs/batch-processing.md)。
 - 新 CLI 上传/查询线程上限分别为 `--upload-concurrency=2` / `--query-concurrency=4`，在途窗口包含上传中的文件；仅主线程写 journal。上传从经原摘要校验的匿名快照读取，故障收尾仍保存其他已发请求返回的 ID；identity version 1 保持，改变并发预算允许续跑。幂等键由批次、输入相对身份和尝试次数导出，不含凭证；兼容 requests 脚本保留串行网络行为。
+- 新 CLI 收到 503 且有合法 task_id/publication=uncertain 时保存该 ID 后停止新增提交；续跑查询原 ID，发布恢复仍由运维显式执行。已有 FAILED 记录续跑时也先查询原 ID，以收取服务端显式 resume 的结果；不将 CLI 续查写成自动执行服务端 resume。
 - 新批量输出 `results/<相对路径及扩展名>.json`，`.batch.json` 记录批次身份，`.tasks` 记录输入/请求/结果摘要和任务 ID；完成后仍校验输入，输入或请求改变、已记录文件被筛除时拒绝混用。结果缺失/损坏只重取原 ID；SUBMITTING 不重投；改变等待预算允许续跑，改变工作流或档位需新目录。旧脚本保留 pickle/旧记录合同，不与新脚本混用输出目录。
 - 新 CLI `--resume-only` 只收取已有任务，禁止补交及失败重试，未提交文件计入 deferred；要求已有批次目录。计划停机先停止原客户端再按原命令加此选项收尾，恢复后去掉选项继续提交；它不取消服务端任务，也不绕过 SUBMITTING 核查或输入一致性检查。
 - `MINERU_RUN_BATCH_PDFS=1` 启用 `tests/test_batch_input_pdfs.py`，使用 input/p2 和九页论文整本验证三模式、续跑；常规边界由 `test_batch_parse.py` 覆盖。本客户端更新不改变千页长任务服务端验收边界。

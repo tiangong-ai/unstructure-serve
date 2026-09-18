@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import time
+import uuid
 
 import httpx
 import pytest
@@ -128,6 +129,45 @@ def test_idempotency_key_is_stable_per_batch_input_attempt(tmp_path, mode):
         assert key == hashlib.sha256(identity.encode()).hexdigest()
     assert journal["idempotency_key"] == keys[-1]
     assert "secret-token" not in "".join(p.read_text() for p in opts.output_dir.rglob("*.json"))
+
+
+@pytest.mark.parametrize("resume_only", [False, True])
+def test_failed_journal_collects_same_job_after_server_stage_resume(tmp_path, resume_only):
+    opts = options(tmp_path, count=1)
+    resumed = False
+    posts = []
+
+    def handle(request):
+        if request.method == "POST":
+            posts.append(request.url.path)
+            return reply(request, "retained-job")
+        return reply(request, state="SUCCESS" if resumed else "FAILURE")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        assert batch.run(opts, client=client, token="")["failures"] == 1
+        resumed = True  # An operator resumed the retained server job, not the CLI.
+        opts.resume_only = resume_only
+        assert batch.run(opts, client=client, token="")["successes"] == 1
+    assert len(posts) == 1
+    journal = json.loads((opts.output_dir / ".tasks/0.pdf.json").read_text())
+    assert journal["task_id"] == "retained-job" and journal["attempts"] == 1
+
+
+def test_known_id_is_saved_when_server_reports_uncertain_publication(tmp_path):
+    opts = options(tmp_path, count=1)
+    task_id = str(uuid.uuid4())
+
+    def handle(request):
+        return httpx.Response(
+            503, json={"detail": {"task_id": task_id, "publication": "uncertain"}}
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(RuntimeError):
+            batch.run(opts, client=client, token="")
+    state = json.loads((opts.output_dir / ".tasks/0.pdf.json").read_text())
+    assert state["task_id"] == task_id and state["state"] == "SUBMITTED"
+    assert state["publication"] == "uncertain" and state["attempts"] == 1
 
 
 def test_upload_uses_verified_snapshot_even_if_source_changes_during_http(tmp_path):

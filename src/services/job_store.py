@@ -338,7 +338,10 @@ def collect_job(job_id, *, retention_seconds):
     if retention_seconds < 0:
         raise ValueError("retention_seconds must be nonnegative")
     try:
-        with stage_lock(job_id, "lifetime", blocking=False):
+        with (
+            stage_lock(job_id, "publication", blocking=False),
+            stage_lock(job_id, "lifetime", blocking=False),
+        ):
             record = read_job(job_id)
             if status(job_id)["state"] not in {"SUCCESS", "FAILURE"}:
                 return False

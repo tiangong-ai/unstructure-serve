@@ -1,5 +1,6 @@
 import json
 import time
+from threading import Event
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -150,3 +151,23 @@ def test_start_does_not_clear_a_concurrent_failure(store):
     job_store.fail_job(job["job_id"], RuntimeError("other image failed"))
     job_store.start_job(job["job_id"])
     assert job_store.status(job["job_id"])["state"] == "FAILURE"
+
+
+def test_collection_cannot_delete_input_during_uncertain_publication_recovery(store):
+    job = create(store)
+    job_store.update_job(job["job_id"], state="FAILURE", publication="uncertain")
+    entered, release = Event(), Event()
+
+    def publisher(_record):
+        entered.set()
+        assert release.wait(2)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(job_store.publish_job, job["job_id"], publisher)
+        assert entered.wait(2)
+        try:
+            assert not job_store.collect_job(job["job_id"], retention_seconds=0)
+            assert job_store.source_path(job["job_id"]).is_file()
+        finally:
+            release.set()
+        future.result()

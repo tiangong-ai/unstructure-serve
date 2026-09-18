@@ -19,6 +19,12 @@ class InputChangedBeforeUpload(ValueError):
     """A verified local failure that occurred before any POST was sent."""
 
 
+class PublicationUncertain(RuntimeError):
+    def __init__(self, task_id):
+        self.task_id = task_id
+        super().__init__(f"Publication uncertain for retained server task {task_id}")
+
+
 def _atomic_write(path: Path, value, *, binary=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = "wb" if binary else "w"
@@ -135,7 +141,12 @@ def run_batch(
             "state": state,
             "result_path": result_path,
         }
-        if state.get("task_id") and state["state"] in {"SUBMITTED", "SUCCESS"}:
+        queryable = {"SUBMITTED", "SUCCESS"}
+        if batch_id is not None:
+            # The retained server job may have been explicitly resumed since
+            # this journal observed FAILURE. Recheck before creating another ID.
+            queryable.add("FAILED")
+        if state.get("task_id") and state["state"] in queryable:
             record["deadline"] = time.monotonic() + poll_timeout
             active[state["task_id"]] = record
         elif resume_only:
@@ -287,6 +298,11 @@ def _run_parallel(
     def accept_upload(future, record):
         try:
             task_id = future.result()
+        except PublicationUncertain as exc:
+            record["state"].update(state="SUBMITTED", task_id=exc.task_id, publication="uncertain")
+            _atomic_write(record["state_path"], record["state"])
+            record.pop("before_submit", None)
+            raise  # Stop new submissions; retain the ID for query/recovery.
         except InputChangedBeforeUpload:
             record["state"] = record.pop("before_submit")
             _atomic_write(record["state_path"], record["state"])

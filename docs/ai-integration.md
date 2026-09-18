@@ -315,6 +315,8 @@ uv run python -m src.scripts.batch_parse \
 
 提交返回 `200 + PENDING` 只说明获得了已保存的任务身份。若 broker 发布结果不明，返回 `503`，`detail.task_id` 和 `detail.publication=uncertain` 标识保留的任务；先保存 ID 并查询。丢失全部 POST 响应时，可以在确认原始文件及参数未变后使用**原幂等键**重复同一 POST 找回 ID；不带键的重复上传会创建新任务。CLI 对 SUBMITTING 仍保守停止，由调用方核查后恢复记录，不自动重传。
 
+统一 CLI 会保存 503 响应中明确返回的任务 ID 后停止新增提交，续跑继续查询；没有发布的任务需要运维恢复发布。已记录失败的 ID 在续跑时也先重新查询，因此服务端显式 resume 后可以沿用原输出目录收取结果。CLI 续跑本身不调用服务端 resume。
+
 | 入口 | 合同 |
 | --- | --- |
 | `GET /tasks/{task_id}/status` | 轻量 JSON：state、stage、generation、publication，以及可用的图片完成数；不含全文。未知持久 ID 返回 404，清理后为 EXPIRED |

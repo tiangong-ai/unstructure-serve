@@ -21,7 +21,12 @@ import uuid
 from dotenv import load_dotenv
 import httpx
 
-from src.scripts.batch_runner import InputChangedBeforeUpload, _atomic_write, run_batch
+from src.scripts.batch_runner import (
+    InputChangedBeforeUpload,
+    PublicationUncertain,
+    _atomic_write,
+    run_batch,
+)
 from src.utils.file_conversion import CONVERTIBLE_OFFICE_EXTENSIONS
 from src.utils.mineru_support import mineru_supported_extensions
 
@@ -188,6 +193,14 @@ class TaskAPI:
                 headers=headers,
                 timeout=httpx.Timeout(self.opts.upload_timeout, connect=self.opts.connect_timeout),
             )
+        if response.status_code == 503:
+            try:
+                detail = response.json().get("detail", {})
+                task_id = detail.get("task_id")
+                if detail.get("publication") == "uncertain" and str(uuid.UUID(task_id)) == task_id:
+                    raise PublicationUncertain(task_id)
+            except (AttributeError, TypeError, ValueError):
+                pass  # Other 503 responses retain the ambiguous submission contract.
         response.raise_for_status()
         data = response.json()
         task_id = data.get("task_id") if isinstance(data, dict) else None

@@ -8,6 +8,10 @@ import tempfile
 from threading import Lock
 import time
 
+# A durable conversion redirects tempfile.tempdir into its private attempt.
+# Capacity must remain shared with other tasks and API processes on this host.
+_DEFAULT_SLOT_DIRECTORY = Path(tempfile.gettempdir()) / "tiangong_mineru_parse_slots"
+
 # A render pool fork must not keep its parent's capacity lease alive. Closing
 # an inherited descriptor is safe; LOCK_UN here would unlock the parent's lease.
 _fds: set[int] = set()
@@ -40,10 +44,7 @@ def parse_slot(*, wait_seconds: float | None = None):
     )
     if timeout <= 0:
         raise ValueError("MINERU_PARSE_SLOT_WAIT_SECONDS must be positive")
-    directory = Path(
-        os.getenv("MINERU_PARSE_SLOT_DIR")
-        or (Path(tempfile.gettempdir()) / "tiangong_mineru_parse_slots")
-    )
+    directory = Path(os.getenv("MINERU_PARSE_SLOT_DIR") or _DEFAULT_SLOT_DIRECTORY)
     directory.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout
     handles = []
