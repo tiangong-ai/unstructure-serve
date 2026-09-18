@@ -9,7 +9,11 @@ from loguru import logger
 from src.config.config import GENIMI_API_KEY, OPENAI_API_KEY
 from src.services.vision_service_genimi import vision_completion_genimi
 from src.services.vision_service_openai import vision_completion_openai
-from src.services.vision_service_vllm import has_vllm_credentials, vision_completion_vllm
+from src.services.vision_service_vllm import (
+    DEFAULT_VISION_MODEL as DEFAULT_VLLM_MODEL,
+    has_vllm_credentials,
+    vision_completion_vllm,
+)
 
 
 @dataclass(frozen=True)
@@ -47,8 +51,8 @@ def _base_providers() -> Dict[str, ProviderSpec]:
         ),
         "vllm": ProviderSpec(
             key="vllm",
-            models=["Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"],
-            default_model="Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+            models=[DEFAULT_VLLM_MODEL],
+            default_model=DEFAULT_VLLM_MODEL,
             call=vision_completion_vllm,
             has_credentials=has_vllm_credentials,
         ),

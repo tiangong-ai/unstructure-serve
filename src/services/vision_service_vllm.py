@@ -13,7 +13,7 @@ from src.services.vision_service_openai_compatible import (
 )
 from src.services.vision_capacity import EndpointScheduler
 
-DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
+DEFAULT_VISION_MODEL = "nv-community/Qwen3.8-Flash-Next-NVFP4"
 _FALLBACK_API_KEY = "not-required"
 _ENABLE_THINKING_ENV = "VLLM_ENABLE_THINKING"
 _TEMPERATURE_ENV = "VLLM_VISION_TEMPERATURE"

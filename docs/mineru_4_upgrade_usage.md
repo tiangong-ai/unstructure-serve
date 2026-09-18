@@ -201,3 +201,9 @@ nvidia-smi 正常不保证容器内 CUDA 可用。检查宿主 UVM 设备节点�
 6. 失败时同步恢复代码、依赖、配置和必要的模型版本；只恢复其中一项可能造成不兼容。
 
 已完成升级的提交与操作过程由 Git 历史追溯。当前文档不维护机器私有目录、历史进程状态或逐轮增长的测试数量。
+
+## 默认图片描述模型
+
+默认视觉模型为 `nv-community/Qwen3.8-Flash-Next-NVFP4`，由独立 Docker vLLM 服务提供。将其真实地址写入私有 `VLLM_BASE_URLS`，逗号分隔多个端点，保留 `/v1`。无鉴权的模型服务无需真实 API key；若清空环境变量，须一并检查 TOML 的 VLLM.API_KEY，避免空值回退到旧配置。不要改动 MinerU 的模型地址或解析模型。
+
+模型切换应同步 `VISION_MODEL`、`VISION_MODELS_VLLM`、`VISION_DEFAULT_MODEL_VLLM`、PM2 API 模板与代码默认值；模板执行 revision 为 2。排空任务后重载 API、普通 worker 和 two-stage worker，检查 OpenAPI 模型枚举及各端点真实图片请求。旧模型结果的检查点因配置摘要不同不能直接续用。

@@ -16,7 +16,7 @@
         "VISION_PROVIDER_CHOICES": "vllm",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
-        "VISION_MODEL": "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+        "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
       },
@@ -41,7 +41,7 @@
         "VISION_PROVIDER_CHOICES": "vllm",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
-        "VISION_MODEL": "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+        "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30001"
       },
@@ -66,7 +66,7 @@
         "VISION_PROVIDER_CHOICES": "vllm",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
-        "VISION_MODEL": "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+        "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30002"
       },
@@ -91,7 +91,7 @@
         "VISION_PROVIDER_CHOICES": "vllm",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
-        "VISION_MODEL": "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+        "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30003"
       },

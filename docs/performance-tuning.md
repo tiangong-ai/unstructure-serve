@@ -167,7 +167,7 @@ MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换
 
 ### 8.2 质量与成本
 
-默认请求 `enable_thinking=false`。Qwen3.5 图表/流程图对照后，公开模板使用 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0；通用代码默认仍为 1/1/40/2，`min_p=0`、`repetition_penalty=1`。这是特定模型配置，不应盲目复制给其他模型；更换模型时核对是否接受 `chat_template_kwargs`、top_k 等扩展参数。
+默认请求 `enable_thinking=false`。当前 Qwen3.8 Flash Next 模板沿用此前图表/流程图对照的采样值： temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0；通用代码默认仍为 1/1/40/2，`min_p=0`、`repetition_penalty=1`。这是特定模型配置，不应盲目复制给其他模型；更换模型时核对是否接受 `chat_template_kwargs`、top_k 等扩展参数。
 
 独立模型选择涉及 `VISION_MODEL`、`VISION_MODELS_VLLM`、`VISION_DEFAULT_MODEL_VLLM` 及 endpoint 的实际 served model name。同步/普通任务对未知值可能兜底，而 two-stage 在路由层校验枚举；更新后同时重载 API 与相关 worker，并重新读取 OpenAPI，不以 200 状态推断一定用了指定模型。
 
@@ -315,3 +315,14 @@ vLLM 视觉客户端默认 `VLLM_VISION_TIMEOUT_SECONDS=180`、`VLLM_VISION_MAX_
 针对这些气象图，另做两种提示词、两组采样及普通双线性 2× 放大，共 24 次有界请求，每请求超时 90 秒、SDK 重试 0 次。temperature=0.7 / presence_penalty=1.5 组合的响应为 1.64–4.13 秒，但仍误读日期、区间或数值；repetition penalty=1.05 的两条输出虽命中关键词，人工核对仍有错误日期，另有一条 54.30 秒的虚构数列。2× 放大改善年份和标题，输入 token 从 589 增至 853，仍有数值遗漏和区间误读。均未达到采用门槛，现有默认 prompt、采样和原图处理保持。清单本身也须对源图复核；关键词命中不代替数值归属与日期检查。少数组间请求有短暂重叠，这些耗时不是严格独占 A/B；原始响应及修订后的复核报告保存在私有测试目录。
 
 轻量下载的真实 API 验证复用六个已完成 p2/论文任务：状态仅 179–180 B，最终 JSON 为 12,553–142,168 B，业务内容与旧 GET 完全一致；客户端原记录副本续取两份结果并逐字节匹配，重复运行不再下载。此项没有新建任务或调用模型，验证的是传输与续跑合同。
+
+
+### Qwen3.8 Flash Next 默认模型切换验证
+
+默认视觉模型切换为 `nv-community/Qwen3.8-Flash-Next-NVFP4`，同时更新代码兜底、PM2 API 模板、模型枚举和私有端点配置；执行配置 revision 提升为 2，避免复用旧模型的检查点。MinerU 解析模型未改变。维持非 thinking、temperature/top_p/top_k/presence_penalty/repetition_penalty=0.2/0.8/20/0/1，不在此次切换中调整提示词或掩盖输出问题。
+
+使用原有 14 张论文/中文流程图，加 3 张低清气象图，完整遍历两个模型端点，每图每端点一次、seed=42、并发 2，共 34 次请求，耗时约 42.7 秒。全部请求正常返回并以 stop 结束，但原有内容规则仅 28 次通过、6 次未通过。该结果不能与此前不同 seed/轮数的 Qwen3.5 测量直接比较，也不能据 HTTP 成功宣称图像质量全部通过。
+
+人工复核发现：weather-seq58/59 在两个端点的输出均存在漏识/误读、重复气压值或按等差序列外推图中不存在的数列；paper-3 在一个端点估算了未印出的标记坐标。paper-4 的一条输出用 `Y ≈` 表述图中已印出的 Avg 13.9/15.3，触发宽泛的坐标规则，不能把这一项等同于捏造数值。保留原规则结果与原响应，不为通过回归修改判定或删除异常数字。低清密集图仍未通过质量验收，需要独立的质量改进工作。
+
+真实论文第五页经 MinerU 提取图像后的数字/单位回归通过；真实 HTTP 的同步解析、普通解析任务、九页论文 two-stage，以及第五页的同步/普通任务图片增强均完成，核对图像块和可见数字通过。OpenAPI 已显示新模型枚举，持久图片任务的 profile 记录新模型、revision=2 和两个端点标识。私有证据位于 `output/vision-qwen38-switch-20260918`，其中 `vision-results` 保留完整的双端点原始响应与失败项。

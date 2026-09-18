@@ -52,10 +52,11 @@
 
 ## 视觉与资产
 
-- 默认视觉 provider 为 vLLM；OpenAI/Gemini 实现仍可显式配置。未知 provider/model 在同步图片接口及普通图片任务中宽松接收，由服务兜底；two-stage 则在路由层校验枚举并可返回 422。
+- 默认视觉 provider 为 vLLM，默认模型为 `nv-community/Qwen3.8-Flash-Next-NVFP4`；代码兜底、模型枚举、`.env.example` 与 PM2 模板须同步。真实视觉端点仅写私有配置，不替换 MinerU 解析模型端点。模型切换后更新执行配置 revision、排空并重载 API 与相关 worker，旧检查点不得混用。
+- OpenAI/Gemini 实现仍可显式配置。未知 provider/model 在同步图片接口及普通图片任务中宽松接收，由服务兜底；two-stage 则在路由层校验枚举并可返回 422。
 - vLLM 必须有 `VLLM_BASE_URL(S)` 才可用，API key 可选。此地址是独立图片描述模型，与 `MINERU_MODEL_VLM_SERVER_URL` 不同。
 - OpenAI/vLLM 复用客户端池。vLLM 通过 vision_capacity.py 在本机共享端点轮换和槽位，缺省每端点 16、等待 180 秒、临时故障冷却 30 秒。所有调用方共用 VLLM_VISION_SLOT_DIR；槽数变更须排空并统一新目录，不能删除在用锁。等价 URL 去重，不同 DNS 别名指向同一服务需配置方确认。连接/超时/408/429/5xx 可冷却切换，400 等请求错误直接失败；请求只编码一次。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
-- 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.5 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
+- 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.8 Flash Next 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
 - 默认 OpenAI-compatible 提示词放在 system，文档上下文作为 user 数据；自定义 prompt 保持优先。图表只提取印出的值，不根据柱高/坐标估算；流程图保留中间步骤。增强时以独立视觉结果替换 SDK 生成的图示正文，仍保留印刷标题/脚注；纯解析和被筛除图片保持 SDK 内容。
 - vLLM 视觉客户端默认单次读写阶段超时 180 秒、SDK 重试 0 次，分别由 VLLM_VISION_TIMEOUT_SECONDS/MAX_RETRIES 控制，故障继续尝试下一端点；不是整份任务的墙钟截止时间。
 - 默认图片提示词保留图中数字、单位、标签和关系，合并同类数据，避免重复 caption、无关引言和推断数值；不压缩图片或按字数硬截断。清理仅处理开头完整 thinking 段和确定的中英文套话，保留正文及不确定性。原生 DOCX 严格 OCR 不启用套话、Page/ChunkType 或 Image Description 标记清理，避免误删原图文字。自定义 prompt 继续优先。
@@ -115,6 +116,7 @@ uv run --group dev pytest
 - `test_guides_router.py` 验证只读 AI 指南与带 root_path 的索引，确保调优资料不被服务提供。视觉代码默认值测试必须隔离本机 `VLLM_VISION_*` 环境覆盖。
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉和进程生命周期。
 - `src/scripts/benchmark_vision.py` 对私有图片/上下文/正则检查清单进行真实多端点重复测量，保存图像摘要、原始响应、质量检查和 token/耗时；正则通过不等于完整语义正确，仍需人工对图核验。
+- Qwen3.8 默认模型切换已完成真实 API/任务和论文图验证，但低清气象图仍有重复/虚构数列，不能宣称全面质量通过；证据与规则误报分析集中见 docs/performance-tuning.md。
 - 图片验收须包含低清密集图表；已有真实气象图暴露双端点超时及 stop 结束后的虚构数列，不得以技术 SUCCESS、仅缩短输出或删去错误数字宣称质量通过。失败证据、单图检查点及候选对照保持私有；通用数列拒收规则须有合法表格负例和图像依据，不能盲目上线。
 - 持久流水线已完成真实构造 400 页 advanced 纯解析、全部页码/表格/摘要及 CLI 原 ID 续取验收，并与九页含图论文并行完成；这不能替代带图 400 页的质量验收，实测条件与失败边界统一见调优指南。
 - `src/scripts/build_pdf_case.py` 构造私有扩页 PDF，保存逐页来源与摘要，禁止覆盖；合成重复页与原生长文档分别记录，不把缓存命中收益外推到新内容。

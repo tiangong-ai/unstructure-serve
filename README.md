@@ -39,6 +39,8 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表。支持单文件同步调用，以及带提交幂等、阶段恢复和结果下载的异步任务。
 
+默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
+
 当前技术栈：**Python 3.13.15 · MinerU 4.0.2 · CPU ONNX · Docker vLLM 0.21.0 · FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
 ## 先理解需要运行什么

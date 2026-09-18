@@ -13,7 +13,7 @@
         "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
         "VISION_PROVIDER": "vllm",
         "VISION_PROVIDER_CHOICES": "vllm",
-        "VISION_MODEL": "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4",
+        "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS": "600",
