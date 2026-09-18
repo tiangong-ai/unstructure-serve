@@ -6,6 +6,7 @@
 
 - **每次修改代码、配置或说明，都同步更新本文件涉及的规则或入口。**
 - 新增 [AI 接入指南](docs/ai-integration.md) 与 [调优指南](docs/performance-tuning.md)。调优文档正常纳入 Git，但仅供仓库开发运维使用，不通过服务路由、静态目录或 llms.txt 暴露。接口变更同步更新 AI 指南；硬件/调度规则变更同步更新调优指南。
+- [依赖与 Python 审计](docs/dependency-audit-2026-09-18.md)及[逐包清单](docs/dependency-inventory-2026-09-18.csv)为开发维护记录，不通过文档服务提供。审计候选不等于线上版本：MinerU 4.0.2 基础包在 ONNX+Docker 下四档已做隔离验证，all/full 不是四档开关；生产依赖仍以 uv.lock 与部署记录为准。Python 3.14 的默认 forkserver 与实际 semaphore 退出警告须专项处理，不能仅凭常规测试通过迁移。
 - 当前操作以 [README](README.md)、[部署与回归](mineru_4_upgrade_usage.md)、[普通异步任务](mineru_with_images_task_usage.md)、[two-stage](two_stage_task_usage.md) 为准。
 - [历史文档](docs/history/README.md)保留原版本的样本、评估和测试结果，不作为当前安装步骤。[多卡计划](multi_gpu_vllm_scaling_todolist.md)明确区分已实现与待验证能力。
 - `.env`、`.secrets/`、输入文件、模型、结果、日志和回滚环境保持私有。公共配置骨架为 `deploy/secrets.example.toml`；不要在 PM2 模板写凭证或实际视觉服务地址。

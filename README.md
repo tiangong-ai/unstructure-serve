@@ -9,6 +9,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [AI 接入指南](docs/ai-integration.md) | 纯解析/图片增强、参数、任务恢复、结果消费、OpenAPI 与远程 AI 接入 |
+| [依赖与 Python 审计](docs/dependency-audit-2026-09-18.md) | extras 含义、逐包升级约束与 Python 隔离验证；开发维护资料 |
 | [调优指南](docs/performance-tuning.md) | 开发运维文档：硬件/模型变化后的测量与调优；不通过服务接口提供 |
 | [部署与回归](mineru_4_upgrade_usage.md) | 安装、配置优先级、Docker/PM2、验证、当前主机与回滚记录 |
 | [普通异步任务](mineru_with_images_task_usage.md) | `/mineru/task`、`/mineru_with_images/task`、普通 worker 与 MinIO |
