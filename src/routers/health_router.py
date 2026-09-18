@@ -24,7 +24,7 @@ async def health_check(pretty: bool = Depends(pretty_response_flag)):
 async def readiness_check(pretty: bool = Depends(pretty_response_flag)):
     """Probe every configured VLM endpoint, without exposing URLs or credentials.
 
-    This does not test Redis, MinIO or the separate image-description service.
+    This does not test Redis or the separate image-description service.
     The endpoint pool has no failover, so every endpoint must be reachable.
     """
     from mineru.config import config

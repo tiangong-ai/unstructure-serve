@@ -235,7 +235,7 @@ def two_stage_task_status(task_id: str):
     if state == states.SUCCESS:
         payload = async_result.result or {}
         items = [TextElementWithPageNum(**chunk) for chunk in payload.get("result", [])]
-        response = ResponseWithPageNum(result=items, txt=payload.get("txt"), minio_assets=None)
+        response = ResponseWithPageNum(result=items, txt=payload.get("txt"))
         return {"task_id": task_id, "state": state, "result": response}
 
     if state in {states.FAILURE, states.REVOKED}:

@@ -3,14 +3,7 @@ from typing import Optional
 
 from loguru import logger
 
-from src.models.models import MinioAssetSummary, TextElementWithPageNum
-from src.routers.mineru_minio_utils import (
-    MinioContext,
-    build_minio_prefix,
-    initialize_minio_context,
-    upload_meta_text,
-    upload_pdf_assets,
-)
+from src.models.models import TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
@@ -92,51 +85,12 @@ def _parse_with_scheduler(
     return items, txt_text
 
 
-def _maybe_upload_minio(
-    *,
-    minio_context: Optional[MinioContext],
-    minio_prefix_value: Optional[str],
-    processing_path: str,
-    minio_meta: Optional[str],
-    items: list[TextElementWithPageNum],
-) -> Optional[MinioAssetSummary]:
-    if not minio_context:
-        return None
-    assert minio_prefix_value is not None
-    chunks_with_pages = [
-        (item.text, item.page_number, item.type)
-        for item in items
-        if item.text and item.text.strip()
-    ]
-    minio_assets_summary = upload_pdf_assets(
-        minio_context,
-        minio_prefix_value,
-        processing_path,
-        chunks_with_pages,
-    )
-    if minio_meta is not None:
-        meta_object = upload_meta_text(
-            minio_context,
-            minio_prefix_value,
-            minio_meta,
-        )
-        minio_assets_summary.meta_object = meta_object
-    return minio_assets_summary
-
-
 def run_mineru_local_job(
     *,
     source_path: str,
     original_filename: str,
     chunk_type: bool,
     return_txt: bool,
-    save_to_minio: bool,
-    minio_address: Optional[str],
-    minio_access_key: Optional[str],
-    minio_secret_key: Optional[str],
-    minio_bucket: Optional[str],
-    minio_prefix: Optional[str],
-    minio_meta: Optional[str],
     backend_value: Optional[str] = None,
     pipeline: str = "default",
     vision_provider: Optional[str] = None,
@@ -155,8 +109,6 @@ def run_mineru_local_job(
 
     backend = backend_value or resolve_backend_from_env()
     cleanup_paths: set[str] = {source_path}
-    minio_context: Optional[MinioContext] = None
-    minio_prefix_value: Optional[str] = None
     processing_path = source_path
     scheduler_options: dict[str, object] = {}
 
@@ -173,18 +125,6 @@ def run_mineru_local_job(
             processing_path, conversion_cleanup = maybe_convert_to_pdf(source_path, file_ext)
             cleanup_paths.update(conversion_cleanup)
 
-        if save_to_minio:
-            if not processing_path.lower().endswith(".pdf"):
-                raise MineruTaskError("MinIO storage requires a PDF input after preprocessing.")
-            minio_context = initialize_minio_context(
-                save_to_minio,
-                minio_address,
-                minio_access_key,
-                minio_secret_key,
-                minio_bucket,
-            )
-            minio_prefix_value = build_minio_prefix(filename, minio_prefix)
-
         items, txt_text = _parse_with_scheduler(
             processing_path,
             chunk_type,
@@ -193,18 +133,9 @@ def run_mineru_local_job(
             pipeline=pipeline,
             **scheduler_options,
         )
-        minio_assets_summary = _maybe_upload_minio(
-            minio_context=minio_context,
-            minio_prefix_value=minio_prefix_value,
-            processing_path=processing_path,
-            minio_meta=minio_meta,
-            items=items,
-        )
-
         return {
             "result": [item.model_dump() for item in items],
             "txt": txt_text if return_txt else None,
-            "minio_assets": minio_assets_summary.model_dump() if minio_assets_summary else None,
         }
     except MineruTaskError:
         raise

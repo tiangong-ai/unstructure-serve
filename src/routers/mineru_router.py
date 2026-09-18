@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 
 from starlette.concurrency import run_in_threadpool
 
@@ -7,14 +6,7 @@ from src.utils.upload_io import persist_upload, await_parse_future, cleanup_afte
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.models.models import MinioAssetSummary, ResponseWithPageNum, TextElementWithPageNum
-from src.routers.mineru_minio_utils import (
-    MinioContext,
-    build_minio_prefix,
-    initialize_minio_context,
-    upload_meta_text,
-    upload_pdf_assets,
-)
+from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
@@ -52,24 +44,6 @@ async def mineru(
         MinerUTier.ADVANCED,
         description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
     ),
-    save_to_minio: bool = Form(
-        False,
-        description="Store the parsed PDF, JSON payload, and per-page images in MinIO.",
-    ),
-    minio_address: Optional[str] = Form(
-        None, description="MinIO server address, e.g. https://minio.local:9000"
-    ),
-    minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
-    minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
-    minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
-    minio_prefix: Optional[str] = Form(
-        None,
-        description="Optional custom prefix for stored assets; defaults to mineru/<filename>.",
-    ),
-    minio_meta: Optional[str] = Form(
-        None,
-        description="Optional string stored as meta.txt next to source.pdf when save_to_minio=true.",
-    ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
     return_txt: bool = False,
@@ -100,10 +74,6 @@ async def mineru(
 
     backend_value = tier.value
 
-    if not save_to_minio:
-        # Ignore meta payloads when MinIO persistence is disabled.
-        minio_meta = None
-
     tmp_path = await run_in_threadpool(persist_upload, file, suffix=file_ext)
 
     conversion_cleanup: list[str] = []
@@ -125,24 +95,6 @@ async def mineru(
     fut = None
 
     try:
-        minio_context: MinioContext = None
-        minio_prefix_value: Optional[str] = None
-        if save_to_minio:
-            if not processing_path.lower().endswith(".pdf"):
-                raise HTTPException(
-                    status_code=400,
-                    detail="MinIO storage requires a PDF input after preprocessing.",
-                )
-            minio_context = await run_in_threadpool(
-                initialize_minio_context,
-                save_to_minio,
-                minio_address,
-                minio_access_key,
-                minio_secret_key,
-                minio_bucket,
-            )
-            minio_prefix_value = build_minio_prefix(filename, minio_prefix)
-
         # Dispatch to GPU scheduler; this returns a Future
         fut = scheduler.submit(
             processing_path,
@@ -177,34 +129,9 @@ async def mineru(
         txt_text = payload.get("txt")
         if return_txt:
             txt_text = build_plain_text(items)
-        minio_assets_summary: Optional[MinioAssetSummary] = None
-        if minio_context:
-            assert minio_prefix_value is not None  # for mypy
-            chunks_with_pages = [
-                (item.text, item.page_number, item.type)
-                for item in items
-                if item.text and item.text.strip()
-            ]
-            minio_assets_summary = await run_in_threadpool(
-                upload_pdf_assets,
-                minio_context,
-                minio_prefix_value,
-                processing_path,
-                chunks_with_pages,
-            )
-            if minio_meta is not None:
-                meta_object = await run_in_threadpool(
-                    upload_meta_text,
-                    minio_context,
-                    minio_prefix_value,
-                    minio_meta,
-                )
-                minio_assets_summary.meta_object = meta_object
-
         response_model = ResponseWithPageNum(
             result=items,
             txt=txt_text if return_txt else None,
-            minio_assets=minio_assets_summary,
         )
         return await run_in_threadpool(json_response, response_model, pretty)
     except Exception as e:

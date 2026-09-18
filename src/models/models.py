@@ -9,24 +9,9 @@ class TextElementWithPageNum(BaseModel):
     type: Optional[str] = None
 
 
-class MinioPageImage(BaseModel):
-    page_number: int
-    object_name: str
-
-
-class MinioAssetSummary(BaseModel):
-    bucket: str
-    prefix: Optional[str] = None
-    pdf_object: str
-    json_object: str
-    page_images: List[MinioPageImage]
-    meta_object: Optional[str] = None
-
-
 class ResponseWithPageNum(BaseModel):
     result: List[TextElementWithPageNum]
     txt: Optional[str] = None
-    minio_assets: Optional[MinioAssetSummary] = None
 
     @classmethod
     def from_result(cls, result: List[Tuple[str, int]]):

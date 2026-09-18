@@ -1,12 +1,8 @@
-import hashlib
 import json
 import logging
 import os
-import pickle
-import tempfile
-import time
+import time  # noqa: F401 - retained for legacy callers/tests controlling the clock
 import tomllib
-from collections import deque
 from pathlib import Path
 from typing import Dict, Iterable
 
@@ -127,20 +123,6 @@ def _bearer_token() -> str:
     return token
 
 
-def _atomic_write(path: Path, value, *, binary=False):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
-        temporary = Path(stream.name)
-        try:
-            data = pickle.dumps(value) if binary else json.dumps(value, ensure_ascii=False).encode()
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-
 def run_batch(
     session,
     paths,
@@ -152,111 +134,22 @@ def run_batch(
     poll_timeout=DEFAULT_TIMEOUT,
     max_attempts=MAX_ATTEMPTS,
 ):
-    """Feed a bounded window, retaining task IDs across restarts and poll errors.
+    # Keep the legacy request identity and pickle layout for existing journals.
+    from src.scripts.batch_runner import run_batch as run
 
-    The CLI holds an exclusive output-directory lock. A timeout stops local
-    waiting; it never cancels or resubmits a possibly running server task.
-    """
-    if max_in_flight < 1 or poll_timeout <= 0 or poll_interval < 0 or max_attempts < 1:
-        raise ValueError("Invalid batch limits")
-    output_dir = Path(output_dir)
-    state_dir = output_dir / ".tasks"
-    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    waiting = deque()
-    active = {}
-    summary = {"successes": 0, "failures": 0, "skipped": 0}
-    stems = set()
-    request = {"api_base": API_BASE, "form": _build_form_data()}
-
-    # Validate all resumptions before submitting new work.
-    for path in paths:
-        path = Path(path)
-        if path.stem in stems:
-            raise ValueError(f"Duplicate output name: {path.stem}")
-        stems.add(path.stem)
-        if (output_dir / f"{path.stem}.pkl").is_file():
-            summary["skipped"] += 1
-            continue
-        with path.open("rb") as source:
-            fingerprint = hashlib.file_digest(source, "sha256").hexdigest()
-        state_path = state_dir / f"{path.stem}.json"
-        if state_path.exists():
-            state = json.loads(state_path.read_text())
-            if state["sha256"] != fingerprint or state["request"] != request:
-                raise ValueError(f"Input or request changed for {path}; use a new output directory")
-            if state["state"] == "SUBMITTING":
-                raise RuntimeError(f"Submission outcome unknown for {path}; journal: {state_path}")
-        else:
-            state = {"sha256": fingerprint, "request": request, "attempts": 0, "state": "NEW"}
-        record = {"path": path, "state_path": state_path, "state": state}
-        if state.get("task_id") and state["state"] in {"SUBMITTED", "SUCCESS"}:
-            record["deadline"] = time.monotonic() + poll_timeout
-            active[state["task_id"]] = record
-        else:
-            waiting.append(record)
-
-    while waiting or active:
-        while waiting and len(active) < max_in_flight:
-            record = waiting.popleft()
-            path, state = record["path"], record["state"]
-            if state["attempts"] >= max_attempts:
-                summary["failures"] += 1
-                logging.error("Attempt limit reached for %s", path)
-                continue
-            state.update(state="SUBMITTING", attempts=state["attempts"] + 1, task_id=None)
-            _atomic_write(record["state_path"], state)
-            try:
-                task_id = submit_task(session, path, token)
-            except Exception as exc:
-                # POST might have reached the server. A second upload could
-                # duplicate expensive work, so retain the ambiguous journal.
-                raise RuntimeError(
-                    f"Submission outcome unknown for {path}; journal: {record['state_path']}"
-                ) from exc
-            state.update(state="SUBMITTED", task_id=task_id)
-            _atomic_write(record["state_path"], state)
-            record["deadline"] = time.monotonic() + poll_timeout
-            active[task_id] = record
-
-        finished = False
-        for task_id, record in list(active.items()):
-            try:
-                data = fetch_status(session, task_id, token)
-            except requests.RequestException as exc:
-                if exc.response is not None and exc.response.status_code in {401, 403}:
-                    raise
-                logging.warning("Status query failed for %s; retaining the task ID", task_id)
-                data = {"state": "PENDING"}
-            status = data.get("state")
-            if status == "SUCCESS":
-                result = data.get("result")
-                if result is None:
-                    raise RuntimeError(f"Task {task_id} succeeded without a result")
-                _atomic_write(output_dir / f"{record['path'].stem}.pkl", result, binary=True)
-                record["state"]["state"] = "SUCCESS"
-                _atomic_write(record["state_path"], record["state"])
-                summary["successes"] += 1
-                del active[task_id]
-                finished = True
-            elif status in {"FAILURE", "REVOKED"}:
-                record["state"]["state"] = "FAILED"
-                _atomic_write(record["state_path"], record["state"])
-                logging.error("Task %s failed for %s", task_id, record["path"])
-                del active[task_id]
-                waiting.append(record)
-                finished = True
-            elif status not in {"PENDING", "STARTED", "RETRY", "RECEIVED"}:
-                raise RuntimeError(f"Unexpected state {status!r} for task {task_id}")
-            elif time.monotonic() >= record["deadline"]:
-                raise TimeoutError(
-                    f"Stopped waiting for {task_id}; server task was not cancelled. "
-                    "Run again with the same output directory to resume."
-                )
-        # Refill immediately when there is room; don't wait for the slowest PDF
-        # in a fixed batch. Otherwise limit the status-query rate.
-        if active and not (finished and waiting and len(active) < max_in_flight):
-            time.sleep(poll_interval)
-    return summary
+    return run(
+        session,
+        paths,
+        token,
+        output_dir,
+        max_in_flight=max_in_flight,
+        poll_interval=poll_interval,
+        poll_timeout=poll_timeout,
+        max_attempts=max_attempts,
+        request={"api_base": API_BASE, "form": _build_form_data()},
+        submit=submit_task,
+        fetch=fetch_status,
+    )
 
 
 def main() -> None:

@@ -1,5 +1,7 @@
 # 两段式 MinerU + 视觉任务
 
+> 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
+
 入口为 `POST /two_stage/task`、`GET /two_stage/task/{task_id}` 和 `GET /two_stage/queue_status`，使用 Celery app `src.services.two_stage_pipeline`。当前主机部署这套任务系统；它与[普通异步任务](mineru_with_images_task_usage.md)分别使用自己的任务和队列。
 
 处理顺序：保存文件 → MinerU parse → dispatch 分发图片 → vision 并行识别 → merge 按原阅读顺序回填并清理工作区。模型和环境准备见[部署说明](mineru_4_upgrade_usage.md)。
@@ -79,7 +81,7 @@ pm2 logs celery-two-stage-parse --lines 100
 | `provider` / `model` | 可选，通常使用服务配置；未知值会在此接口返回 422 |
 | `prompt` | 可选图片提示词；空白串视为未设置 |
 
-此接口不提供 MinIO 参数，最终 `minio_assets` 为空；也不启用同步 DOCX 的原生 TXT-only 分支。图片会按面积、分辨率、体积、长宽比、同页数量及哈希去重筛选，只有保留的图片进入视觉阶段。任一实际视觉请求失败会使任务失败，不用 caption/base_text 降级。
+此接口不启用同步 DOCX 的原生 TXT-only 分支。图片会按面积、分辨率、体积、长宽比、同页数量及哈希去重筛选，只有保留的图片进入视觉阶段。任一实际视觉请求失败会使任务失败，不用 caption/base_text 降级。
 
 ## 提交和结果
 
@@ -109,8 +111,7 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
   "state": "SUCCESS",
   "result": {
     "result": [{"text": "解析文本或图片识别内容", "page_number": 1, "type": "image"}],
-    "txt": "可选纯文本输出",
-    "minio_assets": null
+    "txt": "可选纯文本输出"
   }
 }
 ```

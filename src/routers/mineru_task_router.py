@@ -2,7 +2,6 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from celery import states
 from celery.result import AsyncResult
@@ -16,7 +15,6 @@ from src.config.config import MINERU_TASK_STORAGE_DIR
 from src.models.models import (
     MineruTaskStatusResponse,
     MineruTaskSubmitResponse,
-    MinioAssetSummary,
     ResponseWithPageNum,
     TextElementWithPageNum,
 )
@@ -66,24 +64,6 @@ async def mineru_task(
     tier: MinerUTier = Form(
         MinerUTier.ADVANCED,
         description="MinerU parsing quality: flash, basic, standard, or advanced (default).",
-    ),
-    save_to_minio: bool = Form(
-        False,
-        description="Store the parsed PDF, JSON payload, and per-page images in MinIO.",
-    ),
-    minio_address: Optional[str] = Form(
-        None, description="MinIO server address, e.g. https://minio.local:9000"
-    ),
-    minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
-    minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
-    minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
-    minio_prefix: Optional[str] = Form(
-        None,
-        description="Optional custom prefix for stored assets; defaults to mineru/<filename>.",
-    ),
-    minio_meta: Optional[str] = Form(
-        None,
-        description="Optional string stored as meta.txt next to source.pdf when save_to_minio=true.",
     ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
@@ -137,13 +117,6 @@ async def mineru_task(
                     "original_filename": filename,
                     "chunk_type": chunk_type,
                     "return_txt": return_txt,
-                    "save_to_minio": save_to_minio,
-                    "minio_address": minio_address,
-                    "minio_access_key": minio_access_key,
-                    "minio_secret_key": minio_secret_key,
-                    "minio_bucket": minio_bucket,
-                    "minio_prefix": minio_prefix,
-                    "minio_meta": minio_meta if save_to_minio else None,
                     "backend_value": backend_value,
                 }
             ],
@@ -179,15 +152,12 @@ def mineru_task_status(task_id: str, pretty: bool = Depends(pretty_response_flag
     if state == states.SUCCESS:
         payload = async_result.result or {}
         items = [TextElementWithPageNum(**chunk) for chunk in payload.get("result", [])]
-        minio_assets_payload = payload.get("minio_assets")
-        minio_assets = MinioAssetSummary(**minio_assets_payload) if minio_assets_payload else None
         response = MineruTaskStatusResponse(
             task_id=task_id,
             state=state,
             result=ResponseWithPageNum(
                 result=items,
                 txt=payload.get("txt"),
-                minio_assets=minio_assets,
             ),
         )
         return json_response(response, pretty)

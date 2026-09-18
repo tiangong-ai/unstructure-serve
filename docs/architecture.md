@@ -16,7 +16,7 @@ flowchart LR
   Slots --> Parser[MinerU CPU ONNX + Docker VLM]
   Parser --> Assets[内容 / 页码 / 图片资产]
   Assets --> Vision[可选独立图片模型]
-  Assets --> Result[JSON / TXT / 可选 MinIO]
+  Assets --> Result[JSON / TXT]
   Vision --> Result
 ```
 
@@ -26,7 +26,6 @@ flowchart LR
 - `parse_capacity.py` 在所有本机解析入口共享 Linux 文件锁容量。API worker 数量只改变 HTTP 容量；缺省解析上限仍为 3。不同机器/不共享锁目录的容器不受同一上限约束。
 - `mineru_service_full.py` 是上游 SDK 适配层，保存资产后归一化业务字段、页码、阅读顺序与 checkbox。新 MinerU 输出变化优先在此吸收。
 - two-stage 的 parse/dispatch/vision/merge 是独立阶段，使用 chord 汇总，不在 Celery task 内阻塞等待其他 task。独立图片模型的并发与解析槽位分开。
-- `minio_storage.py` 负责业务资产；原始 SDK MiddleJson 不能替代业务 parsed.json。
 
 ## 目录
 
@@ -52,3 +51,9 @@ flowchart LR
 PM2 负责进程恢复，Gunicorn 管理 API 子进程，Docker 内 vLLM 管理模型副本。三者层次不同；增加 HTTP worker 不等于扩容模型。API 不 preload 已初始化的调度器/客户端。模型、Python 和依赖升级分别记录版本与回滚路径。
 
 批量 CLI 日志默认进入 `output/logs`，`TWO_STAGE_LOG_FILE` 可指定位置。旧 `tests/test_celery.py` 并非测试，导入会重置全局日志且使用无界批量提交，已移除；历史源码保留在 Git。生产批处理遵循 AI 指南的有界在途与任务 ID 持久化规则。
+
+## 批量客户端边界
+
+`src/scripts/batch_parse.py` 负责 CLI 配置、文件扫描、HTTPX 流式上传及三个异步接口的字段适配；`batch_runner.py` 负责共享滚动窗口、原子落盘和任务恢复。`two_stage_enqueue.py` 为兼容入口，保持旧请求身份与 pickle 目录格式。新客户端只通过公开 HTTP API，不直接调用 Celery 或读取服务端任务目录；没有新增服务路由。
+
+新输出目录以批次身份区分工作流，结果/输入摘要防止错误跳过。客户端并发只约束自身，不能替代服务端跨调用者准入、长任务执行隔离、消息幂等或按页断点恢复。详见[统一批量说明](batch-processing.md)。

@@ -1,4 +1,4 @@
-"""Opt-in real HTTP, Celery and storage acceptance using private input PDFs.
+"""Opt-in real HTTP and Celery acceptance using private input PDFs.
 
 Unlike router tests, this connects to an already running deployment. Do not run
 against a busy service. No retrying submissions after ambiguous HTTP failures.
@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import subprocess
 import time
-import uuid
 
 import httpx
 import pytest
@@ -101,40 +100,3 @@ def test_live_office_conversion_from_pdf_text(live_client, tmp_path):
     result = _submit(live_client, "/mineru_with_images?return_txt=true", target)
     assert "1600" in result["txt"]
     assert result["result"]
-
-
-def test_live_minio_assets(live_client):
-    from minio import Minio
-
-    address = os.getenv("MINERU_TEST_MINIO_ADDRESS")
-    if not address:
-        pytest.skip("Private MINERU_TEST_MINIO_* credentials required")
-    access = os.environ["MINERU_TEST_MINIO_ACCESS_KEY"]
-    secret = os.environ["MINERU_TEST_MINIO_SECRET_KEY"]
-    bucket = "mineru-regression-" + uuid.uuid4().hex
-    storage = Minio(address, access_key=access, secret_key=secret, secure=False)
-    try:
-        result = _submit(
-            live_client,
-            "/mineru?return_txt=true",
-            INPUT / "p2.pdf",
-            {
-                "save_to_minio": "true",
-                "minio_address": address,
-                "minio_access_key": access,
-                "minio_secret_key": secret,
-                "minio_bucket": bucket,
-                "minio_prefix": "acceptance",
-            },
-        )
-        _p2(result)
-        objects = list(storage.list_objects(bucket, recursive=True))
-        names = [obj.object_name for obj in objects]
-        assert any(name.endswith("source.pdf") for name in names)
-        assert any(name.endswith("parsed.json") for name in names)
-        assert len([name for name in names if name.endswith((".jpg", ".jpeg"))]) == 2
-    finally:
-        if storage.bucket_exists(bucket):
-            for obj in storage.list_objects(bucket, recursive=True):
-                storage.remove_object(bucket, obj.object_name)
-            storage.remove_bucket(bucket)

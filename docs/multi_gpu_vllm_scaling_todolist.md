@@ -7,7 +7,7 @@
 - [x] `deploy/pm2/ecosystem.vllm.parallele.config.json` 通过前台 Compose 管理三卡模型服务；GPU 0/1/2，DP=3、TP=1。
 - [x] 单个 `MINERU_MODEL_VLM_SERVER_URL`，由 vLLM 根据副本队列分配推理请求，无需应用维护三个 URL。
 - [x] Docker 模型与缓存持久化，应用进程不加载大模型。
-- [x] SDK 兼容层与页面/图片/Office/MinIO 合同；two-stage 分离 parse、vision、dispatch、merge，支持 normal/urgent 队列。
+- [x] SDK 兼容层与页面/图片/Office 合同；two-stage 分离 parse、vision、dispatch、merge，支持 normal/urgent 队列。
 - [x] 三卡 Compose/PM2 配置回归，以及使用 input PDF 检查三个 engine 推理增量的可选集成测试。
 - [x] 重启后的 UVM 设备映射修复、启动等待和模型 `/ready` 探测。
 - [x] 隔离解析的渲染池正常退出、共享 Unicode 清理；生产批量脚本滚动窗口和任务 ID 续跑，已比较窗口 3/6/30。详见[第二轮记录](mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)。

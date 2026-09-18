@@ -30,7 +30,6 @@ dependencies = [
     "pillow>=12.3.0",
     "loguru>=0.7.3",
     "protobuf>=7.36.2",
-    "minio>=7.2.20",
     "httpx>=0.28.1",
     "requests>=2.32.5",
     "pypdfium2>=5",

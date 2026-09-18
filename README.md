@@ -1,6 +1,43 @@
 # TianGong AI Unstructure Serve
 
-把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表，也可把 PDF、JSON 和逐页图片保存到 MinIO。支持单文件同步调用和可续查的异步任务。
+## 直接复制给 AI：启动、恢复、停止整套设施
+
+以下指令适用于能在部署机器上执行命令的 AI。把项目路径改成你的实际路径，然后复制对应整段。AI 会读取本地配置使用凭证，无需把密钥粘贴到对话中。整套设施包括本项目的 API、普通 worker、六个 two-stage worker 和三卡 MinerU 模型，以及配置中依赖的 Redis、图片模型；共享或其他项目管理的依赖须先识别归属。
+
+**首次初始化并启动：**
+
+```text
+请初始化并启动 /home/david/projects/TianGong-AI-Unstructure-Serve 的整套文档解析设施。
+先阅读仓库 AGENTS.md、README.md 和 docs/mineru_4_upgrade_usage.md，核对现有进程、端口、GPU、模型缓存和私有配置。已有配置和缓存应复用，缺失配置按示例初始化；不要覆盖凭证或修改系统 Python。缺少必须由我提供的凭证/地址时，明确列出缺项。
+按 uv.lock 使用 Python 3.13.15，应用安装 CPU ONNX 依赖，MinerU 大模型只运行在 Docker。按文档准备和验证小模型，检查 Redis、独立图片模型；若依赖由其他项目管理，按其已有方式使用，不重复创建。
+通过 deploy/manage.sh start model 启动模型，等待实际健康；再执行 start app 和 start ordinary，启动 API、六个 two-stage worker 与普通 worker。已有在线进程不要重复重启。
+验证 API /health、/ready、普通及 two-stage 队列消费者、图片模型可用性，并用 input/p2.pdf 和含图论文做小规模真实验收。完成后 pm2 save；检查开机恢复是否已配置，缺失则按 pm2 startup 的提示配置。
+最后列出本项目进程、端口、检查结果、尚缺的配置和可用的调用方式。不要输出密钥，不操作无关服务，不用全局 PM2 删除或 Redis 清空命令。
+```
+
+**重启机器后恢复，或排查服务不可用：**
+
+```text
+请恢复 /home/david/projects/TianGong-AI-Unstructure-Serve 的整套文档解析设施。
+先读 AGENTS.md、README.md 和部署说明，检查本项目 PM2/容器状态、端口、日志、GPU/CUDA、Redis、独立图片模型，定位故障。先检查在途任务及队列，再决定哪些故障组件需要重启；健康组件保持运行。
+复用现有 .venv、uv.lock、私有配置和缓存。通过 deploy/manage.sh start model 补起模型并验证健康，再 start app、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
+如驱动升级后 GPU 可见但推理失败，按部署说明检查 UVM/CDI 和容器内 CUDA，不以 nvidia-smi 正常作为修复完成的依据。
+核对 API、三个解析 worker、视觉/调度/合并 worker、普通 worker 和三卡模型，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录，需要恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
+完成后 pm2 save，说明原因、修复内容、验证结果和仍未恢复的依赖，不输出密钥。
+```
+
+**安全停止整套设施：**
+
+```text
+请安全停止 /home/david/projects/TianGong-AI-Unstructure-Serve 的文档解析设施。
+先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止本项目批量客户端及其他提交来源，保留其输出目录和任务记录；保持 API/worker/模型可用，让已提交任务继续完成并保存结果。
+检查普通和 two-stage 的 ready、active、reserved、scheduled/unacked 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
+任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、stop workers、stop model，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
+Redis 和独立图片模型如为共享或其他项目管理的服务，保持运行；仅在确认专用于本项目且停止不会影响其他服务时，按其已有启动方式停止。不删除容器卷、模型缓存、结果、任务记录或私有配置，不使用 pm2 delete all、Redis flush 或全局进程清理。
+最后报告已停止的组件、保留的共享依赖，以及下次恢复应执行的步骤。
+```
+
+把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表。支持单文件同步调用和可续查的异步任务。
 
 当前技术栈：**Python 3.13.15 · MinerU 4.0.2 · CPU ONNX · Docker vLLM 0.21.0 · FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
@@ -11,11 +48,11 @@
 | Docker MinerU VLM | 解析模型；默认 GPU 0/1/2，DP=3、单地址 30000 | standard/advanced |
 | Gunicorn API | 上传、提交、查询，默认 7770 | 所有服务调用 |
 | Redis | Celery 队列与结果状态 | 异步任务 |
-| 普通 Celery worker | 纯解析或完整图片增强任务，支持 MinIO | 两个普通 `/task` 接口 |
+| 普通 Celery worker | 纯解析或完整图片增强任务 | 两个普通 `/task` 接口 |
 | two-stage 六个 worker | 三个解析 worker，加图片调度、识别、合并 | 图片增强批处理 |
 | 独立图片模型服务 | 为提取出来的图片生成描述 | 图片增强；与 MinerU VLM 是两个服务 |
 
-不带图片识别的批量任务优先 `/mineru/task`；带图片识别的批量优先 `/two_stage/task`。需要 MinIO 的图片任务使用 `/mineru_with_images/task`。**队列名称和消费者必须配套，不能只启动 API。**
+不带图片识别的批量任务优先 `/mineru/task`；带图片识别的批量优先 `/two_stage/task`。**队列名称和消费者必须配套，不能只启动 API。**
 
 ## 首次初始化
 
@@ -89,20 +126,29 @@ curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=t
   -F 'file=@input/p2.pdf' -F 'tier=advanced'
 ```
 
-| POST 接口 | 执行方式 | 图片增强 | MinIO |
-| --- | --- | --- | --- |
-| `/mineru` | 同步 | 否 | 是 |
-| `/mineru_sci` | 同步科研入口 | 否 | 否 |
-| `/mineru_with_images` | 同步 | 是 | 是 |
-| `/mineru/task` | 普通队列 | 否 | 是 |
-| `/mineru_with_images/task` | 普通队列 | 是 | 是 |
-| `/two_stage/task` | 分阶段队列 | 是 | 否 |
+| POST 接口 | 执行方式 | 图片增强 |
+| --- | --- | --- |
+| `/mineru` | 同步 | 否 |
+| `/mineru_sci` | 同步科研入口 | 否 |
+| `/mineru_with_images` | 同步 | 是 |
+| `/mineru/task` | 普通队列 | 否 |
+| `/mineru_with_images/task` | 普通队列 | 是 |
+| `/two_stage/task` | 分阶段队列 | 是 |
 
 六个接口均上传 `file`，可选表单 `tier`；`flash` 适合电子 PDF 文本层预览，`basic` 使用 OCR 小模型，`standard/advanced` 调用 Docker VLM。`chunk_type`、`return_txt` 在前五个接口中是 URL 查询参数，仅 two-stage 使用表单。返回页码从 1 开始，`return_txt=true` 附加按阅读顺序拼接的文本。
 
 支持 PDF、PNG/JPEG/WebP/BMP/TIFF 和[Office 转换清单](src/utils/file_conversion.py)，不接受 Markdown/TXT 作为解析输入。异步提交后保存 task_id，持续查询对应 `/task/{task_id}`；查询超时不能视为任务失败并盲目重投。
 
-大量 400–1000 页 PDF 应整本入队，先单文件验证，再逐步增加在途数量；不能把默认并发或抽页回归当作千页容量保证。带图片识别可用[可续跑批量脚本](docs/two_stage_task_usage.md#批量脚本)。完整选择规则和可运行客户端见 [AI 接入指南](docs/ai-integration.md)。
+大量 400–1000 页 PDF 应整本入队，先单文件验证，再逐步增加在途数量；不能把默认并发或抽页回归当作千页容量保证。三个异步入口统一使用[可续跑批量客户端](docs/batch-processing.md)：
+
+```bash
+# 不额外描述图片；需要图片增强改 --mode two-stage，并使用新的输出目录
+uv run python -m src.scripts.batch_parse \
+  --mode parse --input-dir /path/to/pdfs --output-dir /path/to/results-parse \
+  --max-in-flight 2
+```
+
+`--mode images` 为普通队列图片增强。默认 advanced、输出 JSON；可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
 
 ## 文档与开发
 
@@ -111,6 +157,7 @@ curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=t
 | [部署与回归](docs/mineru_4_upgrade_usage.md) | 配置、模型、队列、恢复、回滚和实测记录 |
 | [AI 接入指南](docs/ai-integration.md) | 端点选择、上传字段、轮询、失败处理、大文档批量 |
 | [普通任务](docs/mineru_with_images_task_usage.md) / [two-stage](docs/two_stage_task_usage.md) | 各自队列、字段及批量示例 |
+| [统一批量客户端](docs/batch-processing.md) | 三种异步模式、文件筛选、JSON 结果、超时及续跑 |
 | [架构说明](docs/architecture.md) | 模块职责、容量与生命周期、部署目录 |
 | [调优指南](docs/performance-tuning.md) | CPU/GPU/模型变化后的测量和参数选择 |
 | [依赖审计](docs/dependency-audit-2026-09-18.md) | 升级前版本约束与隔离验证 |

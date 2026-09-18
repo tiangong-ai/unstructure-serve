@@ -542,7 +542,6 @@ def merge_task(
     return {
         "result": [item.model_dump() for item in items],
         "txt": txt_text,
-        "minio_assets": None,
     }
 
 

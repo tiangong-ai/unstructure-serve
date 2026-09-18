@@ -25,7 +25,7 @@ flowchart LR
     C --> D[Docker MinerU VLM]
     D --> E[整本后处理与图片资产]
     E --> F{是否额外识别图片}
-    F -->|否| H[业务块与 TXT / 可选 MinIO]
+    F -->|否| H[业务块与 TXT]
     F -->|是| G[独立多模态图片服务]
     G --> H
 ```
@@ -90,7 +90,7 @@ MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.p
 
 ### 4.2 SDK 解析基准
 
-输出目录必须未存在。以下示例对三种文件循环提交六份，每个进程先预热，测量完整解析与资产保存；不含 HTTP、Celery、独立图片描述和 MinIO。
+输出目录必须未存在。以下示例对三种文件循环提交六份，每个进程先预热，测量完整解析与资产保存；不含 HTTP、Celery、独立图片描述。
 
 ```bash
 MINERU_INTRA_OP_NUM_THREADS=16 MINERU_INTER_OP_NUM_THREADS=1 \
@@ -106,7 +106,7 @@ uv run python -m src.scripts.benchmark_mineru \
 
 ### 4.3 端到端与容量基准
 
-再通过真实 API 测试纯解析、图片增强和业务需要的 MinIO；批量可使用现有 two-stage 脚本，见 AI 指南。脚本的提交窗口不是压测报告器，需要另记提交、开始/阶段完成、最终成功时间及错误数量。
+再通过真实 API 测试纯解析、图片增强；批量可使用统一客户端的三种模式，见 AI 指南。脚本的提交窗口不是压测报告器，需要另记提交、开始/阶段完成、最终成功时间及错误数量。
 
 对每组配置先预热，重复至少三轮，交错基线与候选顺序，分别报告中位数和范围；正式 P95 需要足够任务样本，六份文件的 P95 不能代表生产尾延迟。排队期间保持输入速率可控，观察队列能否回落。每轮保存输出到新的私有目录，确认无重试任务混入计时。
 
@@ -181,7 +181,7 @@ MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换
 
 当前同步隔离任务已经显式关闭 DocVortex 渲染池；不要通过更短的 watchdog 或提前返回来隐藏进程退出耗时。临时目录、图片和跨 worker 共享路径必须继续正确收尾。
 
-MinIO 逐页 JPEG、parsed.json、PDF 和 meta 上传应单独计时。Redis result backend 不是永久结果存储；大文本会增加内存和网络压力，及时落盘并按实际 app 的结果过期策略获取结果。当前 two-stage app 未直接使用普通 app 的 `CELERY_RESULT_EXPIRES` 配置，不假定改这一个变量就能同时改变两类任务 TTL。远端视觉上传的图片体积和网络往返也会限制吞吐。
+Redis result backend 不是永久结果存储；大文本会增加内存和网络压力，及时落盘并按实际 app 的结果过期策略获取结果。当前 two-stage app 未直接使用普通 app 的 `CELERY_RESULT_EXPIRES` 配置，不假定改这一个变量就能同时改变两类任务 TTL。远端视觉上传的图片体积和网络往返也会限制吞吐。
 
 ## 10. 变更与回滚步骤
 
@@ -189,7 +189,7 @@ MinIO 逐页 JPEG、parsed.json、PDF 和 meta 上传应单独计时。Redis res
 2. 查 active/reserved 与各队列，等待相关任务完成。只操作本项目指定进程或 Compose project，保留缓存卷，不重启共享 Docker/驱动。
 3. 每次只改一类参数，先低并发质量回归，再混合压测，再端到端验证；长尾与内存失败也计入结果。
 4. 按变更重载对应 API/worker 或重建模型容器。模型拓扑变化使用该 project 唯一的 PM2/Compose 管理入口，不能再启动另一套重叠容器。
-5. 检查 `/health`、`/ready`、队列、实际任务和所有 engine。`/ready` 仅探测 MinerU 端点健康，不覆盖 Redis、独立视觉模型、MinIO或真实 CUDA 推理。
+5. 检查 `/health`、`/ready`、队列、实际任务和所有 engine。`/ready` 仅探测 MinerU 端点健康，不覆盖 Redis、独立视觉模型或真实 CUDA 推理。
 6. 质量不达标、OOM、错误率或尾延迟恶化时回滚候选配置，复测；稳定后 `pm2 save` 并更新部署说明和 AGENTS.md。
 
 只读队列检查：
@@ -227,8 +227,8 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 
 | 层次 | 当前行为 | 千页验收要求 |
 | --- | --- | --- |
-| 提交 HTTP | 批量脚本 POST timeout=120 秒；路由会读取整份上传字节 | 依据文件体积/带宽设置客户端和网关预算，并测同时上传 RAM 峰值 |
-| 客户端轮询 | 脚本默认总等待 800 秒，GET timeout=30 秒 | 覆盖排队+完整流水线；超时续查原 ID，不能重投 |
+| 提交 HTTP | 新 CLI 流式 multipart，upload-timeout 缺省 600 秒可调；旧脚本 POST 仍 120 秒；六个路由按 1 MiB 分块落盘 | 依据文件体积/带宽设置客户端和网关预算，并测同时上传 RAM 峰值 |
+| 客户端轮询 | 新 CLI 等待预算 21600 秒、GET 60 秒均可调；旧脚本仍 800/30 秒 | 覆盖排队+完整流水线；超时续查原 ID，不能重投 |
 | 普通异步解析 | 经 scheduler 的独立子进程 hard timeout；全局代码缺省 600 秒，再受对应进程配置覆盖 | 检查普通 worker 的实际环境，不以 API PM2 的 1800 秒推定 worker 同值 |
 | two-stage parse | 直接调用 parse_doc，未走 scheduler；app 未配置 task_time_limit | 不把 scheduler 的 hard timeout 当成这里的保护；solo/threads 也不能假定具有 prefork 的终止能力 |
 | Redis 未确认消息 | two-stage late ack，当前未覆盖 Redis 默认 visibility timeout=3600 秒 | 单个消息未确认时长可能超过一小时，应先完成超长任务方案；不能仅延长客户端等待 |
@@ -243,7 +243,7 @@ Redis visibility timeout 到期可使未确认任务被重新投递；扩大它�
 
 ## 13. API 与解析容量分离（Python 3.13 维护）
 
-六个上传入口按 1 MiB 在线程池落盘，不再整文件读取；Office/MinIO/broker 操作移出事件循环。解析 Future 直接异步等待，不再每个长请求占用一个等待线程。HTTP 超时后的源文件等实际任务结束才清理。
+六个上传入口按 1 MiB 在线程池落盘，不再整文件读取；Office/broker 操作移出事件循环。解析 Future 直接异步等待，不再每个长请求占用一个等待线程。HTTP 超时后的源文件等实际任务结束才清理。
 
 `MINERU_PARSE_SLOTS` 缺省 3，在同一主机为 API、普通任务和 two-stage 共享解析上限；全部进程必须配置相同 `MINERU_PARSE_SLOT_DIR`（缺省 `/tmp/tiangong_mineru_parse_slots`）。槽位涵盖 MinerU 推理、资产保存和结果归一化；不限制后续独立图片模型并发。等待超时缺省 1800 秒，并计入 scheduler hard timeout。跨主机需独立容量规划，不能把本机文件锁当作分布式调度。增加 API worker 不会增加这个上限；锁文件不能在运行中删除。
 
@@ -264,3 +264,5 @@ Redis visibility timeout 到期可使未确认任务被重新投递；扩大它�
 Gunicorn 使用 uvloop/httptools 的 UvicornWorker；配置集中 `deploy/gunicorn.conf.py`，`API_WORKERS` 缺省 4。`API_MAX_REQUESTS` 从 500 调为 5000，jitter 为 500，减少频繁轮询造成的周期回收；这是回收频率折中，仍需长期监测 RSS，不能据短测认定不存在内存增长。PM2 API kill_timeout 1900 秒与 Gunicorn 退出窗口对齐。`preload_app=false` 避免复制已初始化的调度器/客户端。
 
 复现：`uv run python -m src.scripts.benchmark_api --output output/http-benchmark-new --workers 2 4 8`。输出目录必须不存在；端口默认 17771，仅绑定 loopback。脚本会访问真实模型，需在维护/测试窗口执行，不能在满负荷生产期间直接加压。
+
+统一批量客户端见 [批量操作](batch-processing.md)：三种异步模式共用在途窗口，缺省 2，按文件及请求校验续跑。客户端窗口/超时不替代本节服务端长任务保障；默认 2 也不是内存安全保证。

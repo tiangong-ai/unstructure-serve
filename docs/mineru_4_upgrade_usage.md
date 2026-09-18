@@ -98,7 +98,7 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 pm2 logs unstructured-gunicorn --lines 100
 ```
 
-`/health` 仅返回 API 存活状态；`/ready` 并行探测全部配置的 MinerU VLM `/health`，不可用时返回 503，单端点超时 3 秒。它沿用解析端点及认证配置，不探测 Redis、MinIO 或独立图片描述服务，也不能代替真实 PDF 回归。
+`/health` 仅返回 API 存活状态；`/ready` 并行探测全部配置的 MinerU VLM `/health`，不可用时返回 503，单端点超时 3 秒。它沿用解析端点及认证配置，不探测 Redis 或独立图片描述服务，也不能代替真实 PDF 回归。
 
 三卡服务和应用 URL 均使用 `30000`；启动脚本的 project 参数优先于 `.env` 中旧的 `COMPOSE_PROJECT_NAME`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload deploy/pm2/ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
 
@@ -189,7 +189,7 @@ MINERU_RUN_DP_PDFS=1 MINERU_TEST_VLM_URL=http://127.0.0.1:30000 \
 
 API 与四类 two-stage worker 已切换新地址并重启，缺省档位现为 advanced。standard/advanced 同步解析和真实 two-stage Celery p2 任务已验收。PM2 stop 实测使容器正常退出（exit 0），重新启动后健康检查和线上请求通过，已执行 `pm2 save`。原 31000 单卡容器已停止并移除，模型缓存保留；旧 MinerU 本机 vLLM 启动项已移除。另一仓库的 `vllm-qwen3-embedding-8b` 保持原进程运行。
 
-兼容层仍返回 `(content_list, artifact_dir, None)`，PDF 默认整本，保留源页号和可访问图片；业务 MinIO `parsed.json` 使用服务响应结构，不用原生 MiddleJson 替换。Office 主 JSON/MinIO 资产来自 PDF，原生 DOCX 仅用于同步 TXT 增强。
+兼容层仍返回 `(content_list, artifact_dir, None)`，PDF 默认整本，保留源页号和可访问图片。Office 主 JSON 来自 PDF，原生 DOCX 仅用于同步 TXT 增强。
 
 旧源码、配置、PM2 快照和旧 `.venv` 保存在 `output/mineru4_tdd/rollback-20260917/`。回滚需排空或隔离在途任务，并同步恢复代码、应用环境及模型服务地址；旧虚拟环境须放回原 `.venv` 路径，避免绝对 shebang 失效。保留已完成资产与模型缓存。
 
@@ -273,7 +273,7 @@ MINERU_INTRA_OP_NUM_THREADS=16 MINERU_INTER_OP_NUM_THREADS=1 \
 
 另外尝试三个解析进程下的混合六份 PDF：ONNX 8/1 + VLM 8 用时 89.88 秒，慢于已采用的 16/1 + VLM 8（前轮 73.53 秒）；16/1 + VLM 16 为 69.75 秒，单轮仅改善约 5%，尚不足以确认稳定收益，线上继续使用 VLM 8。未降低质量档位、压缩图片或修改模型精度。
 
-对低频单文件，同步接口仍适合需要直接响应、纯解析或 MinIO 的调用；对批量文件，使用队列可以复用已预热解析进程。two-stage 包含额外视觉描述，不能与 `/mineru` 的功能直接等同。本轮 p2 没有实际视觉任务，因此队列速度不是图片描述服务的容量测试。
+对低频单文件，同步接口仍适合需要直接响应的解析调用；对批量文件，使用队列可以复用已预热解析进程。two-stage 包含额外视觉描述，不能与 `/mineru` 的功能直接等同。本轮 p2 没有实际视觉任务，因此队列速度不是图片描述服务的容量测试。
 
 回归：172 项常规测试通过，20 项模型测试默认跳过；显式运行的 p2 缺省/四档与九页论文三卡回归共 6 项通过，三个 engine 请求增量 7/6/5。实际 CLI 在提交 p2 后中断，再以相同输出目录续跑，沿用同一任务 ID、attempts=1；再次运行跳过已有结果。
 
@@ -347,7 +347,7 @@ API 与六个 two-stage worker 已重载并完成整本线上验收：同一九�
 MINERU_RUN_API_PDFS=1 uv run --group dev pytest tests/test_live_api_pdfs.py -v
 ```
 
-MinIO 子项需要私有 `MINERU_TEST_MINIO_ADDRESS`（host:port）、`MINERU_TEST_MINIO_ACCESS_KEY`、`MINERU_TEST_MINIO_SECRET_KEY`，仅用于可信本机 HTTP MinIO 测试。缺少时该子项明确跳过。不要把凭证写入命令历史、仓库或测试输出。运行端口可用 `MINERU_TEST_API_URL` 指定；这些测试会真实提交任务，只在维护窗口执行。
+运行端口可用 `MINERU_TEST_API_URL` 指定；这些测试会真实提交任务，只在维护窗口执行。
 
 ### 本次遇到的 Docker Snap CDI 过期记录
 
@@ -360,3 +360,11 @@ apt 升级删除了旧 EGL Wayland 库与对应 JSON，但 `/var/snap/docker/cur
 旧 Python 3.12 环境保留为 `output/releases/python313-20260918/python312-venv`，原镜像 `tiangong/mineru-vlm:4.0.0-vllm0.21.0` 保留。部署前代码为 5612c38。回滚需先停止接收新任务并等 active/reserved 收敛，停止本项目 API/worker，再一起恢复对应代码、`.venv` 链接、模型镜像和 PM2 入口；不能只更换 Python 链接却保留不兼容的新依赖声明。旧 PM2 备份使用旧的根目录配置路径，必须与旧代码配套。恢复后执行真实 PDF、队列和 readiness 验证再保存 PM2。不要用 git reset --hard 或删除共享模型卷作为回滚步骤。
 
 此次长文件仍按既定抽页边界验证，未宣称 400–1000 页整本批量已经完成容量准入；长任务 Redis visibility timeout 等限制仍需专项配置与实测。HTTP 并发的短 PDF 对照见调优指南第 13 节。
+
+## 移除存储集成与统一批量入口（2026-09-18）
+
+按用户要求移除全部 MinIO API、表单参数、Celery 存储载荷、响应资产字段、实现模块、专用测试及 SDK 依赖。此前章节中的 MinIO 测量为历史记录，不代表当前功能；不再支持 source.pdf/逐页 JPEG 自动上传。调用方负责长期归档，统一 CLI 将业务 JSON 保存到本地。共享存储容器、桶和既有数据保持原状。
+
+升级前须停新提交并确认普通/two-stage 队列、active/reserved/scheduled 已清空；旧普通任务载荷包含已删除字段，不能在未收敛时混用新旧 API/worker。随后同步 uv.lock，重载 API、普通与 two-stage worker。模型容器无需重建。同步/异步解析、图片描述及 Office 转换继续保留。
+
+新批量入口为 `uv run python -m src.scripts.batch_parse --mode parse|images|two-stage`，详见[批量操作](batch-processing.md)。README 顶部提供可复制给 AI 的整套设施启动、恢复、停止指令。

@@ -19,7 +19,6 @@ for file_path in INPUT_DIR.iterdir():
     data_normal = {
         "chunk_type": "true",
         "return_txt": "false",
-        "save_to_minio": "false",
         "priority": "normal",
     }
     with file_path.open("rb") as f:
@@ -32,7 +31,6 @@ for file_path in INPUT_DIR.iterdir():
     data_urgent = {
         "chunk_type": "true",
         "return_txt": "false",
-        "save_to_minio": "false",
         "priority": "urgent",
     }
     with file_path.open("rb") as f:
