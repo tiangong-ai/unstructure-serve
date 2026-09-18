@@ -69,7 +69,7 @@ CELERY_TASK_URGENT_QUEUE = (
     _env_override("CELERY_TASK_URGENT_QUEUE", _CELERY_CONFIG.get("URGENT_QUEUE")) or "queue_urgent"
 )
 CELERY_RESULT_EXPIRES = int(
-    os.getenv("CELERY_RESULT_EXPIRES", _CELERY_CONFIG.get("RESULT_EXPIRES", "3600"))
+    os.getenv("CELERY_RESULT_EXPIRES", _CELERY_CONFIG.get("RESULT_EXPIRES", "86400"))
 )
 
 # Local task workspace for mineru async jobs

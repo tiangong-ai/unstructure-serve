@@ -32,11 +32,13 @@ from PIL import Image
 from src.config.config import (
     CELERY_BROKER_URL,
     CELERY_RESULT_BACKEND,
+    CELERY_RESULT_EXPIRES,
     CELERY_TASK_DEFAULT_QUEUE,
     CELERY_TASK_MINERU_QUEUE,
     MINERU_TASK_STORAGE_DIR,
 )
 from src.models.models import TextElementWithPageNum
+from src.services.celery_runtime import runtime_options
 from src.services.mineru_service_full import parse_doc
 from src.services.mineru_with_images_service import (
     _build_context_blocks,
@@ -114,8 +116,7 @@ celery_conf = {
         "two_stage.dispatch": {"queue": DISPATCH_QUEUE},
     },
 }
-if CELERY_BROKER_URL.startswith(("redis://", "rediss://")):
-    celery_conf["broker_transport_options"] = {"queue_order_strategy": "priority"}
+celery_conf.update(runtime_options(CELERY_BROKER_URL, CELERY_RESULT_EXPIRES))
 celery_app.conf.update(**celery_conf)
 
 

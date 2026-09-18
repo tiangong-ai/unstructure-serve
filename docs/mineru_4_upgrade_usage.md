@@ -50,6 +50,7 @@ uv run mineru-kit models verify --tier basic --small-backend onnx
 | MINERU_PARSE_SLOT_WAIT_SECONDS | 代码及模板 1800 秒 | 等待共享槽位的上限；计入 scheduler hard timeout |
 | MINERU_SCHEDULER_WORKERS / GPU_IDS | 模板 3 / 0 | 每个应用调度池的派发进程数 / 池标识；不控制 Docker GPU |
 | CELERY_BROKER_URL / CELERY_RESULT_BACKEND | 模板为本机 Redis DB 0 | API 与 worker 必须一致 |
+| CELERY_VISIBILITY_TIMEOUT / CELERY_RESULT_EXPIRES | 模板 21600 / 86400 秒 | 两个 app 共用的 Redis 消息确认期限 / 结果保留时间；不是任务执行期限 |
 | MINERU_TASK_STORAGE_DIR | 未设置时使用系统临时目录中的 tiangong_mineru_tasks | API 与 worker 共用上传工作区 |
 | VLLM_BASE_URLS / VISION_* | 按部署填写 | 独立图片描述模型；采样与并发见调优指南 |
 

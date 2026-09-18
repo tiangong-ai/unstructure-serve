@@ -181,7 +181,7 @@ MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换
 
 当前同步隔离任务已经显式关闭 DocVortex 渲染池；不要通过更短的 watchdog 或提前返回来隐藏进程退出耗时。临时目录、图片和跨 worker 共享路径必须继续正确收尾。
 
-Redis result backend 不是永久结果存储；大文本会增加内存和网络压力，及时落盘并按实际 app 的结果过期策略获取结果。当前 two-stage app 未直接使用普通 app 的 `CELERY_RESULT_EXPIRES` 配置，不假定改这一个变量就能同时改变两类任务 TTL。远端视觉上传的图片体积和网络往返也会限制吞吐。
+Redis result backend 不是永久结果存储；大文本会增加内存和网络压力，及时落盘并按实际 app 的结果过期策略获取结果。两个 app 共同使用 `CELERY_RESULT_EXPIRES`，代码及模板缺省 86400 秒；修改后共同重载 API/worker，检查各自有效值。远端视觉上传的图片体积和网络往返也会限制吞吐。
 
 ## 10. 变更与回滚步骤
 
@@ -228,11 +228,11 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 | 客户端轮询 | 新 CLI 等待预算 21600 秒、GET 60 秒均可调；旧脚本仍 800/30 秒 | 覆盖排队+完整流水线；超时续查原 ID，不能重投 |
 | 普通异步解析 | 经 scheduler 的独立子进程 hard timeout；全局代码缺省 600 秒，再受对应进程配置覆盖 | 检查普通 worker 的实际环境，不以 API PM2 的 1800 秒推定 worker 同值 |
 | two-stage parse | 直接调用 parse_doc，未走 scheduler；app 未配置 task_time_limit | 不把 scheduler 的 hard timeout 当成这里的保护；solo/threads 也不能假定具有 prefork 的终止能力 |
-| Redis 未确认消息 | two-stage late ack，当前未覆盖 Redis 默认 visibility timeout=3600 秒 | 单个消息未确认时长可能超过一小时，应先完成超长任务方案；不能仅延长客户端等待 |
-| two-stage 中间/最终结果 | 当前 app 结果过期采用 Celery 默认一天；普通 app 的 CELERY_RESULT_EXPIRES 没有直接接到此 app | 保留时间覆盖最慢图片及 chord 汇总和客户端结果获取，按运行 app 验证 |
+| Redis 未确认消息 | two-stage late ack；两个 app 共用 CELERY_VISIBILITY_TIMEOUT，代码缺省 3600 秒、模板 21600 秒 | 单个消息未确认时长可能超过一小时，应先完成超长任务方案；不能仅延长客户端等待 |
+| two-stage 中间/最终结果 | 两个 app 均读取 CELERY_RESULT_EXPIRES，代码/模板缺省一天 | 保留时间覆盖最慢图片及 chord 汇总和客户端结果获取，按运行 app 验证 |
 | 停机 | parse PM2 等待窗口 1900 秒 | 长任务超此时间时不要在活跃中重启；扩大预算须与恢复机制一起评估 |
 
-Redis visibility timeout 到期可使未确认任务被重新投递；扩大它也会延迟故障后的恢复。Celery 要求相关 broker/backend/app 设置一致，共享 broker 的应用存在较短设置时还会影响效果，见 [Celery Redis 官方说明](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html#visibility-timeout)。当前项目没有把一个 `CELERY_VISIBILITY_TIMEOUT` 环境变量自动接入所有这些配置；只在 `.env` 写一个名称不会生效。需要实现并验证一致配置，或给长任务提供已验证的独立执行/恢复方案，不能只改某个 worker 的一个参数。
+Redis visibility timeout 到期可使未确认任务被重新投递；扩大它也会延迟故障后的恢复。Celery 要求相关 broker/backend/app 设置一致，共享 broker 的应用存在较短设置时还会影响效果，见 [Celery Redis 官方说明](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html#visibility-timeout)。本项目通过共享配置模块把 `CELERY_VISIBILITY_TIMEOUT` 同时接到这三处，两个 app 均适用。修改后共同重载所有消费者；同 broker 的外部应用也须核对。它不等于任务执行期限或 exactly-once；普通任务为 early ack，异常退出后的恢复也需单独验证。
 
 容量验收中应同时检查同一 task_id 的执行事件/日志，避免两个 worker 重复处理同一工作区；客户端没有重复 POST 不代表 broker 不会重投。图像任务一次 fan-out，API 也没有全局按页数/图片数/字节的准入预算；客户端在途 2 是起始实验，不是内存安全保证。若缺少可接受的任务时长上界、可靠终止或恢复能力，先补齐执行隔离/幂等与监控，再开放大规模长任务。
 

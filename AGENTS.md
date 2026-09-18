@@ -63,6 +63,7 @@
 - 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`；普通 worker 不消费 two-stage 的解析/视觉/default merge 队列，防止不同 Celery app 抢到未注册任务。
 - two-stage 部署显式配置 normal 队列 `queue_parse_gpu/queue_vision/queue_dispatch/default`；四类 urgent 为 `queue_parse_urgent/queue_vision_urgent/queue_dispatch_urgent/queue_merge_urgent`。API 与每个 worker 必须配置一致，不能只改 worker 的 `-Q`。
 - 未配置时代码的 parse 回退到普通队列，dispatch/merge 回退到 default；`.env.example` 显式列出与 PM2 匹配的队列，详细规则见 two-stage 文档。
+- 两个 Celery app 共用 `celery_runtime.py`：Redis 的 broker/backend/app visibility_timeout 一致读取 `CELERY_VISIBILITY_TIMEOUT`（代码 3600 秒、模板 21600 秒），`CELERY_RESULT_EXPIRES` 同时控制两类结果（代码/模板 86400 秒，TOML/环境可覆盖）。普通 worker 同样使用 priority 队列顺序。所有共享 broker 的 worker 必须一同配置；延长确认期限会延迟崩溃后重投，并不提供幂等或断点恢复。
 - Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
 - scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
@@ -106,7 +107,7 @@ uv run --group dev pytest
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。验收须说明模型拓扑、样本范围和证据位置。
 - `src/scripts/benchmark_mineru.py` 对真实 PDF 做已预热 SDK 进程压测，记录批量完成、单任务服务和排队耗时；不含 Celery/独立视觉阶段。输出目录必须新建，校验整本页号、图片及 p2 关键表格/checkbox；样本与结果保持私有。脚本退出前显式收尾各进程的 DocVortex 渲染池，避免嵌套 multiprocessing 等待退出。
 - `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 advanced）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。
-- 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，统一 CLI 默认在途 2、等待 21600 秒，兼容脚本为 6/800 秒；两者均不作千页容量承诺。当前长样本仅抽页验证；two-stage 直接 parse_doc 不走 scheduler hard timeout，late ack 仍需核对 Redis 默认一小时 visibility timeout，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
+- 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，统一 CLI 默认在途 2、等待 21600 秒，兼容脚本为 6/800 秒；两者均不作千页容量承诺。当前长样本仅抽页验证；two-stage 直接 parse_doc 不走 scheduler hard timeout，late ack 仍需核对实际 visibility timeout 及所有共享 broker 的消费者，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
 - 兼容 two-stage 脚本采用滚动在途窗口（`TWO_STAGE_MAX_IN_FLIGHT`，默认 6），输出目录 `.tasks` 原子保存任务 ID/文件摘要/请求参数，重启续查已有任务。查询故障或本地等待超时不重投；只有服务端确认 FAILURE/REVOKED 才有界重试。提交响应丢失时保留 SUBMITTING 并明确停止，不能假定服务器未接收。单输出目录由文件锁限制一个 CLI 写入进程。脚本认证优先环境/.env，再回退本地 TOML 的 FASTAPI.BEARER_TOKEN，不记录令牌。
 - 新批次优先 `uv run python -m src.scripts.batch_parse`，`--mode parse/images/two-stage` 覆盖全部三个异步 API；缺省 advanced、在途 2、等待 21600 秒、尝试 1 次、chunk_type=true、return_txt=false。上传/查询/连接超时独立可配置，HTTPX 流式 multipart；网络阶段超时不是服务端任务期限。普通模式 query 与 two-stage form 自动区分，普通任务 HTTP 500 的 FAILURE/REVOKED 作为终态处理。详见 [统一批量说明](docs/batch-processing.md)。
 - 新批量输出 `results/<相对路径及扩展名>.json`，`.batch.json` 记录批次身份，`.tasks` 记录输入/请求/结果摘要和任务 ID；完成后仍校验输入，输入或请求改变、已记录文件被筛除时拒绝混用。结果缺失/损坏只重取原 ID；SUBMITTING 不重投；改变等待预算允许续跑，改变工作流或档位需新目录。旧脚本保留 pickle/旧记录合同，不与新脚本混用输出目录。

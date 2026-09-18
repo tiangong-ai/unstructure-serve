@@ -1,5 +1,6 @@
 from celery import Celery
 from kombu import Queue
+from src.services.celery_runtime import runtime_options
 
 from src.config.config import (
     CELERY_BROKER_URL,
@@ -19,7 +20,6 @@ celery_app = Celery(
 celery_app.conf.update(
     broker_url=CELERY_BROKER_URL,
     result_backend=CELERY_RESULT_BACKEND,
-    result_expires=CELERY_RESULT_EXPIRES,
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
@@ -36,6 +36,7 @@ celery_app.conf.update(
         "mineru.parse": {"queue": CELERY_TASK_MINERU_QUEUE},
         "mineru.parse_images": {"queue": CELERY_TASK_MINERU_QUEUE},
     },
+    **runtime_options(CELERY_BROKER_URL, CELERY_RESULT_EXPIRES),
 )
 
 celery_app.autodiscover_tasks(["src.services"], force=True)
