@@ -368,3 +368,9 @@ apt 升级删除了旧 EGL Wayland 库与对应 JSON，但 `/var/snap/docker/cur
 升级前须停新提交并确认普通/two-stage 队列、active/reserved/scheduled 已清空；旧普通任务载荷包含已删除字段，不能在未收敛时混用新旧 API/worker。随后同步 uv.lock，重载 API、普通与 two-stage worker。模型容器无需重建。同步/异步解析、图片描述及 Office 转换继续保留。
 
 新批量入口为 `uv run python -m src.scripts.batch_parse --mode parse|images|two-stage`，详见[批量操作](batch-processing.md)。README 顶部提供可复制给 AI 的整套设施启动、恢复、停止指令。
+
+本机已完成切换：先确认七个 worker 的 active/reserved/scheduled 与所有相关队列 ready 为零，再停 API、复核队列、停 worker、`uv sync --locked --group dev` 并补起应用。API 和七个 worker 在线，PM2 已保存；MinerU 模型及其他仓库 embedding 进程 PID 未变化，共享存储服务和数据未清理。应用安装依赖降至 145 个，移除 minio、argon2-cffi、argon2-cffi-bindings、pycryptodome，依赖一致性检查通过。
+
+最终验证：215 项常规测试通过、27 项外部回归按缺省跳过；另启用真实模型的 7 项 HTTP/批量回归全部通过，覆盖三个批量模式的 p2/九页论文整本及续跑、同步解析、普通任务、two-stage 图片增强和 Office 转换。真实 CLI 额外验证“超时保留 ID → --resume-only 只收取已提交文件 → 恢复后提交剩余文件”，检查 p2 的 1600 关键值。旧存储路由 404，公开 schema 与 AI 指南无存储选项，调优指南仍不经服务提供。
+
+私有证据位于 `output/batch-entrypoints-20260918/`：`final-unit-tests.log`、`final-live-tests.log`、`cli-drain/`、`reload.log`、`acceptance.json`。较早的 `live-tests.log` 是用户要求移除存储之前的中间结果，不作为最终功能清单。批量窗口、上传超时和恢复流程已验证；千页整本及 20 万页容量仍须按调优指南专项验收。

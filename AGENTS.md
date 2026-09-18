@@ -127,3 +127,5 @@ uv run --group dev pytest
 2026-09-18 Python 3.13 / 4.0.2：应用已切换 Python 3.13.15、MinerU 4.0.2、DocVortex 0.4.12；基础 mineru/ONNX，无应用 Torch/vLLM。Docker 镜像也升级 MinerU 4.0.2，保留 vLLM 0.21.0 + Torch 2.11.0/CUDA 13。API 4 worker，每 scheduler 池派发 3，共享解析容量 3；普通 worker 新增上线，只消费 urgent/normal，避免抢 two-stage merge 的 default。API、七个 Celery worker 与三卡模型均在线并已 pm2 save。198 项常规测试通过；20 项真实模型与 5 项当时的 HTTP/Celery/Office/存储验收通过（存储功能现已移除）。重建容器暴露的 Docker Snap CDI 过期 EGL 挂载已在备份后最小修复，三卡 CUDA 实测通过，未重启共享 Docker，其他 PM2 进程 PID 未变化。详细证据、限制与回滚见部署记录；临时/历史日志归入 output。
 
 - MinIO 功能已按用户要求移除：不注册存储路由，不接受存储任务参数，不返回 minio_assets，应用依赖不含 minio；不要恢复旧接口、上传 helper 或客户端存储选项。结果由调用方通过 HTTP 获取并自行保存，批量 CLI 默认本地 JSON。现存共享存储服务/数据不属于本项目清理范围；历史验收仅作记录。`test_removed_storage_contract.py` 检查公开 schema 和响应不含旧合同。
+
+2026-09-18 批量与存储清理：统一 CLI 的 parse/images/two-stage 三模式、JSON 续跑与 --resume-only 已完成；README 顶部提供三段 AI 运维指令。应用及 worker 在队列收敛后已重载并 pm2 save，模型及其他项目进程保持。215 项常规测试及另行启用的 7 项真实 HTTP/批量回归通过，真实 CLI 超时/收尾/恢复通过；应用 145 个依赖，旧存储 SDK 与接口移除。证据见部署说明和 output/batch-entrypoints-20260918，未宣称千页整本容量已验证。
