@@ -197,6 +197,7 @@ def test_vllm_requires_base_url(monkeypatch):
 
 def test_vllm_vision_retries_next_client(monkeypatch):
     attempts = []
+    messages = []
 
     monkeypatch.setattr(vision_vllm, "_CLIENT_POOL", _DummyVllmPool(["first", "second"]))
 
@@ -208,10 +209,16 @@ def test_vllm_vision_retries_next_client(monkeypatch):
 
     monkeypatch.setattr(vision_vllm, "vision_completion_openai_compatible", _fake_openai_compatible)
 
-    result = vision_vllm.vision_completion_vllm("fake.jpg")
+    sink = vision_vllm.logger.add(messages.append, format="{message}")
+    try:
+        result = vision_vllm.vision_completion_vllm("fake.jpg")
+    finally:
+        vision_vllm.logger.remove(sink)
 
     assert result == "ok"
     assert attempts == ["first", "second"]
+    assert any("attempt 1/2 failed: RuntimeError" in message for message in messages)
+    assert all("first endpoint down" not in message for message in messages)
 
 
 def test_vllm_vision_raises_when_all_clients_fail(monkeypatch):

@@ -24,7 +24,7 @@
 
 1. 不需要独立图片描述：短任务用 `/mineru`；批量/长任务用 `/mineru/task`，先由运维确认普通 worker 已启用。
 2. 需要图片描述：长文档与批量优先 `/two_stage/task`；临时直接响应可用 `/mineru_with_images`。单文件也可以入队，队列不是多文件专属功能。
-3. 不要用 two-stage 假装纯解析：当前没有 `with_images=false` 开关。其图片筛选和去重也与同步图片接口不同，不能期待两个入口逐字相同。
+3. 不要用 two-stage 假装纯解析：当前没有 `with_images=false` 开关。其图片筛选与同步图片接口不同，不能期待两个入口逐字相同。
 
 部署可能只启用了 two-stage worker。API 有某个路由或提交返回 200，并不保证对应队列有人消费。普通与 two-stage 的 worker 配置见[普通任务说明](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/mineru_with_images_task_usage.md)和[two-stage 说明](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/two_stage_task_usage.md)。
 

@@ -240,7 +240,7 @@ def _build_image_jobs(
         min_area_ratio = MIN_IMAGE_AREA_RATIO_WITH_CAPTION if has_caption else MIN_IMAGE_AREA_RATIO
         if area_ratio is not None and area_ratio < min_area_ratio:
             logger.debug(
-                "Skip image (small area %.4f < %.4f) at %s page %s",
+                "Skip image (small area {:.4f} < {:.4f}) at {} page {}",
                 area_ratio,
                 min_area_ratio,
                 img_path,
@@ -250,7 +250,7 @@ def _build_image_jobs(
 
         if aspect_ratio is not None and aspect_ratio > MAX_IMAGE_ASPECT_RATIO:
             logger.debug(
-                "Skip image (extreme aspect %.2f > %.2f) at %s page %s",
+                "Skip image (extreme aspect {:.2f} > {:.2f}) at {} page {}",
                 aspect_ratio,
                 MAX_IMAGE_ASPECT_RATIO,
                 img_path,
@@ -262,7 +262,7 @@ def _build_image_jobs(
             dim_aspect = dim_w / dim_h if dim_w >= dim_h else dim_h / dim_w
             if dim_aspect > MAX_IMAGE_ASPECT_RATIO:
                 logger.debug(
-                    "Skip image (extreme intrinsic aspect %.2f > %.2f) at %s page %s",
+                    "Skip image (extreme intrinsic aspect {:.2f} > {:.2f}) at {} page {}",
                     dim_aspect,
                     MAX_IMAGE_ASPECT_RATIO,
                     img_path,
@@ -273,7 +273,7 @@ def _build_image_jobs(
                 min_side = min(dim_w, dim_h)
                 if min_side < MIN_IMAGE_MIN_DIM:
                     logger.debug(
-                        "Skip image (min side %d < %d) at %s page %s",
+                        "Skip image (min side {} < {}) at {} page {}",
                         min_side,
                         MIN_IMAGE_MIN_DIM,
                         img_path,
@@ -282,7 +282,7 @@ def _build_image_jobs(
                     continue
                 if dim_w * dim_h < MIN_IMAGE_PIXEL_AREA:
                     logger.debug(
-                        "Skip image (pixel area %d < %d) at %s page %s",
+                        "Skip image (pixel area {} < {}) at {} page {}",
                         dim_w * dim_h,
                         MIN_IMAGE_PIXEL_AREA,
                         img_path,
@@ -293,7 +293,7 @@ def _build_image_jobs(
         min_bytes = MIN_IMAGE_BYTES_WITH_CAPTION if has_caption else MIN_IMAGE_BYTES
         if file_size and file_size < min_bytes and not has_caption:
             logger.debug(
-                "Skip image (size %dB < %dB) at %s page %s",
+                "Skip image (size {}B < {}B) at {} page {}",
                 file_size,
                 min_bytes,
                 img_path,
@@ -303,7 +303,7 @@ def _build_image_jobs(
 
         if per_page_counts[page_number] >= PER_PAGE_IMAGE_LIMIT:
             logger.debug(
-                "Skip image due to per-page limit %d at page %s (%s)",
+                "Skip image due to per-page limit {} at page {} ({})",
                 PER_PAGE_IMAGE_LIMIT,
                 page_number,
                 img_path,
@@ -453,9 +453,9 @@ def parse_task(payload: Dict[str, object]) -> Dict[str, object]:
         except FileNotFoundError:
             pass
         except Exception:
-            logger.debug("Failed to remove source file %s", source_path)
+            logger.debug("Failed to remove source file {}", source_path)
 
-    logger.info("Parsing %s into workspace %s", target_path, workspace)
+    logger.info("Parsing {} into workspace {}", target_path, workspace)
     try:
         response = parse_doc([target_path], workspace, backend=backend)
     except Exception as exc:
@@ -484,7 +484,7 @@ def parse_task(payload: Dict[str, object]) -> Dict[str, object]:
         output_dir or str(workspace),
         keep_positions=bool(payload.get("custom_vision_prompt")),
     )
-    logger.info("Parsed %s: %d images found", target_path, len(image_jobs))
+    logger.info("Parsed {}: {} images found", target_path, len(image_jobs))
 
     return {
         "workspace": str(workspace),
@@ -521,7 +521,7 @@ def vision_task(
         )
         return {"seq": seq, "vision_text": vision_text}
     except Exception as exc:  # noqa: BLE001 - external call may fail
-        logger.info("Vision call failed for seq=%s: %s", seq, exc)
+        logger.info("Vision call failed for seq={}: {}", seq, type(exc).__name__)
         raise RuntimeError(f"Vision call failed for seq={seq}: {exc}") from exc
 
 
@@ -549,7 +549,7 @@ def merge_task(
         except FileNotFoundError:
             pass
         except Exception:
-            logger.debug("Failed to remove cleanup path %s", path)
+            logger.debug("Failed to remove cleanup path {}", path)
 
     return {
         "result": [item.model_dump() for item in items],

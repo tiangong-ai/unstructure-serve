@@ -73,7 +73,7 @@ def _env_float(var_name: str, default: float) -> float:
         return float(raw_value.strip())
     except (TypeError, ValueError):
         logger.warning(
-            "Invalid %s=%s, falling back to default %s.",
+            "Invalid {}={}, falling back to default {}.",
             var_name,
             raw_value,
             default,
@@ -89,7 +89,7 @@ def _env_positive_int(var_name: str, default: int) -> int:
         parsed = int(raw_value.strip())
     except (TypeError, ValueError):
         logger.warning(
-            "Invalid %s=%s, falling back to default %s.",
+            "Invalid {}={}, falling back to default {}.",
             var_name,
             raw_value,
             default,
@@ -97,7 +97,7 @@ def _env_positive_int(var_name: str, default: int) -> int:
         return default
     if parsed <= 0:
         logger.warning(
-            "Invalid %s=%s, falling back to default %s.",
+            "Invalid {}={}, falling back to default {}.",
             var_name,
             raw_value,
             default,
@@ -182,10 +182,10 @@ def vision_completion_vllm(
             last_error = exc
             errors.append(str(exc))
             logger.warning(
-                "vLLM vision attempt %s/%s failed: %s",
+                "vLLM vision attempt {}/{} failed: {}",
                 attempt,
                 len(clients),
-                exc,
+                type(exc).__name__,
             )
 
     assert last_error is not None
