@@ -2,12 +2,12 @@
 
 ## 直接复制给 AI：启动、恢复、停止整套设施
 
-以下指令适用于能在部署机器上执行命令的 AI。把项目路径改成你的实际路径，然后复制对应整段。AI 会读取本地配置使用凭证，无需把密钥粘贴到对话中。整套设施包括本项目的 API、普通 worker、六个 two-stage worker 和三卡 MinerU 模型，以及配置中依赖的 Redis、图片模型；共享或其他项目管理的依赖须先识别归属。
+在能访问部署机器的 AI 中打开本仓库作为工作区，再复制以下任一段。AI 会读取本地配置使用凭证，无需把密钥粘贴到对话中。整套设施包括本项目的 API、普通 worker、六个 two-stage worker 和三卡 MinerU 模型，以及配置中依赖的 Redis、图片模型；共享或其他项目管理的依赖须先识别归属。
 
 **首次初始化并启动：**
 
 ```text
-请初始化并启动 /home/david/projects/TianGong-AI-Unstructure-Serve 的整套文档解析设施。
+请初始化并启动当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先阅读仓库 AGENTS.md、README.md 和 docs/mineru_4_upgrade_usage.md，核对现有进程、端口、GPU、模型缓存和私有配置。已有配置和缓存应复用，缺失配置按示例初始化；不要覆盖凭证或修改系统 Python。缺少必须由我提供的凭证/地址时，明确列出缺项。
 按 uv.lock 使用 Python 3.13.15，应用安装 CPU ONNX 依赖，MinerU 大模型只运行在 Docker。按文档准备和验证小模型，检查 Redis、独立图片模型；若依赖由其他项目管理，按其已有方式使用，不重复创建。
 通过 deploy/manage.sh start model 启动模型，等待实际健康；再执行 start app 和 start ordinary，启动 API、六个 two-stage worker 与普通 worker。已有在线进程不要重复重启。
@@ -18,7 +18,7 @@
 **重启机器后恢复，或排查服务不可用：**
 
 ```text
-请恢复 /home/david/projects/TianGong-AI-Unstructure-Serve 的整套文档解析设施。
+请恢复当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先读 AGENTS.md、README.md 和部署说明，检查本项目 PM2/容器状态、端口、日志、GPU/CUDA、Redis、独立图片模型，定位故障。先检查在途任务及队列，再决定哪些故障组件需要重启；健康组件保持运行。
 复用现有 .venv、uv.lock、私有配置和缓存。通过 deploy/manage.sh start model 补起模型并验证健康，再 start app、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
 如驱动升级后 GPU 可见但推理失败，按部署说明检查 UVM/CDI 和容器内 CUDA，不以 nvidia-smi 正常作为修复完成的依据。
@@ -29,7 +29,7 @@
 **安全停止整套设施：**
 
 ```text
-请安全停止 /home/david/projects/TianGong-AI-Unstructure-Serve 的文档解析设施。
+请安全停止当前工作区中 TianGong AI Unstructure Serve 的文档解析设施。
 先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止新增提交，保留各批量客户端的输入、输出目录和任务记录；统一客户端可停止后用原命令加 --resume-only 重新运行，只查询并保存已提交任务，不补交或重试文件。其他提交来源也停止新增请求，保持 API/worker/模型可用直到已有任务结果已收取。
 检查普通和 two-stage 的 ready、active、reserved、scheduled/unacked 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
 任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、stop workers、stop model，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
@@ -56,7 +56,7 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 ## 首次初始化
 
-以下命令在仓库根目录执行。准备 Linux、支持 GPU 的 NVIDIA 驱动/Container Toolkit、Docker Compose 2.24.4+、PM2，以及较新的 uv（建议 0.12.16+）。系统组件安装及单卡方案见[部署说明](docs/mineru_4_upgrade_usage.md#首次安装)。不要修改系统 `/usr/bin/python3`。
+以下命令在仓库根目录执行。准备 Linux、支持 GPU 的 NVIDIA 驱动/Container Toolkit、Docker Compose 2.24.4+、PM2，以及较新的 uv（建议 0.12.16+）。系统组件安装及单卡方案见[部署说明](docs/mineru_4_upgrade_usage.md#首次安装)。不要替换操作系统自带的 Python。
 
 ```bash
 sudo apt install -y libmagic-dev poppler-utils libreoffice pandoc graphicsmagick
@@ -82,7 +82,7 @@ uv run mineru-kit models download --tier basic --small-backend onnx --source mod
 uv run mineru-kit models verify --tier basic --small-backend onnx
 ```
 
-Redis 可以复用已有服务。全新单机没有 Redis 时，按[部署说明](docs/mineru_4_upgrade_usage.md#首次安装)创建；不要重建或清空已有共享 Redis。
+启动异步 worker 前，先准备可用的 Redis 并填写 broker/backend；可以复用已有服务。Redis 和独立图片模型的管理边界见[部署说明](docs/mineru_4_upgrade_usage.md#首次安装)。
 
 启动模型并等待健康检查成功，再启动应用：
 
@@ -96,7 +96,7 @@ curl --fail http://127.0.0.1:30000/health
 pm2 save
 ```
 
-`app` 包含 API 和六个 two-stage worker；`ordinary` 启动普通 worker。统一脚本可从任意目录用绝对路径调用；重复 start 会跳过已在线进程，修改配置请使用 restart。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
+`app` 包含 API 和六个 two-stage worker；`ordinary` 启动普通 worker。以下脚本命令均从仓库根目录执行；重复 start 会跳过已在线进程，修改配置请使用 restart。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
 
 ## 重启后恢复与日常维护
 
@@ -114,7 +114,7 @@ curl --fail http://127.0.0.1:30000/health
 
 修改 `.env`/应用代码后，确认 active/reserved 任务已收敛，再执行相应 `restart api`、`restart workers` 或 `restart ordinary`；模型维护使用 `restart model`。停止对应组件用 `stop`。**不要用全局 `pm2 delete all`、Redis flush 或清空共享任务目录。** 更新 Python/依赖时先按[部署与回滚](docs/mineru_4_upgrade_usage.md)保留旧环境并停妥本项目进程，不能直接覆盖正在运行的 `.venv`。
 
-`/health` 只确认 API 存活；`/ready` 检查 MinerU 模型端点；还需核对队列消费者、独立图片服务和一次真实 PDF。若驱动升级后 GPU 可见但无法推理，按[Docker 故障排查](docs/mineru_4_upgrade_usage.md#docker-与多卡)检查 UVM 设备。
+`/health` 只确认 API 存活；`/ready` 检查 MinerU 模型端点；还需核对队列消费者、独立图片服务和一次真实 PDF。若驱动升级后 GPU 可见但无法推理，按[Docker 故障排查](docs/mineru_4_upgrade_usage.md#gpu-重启故障排查)检查 UVM 设备。
 
 ## 如何调用
 
@@ -144,24 +144,25 @@ curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=t
 ```bash
 # 不额外描述图片；需要图片增强改 --mode two-stage，并使用新的输出目录
 uv run python -m src.scripts.batch_parse \
-  --mode parse --input-dir /path/to/pdfs --output-dir /path/to/results-parse \
+  --mode parse --input-dir input/batch --output-dir output/batch-parse \
   --max-in-flight 2
 ```
 
-`--mode images` 为普通队列图片增强。默认 advanced、输出 JSON；可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
+示例假定已将待处理文件放入 `input/batch`；也可替换为自己的输入目录。`--mode images` 为普通队列图片增强。默认 advanced、输出 JSON；可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
 
 ## 文档与开发
 
 | 文档 | 内容 |
 | --- | --- |
-| [部署与回归](docs/mineru_4_upgrade_usage.md) | 配置、模型、队列、恢复、回滚和实测记录 |
+| [部署与恢复](docs/mineru_4_upgrade_usage.md) | 配置、模型、队列、恢复与回滚 |
 | [AI 接入指南](docs/ai-integration.md) | 端点选择、上传字段、轮询、失败处理、大文档批量 |
 | [普通任务](docs/mineru_with_images_task_usage.md) / [two-stage](docs/two_stage_task_usage.md) | 各自队列、字段及批量示例 |
 | [统一批量客户端](docs/batch-processing.md) | 三种异步模式、文件筛选、JSON 结果、超时及续跑 |
 | [架构说明](docs/architecture.md) | 模块职责、容量与生命周期、部署目录 |
 | [调优指南](docs/performance-tuning.md) | CPU/GPU/模型变化后的测量和参数选择 |
-| [依赖审计](docs/dependency-audit-2026-09-18.md) | 升级前版本约束与隔离验证 |
-| [HTTP 示例](examples/test.http) / [历史记录](docs/history/README.md) | 调用样例与旧版本证据 |
+| [依赖维护](docs/dependencies.md) | 安装边界、兼容升级与 Python 迁移 |
+| [验证指南](docs/validation.md) | 常规检查、真实 PDF 回归和验收范围 |
+| [HTTP 示例](examples/test.http) | VS Code REST Client 调用样例 |
 
 远程 AI 可读取 `/llms.txt`、`/guides/ai-integration.md` 和 `/openapi.json`；前两个继承业务鉴权。调优、架构和部署文档仅在仓库维护，不经服务公开。Swagger `/docs` 与 OpenAPI 如需私有，由网关额外保护。
 

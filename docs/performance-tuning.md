@@ -2,13 +2,13 @@
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
 
-适用基线：MinerU 4.0.2、Python 3.13.15、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。最后核对：2026-09-18。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
+适用基线：MinerU 4.0.2、Python 3.13.15、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
 
-安装与故障恢复见[部署与回归](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/mineru_4_upgrade_usage.md)，接口调用见 [AI 接入指南](ai-integration.md)。先按部署文档获得能正确解析的系统，再调性能。
+安装与故障恢复见[部署与恢复](mineru_4_upgrade_usage.md)，接口调用见 [AI 接入指南](ai-integration.md)。先按部署文档获得能正确解析的系统，再调性能。
 
 ## 1. 先确定要优化的目标
 
-至少分别记录以下两种目标，避免把吞吐提升误认为单文件延迟下降：
+分别记录以下目标，避免把吞吐提升误认为单文件延迟下降：
 
 - **交互延迟**：单文件从提交到完整结果的 P50/P95，以及冷启动与已预热差异。
 - **批处理吞吐**：固定混合文件集的总完成时间、成功页/秒、成功文档/分钟、失败率和积压量。
@@ -37,7 +37,7 @@ flowchart LR
 | 服务 | 配置入口 | 工作内容 | 当前分配方式 |
 | --- | --- | --- | --- |
 | MinerU VLM | `MINERU_MODEL_VLM_SERVER_URL` | 版面区域解析等 MinerU 推理 | 本机单容器、DP=3、TP=1，单 URL 内部分配请求 |
-| 独立图片描述 | `VLLM_BASE_URLS` / `VLLM_BASE_URL` | 对提取图片补充事实描述 | 当前两个可用端点、相同模型；应用进程内轮换优先端点，失败再试下一个 |
+| 独立图片描述 | `VLLM_BASE_URLS` / `VLLM_BASE_URL` | 对提取图片补充事实描述 | 数量取决于 VLLM_BASE_URLS；应用进程内轮换优先端点，失败再试下一个，使用共同模型名 |
 
 图片模型的轮询不是按 GPU 利用率或队列深度加权；MinerU 多 URL 池也没有图片服务同样的故障切换语义。相同 URL 的多个别名不等于新增推理容量。
 
@@ -53,12 +53,12 @@ DP 主要增加可同时处理的请求数。一个长文档如果产生很多�
 lscpu
 free -h
 nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu --format=csv
-df -h /tmp .
+df -h .
 pm2 status
 docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/compose.mineru.yaml -f deploy/mineru-vllm/compose.mineru.parallel.yaml ps
 ```
 
-还需记录容器或 cgroup 的 CPU/内存配额、NUMA、GPU 间互联、共享 GPU 上其他服务的峰值、Redis/磁盘/网络延迟。宿主机总核数和总内存不一定是本服务可用资源。
+还需检查任务临时目录所在文件系统的容量，并记录容器或 cgroup 的 CPU/内存配额、NUMA、GPU 间互联、共享 GPU 上其他服务的峰值、Redis/磁盘/网络延迟。宿主机总核数和总内存不一定是本服务可用资源。
 
 以下仅用于规划实验，不是硬性计算公式：
 
@@ -67,13 +67,13 @@ docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/comp
 - 每 GPU 显存需求包括权重、KV cache、视觉 encoder、中间激活及运行时保留。`gpu-memory-utilization` 是预算，不是 OS 级隔离，也不保证别的进程随后申请显存时仍有余量。
 - 稳态平均在途数可用 Little 定律 `L ≈ λ × W` 帮助理解；不要用平均值替代 P95 或忽略突发、失败重试和文件长尾。
 
-本机基线：3 个 parse solo worker、ONNX intra/inter=16/1、每 parser VLM 并发 8、处理窗口 64 页；Docker DP/TP=3/1、每 GPU 显存比例 0.15、max-model-len=8192、max-num-seqs=16；two-stage vision threads=32；同步图片每请求窗口 3；批量客户端在途 6。基础 Compose 的单卡替代与三卡模板不能同时管理同一 project。
+本机基线：3 个 parse solo worker、ONNX intra/inter=16/1、每 parser VLM 并发 8、处理窗口 64 页；Docker DP/TP=3/1、每 GPU 显存比例 0.15、max-model-len=8192、max-num-seqs=16；two-stage vision threads=32；同步图片每请求窗口 3；统一批量客户端在途 2；API、普通与 two-stage 共享实际解析上限 3。基础 Compose 的单卡替代与三卡模板不能同时管理同一 project。
 
 ## 4. 用同一套样本建立基准
 
 ### 4.1 样本与正确性门槛
 
-`input` 有 11 份私有 PDF。至少包含：p2 短表格/checkbox、九页论文的公式与图、46 页 fese、长文档首/中/尾页、扫描件；Office 业务另加 DOCX/PPT/XLS 转换样本。性能主集合按实际业务的页数、分辨率和图片比例加权，不要仅测 p2。
+测试中的固定样本清单包含：p2 短表格/checkbox、九页论文的公式与图、46 页 fese、长文档首页、第 11 页和末页、扫描件；目录新增文件需显式加入回归，见[验证指南](validation.md)。Office 业务另加 DOCX/PPT/XLS 转换样本。性能主集合按实际业务的页数、分辨率和图片比例加权，不要仅测 p2。
 
 检查页数与源页号、非空内容、图片文件存在、表格/公式/数字/正负号/单位、checkbox、阅读顺序、图片与文字不重复错位。改变视觉模型或提示词时，用固定原图和固定上下文检查输出；保留原图，不以更小图片的结果冒充同条件对比。
 
@@ -124,7 +124,7 @@ uv run python -m src.scripts.benchmark_mineru \
 
 `MINERU_PROCESSING_WINDOW_SIZE` 控制内部处理窗口，不是页数上限，也不把结果拆成多个独立文档。缩小窗口可能减少峰值内存但增加调度成本；调后检查整本末页和跨页顺序。
 
-普通/sync scheduler 的 `GPU_IDS` 是应用进程内的历史调度槽位，并会设置子进程可见设备；它不改变 Docker 绑定的卡或 DP。多个 Gunicorn 进程各有 scheduler，增加 API worker 或槽位会叠加解析压力，不是增加 MinerU GPU 副本的正确入口。
+普通/sync scheduler 的 `GPU_IDS` 是应用进程内的历史调度槽位，并会设置子进程可见设备；它不改变 Docker 绑定的卡或 DP。多个 Gunicorn 进程各有 scheduler，增加 API worker 或池会增加派发进程与基础内存；实际解析仍受共享 MINERU_PARSE_SLOTS 限制，不会增加 Docker 模型副本。
 
 ## 6. GPU 数量、显存和模型变化时
 
@@ -135,7 +135,7 @@ uv run python -m src.scripts.benchmark_mineru \
 - 卡数足够且模型需多卡：可评估 DP×TP 组合，每副本使用 TP 张卡；不要把这个规划公式当成本项目所有模型都已验证支持。
 - GPU 型号/显存不一致：优先隔离服务并单独测容量，不直接套用相同显存比例或同步 TP。当前客户端没有按异构端点容量加权的调度。
 
-DP/TP 原理参考 [vLLM 官方部署说明](https://docs.vllm.ai/en/latest/serving/data_parallel_deployment/)；其中新版本参数需与本项目固定的 vLLM 0.21.0 核对后使用。
+DP/TP 原理参考 [vLLM 官方部署说明](https://docs.vllm.ai/en/v0.21.0/serving/data_parallel_deployment/)；升级时需核对目标版本支持的参数。
 
 ### 6.2 本仓库具体修改位置
 
@@ -155,7 +155,7 @@ MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换
 
 长任务的预取会影响公平性，相关行为参考 [Celery 优化文档](https://docs.celeryq.dev/en/stable/userguide/optimizing.html)。parse 使用 solo 是为了允许 SDK 再创建渲染子进程，不随意换成 daemonic prefork。
 
-客户端批量窗口 `TWO_STAGE_MAX_IN_FLIGHT` 当前为 6。可从约两倍 parse worker 数开始实验，但图片多、文件大或视觉阶段慢时应减少积压，并同时观察全流水线；它不是全局准入控制。一次上传数千文件通常只增加磁盘与等待，未必增加吞吐。
+统一客户端的 --max-in-flight 默认 2，先从 1、2、3 个在途文件逐步测量；图多、文件大或视觉阶段慢时减少积压。兼容 two-stage 脚本的 TWO_STAGE_MAX_IN_FLIGHT 默认 6，不用于推定统一客户端或服务器容量。客户端窗口不是全局准入控制，一次上传更多文件可能只增加磁盘与等待。
 
 ## 8. 独立多模态图片服务调优
 
@@ -202,11 +202,9 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 
 这些输出可能含任务路径/参数，仅作私有诊断。不要发布完整 PM2 环境、Redis 内容或业务任务日志。
 
-## 11. 已有证据怎样使用
+## 11. 测量记录与决策
 
-2026-09-18 的本机单轮对照：p2 同步平均 9.75→4.29 秒主要来自渲染池退出修复；同一份 fese 业务拼接 7.86→5.97 毫秒只是小比例优化。30 份 p2 使用在途 30/6/3，整批分别 26.61/26.44/30.33 秒。固定六图的旧/新提示词与采样对照，输出 token 2753→2303；九页论文整份仅 49.16→48.19 秒，因为解析仍占约 31 秒。
-
-这些结果说明应先找固定开销和真正瓶颈，不能保证换 CPU/GPU/模型后保持同样比例。记录表建议：
+优先定位固定开销和真正瓶颈，分别记录解析、图片模型和输出处理的耗时。毫秒级拼接收益不能代替整份文档收益；图片输出 token 减少也不意味着端到端耗时同比减少。每轮使用以下记录表：
 
 | 项目 | 每轮必填 |
 | --- | --- |
@@ -218,12 +216,11 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 
 找到在质量和尾延迟约束下的稳定拐点后停止加并发；资源有空闲本身不是必须提高占用率的理由。
 
-
 ## 12. 400–1000 页整本批量的专项准入
 
 接口选择与投递步骤见 [AI 指南第 5.3 节](ai-integration.md#53-多份-4001000-页-pdf-的投递流程)。原有长样本抽页测试与短文件吞吐测试不是千页整本容量验收。先单份代表性整本，再 2/3 份，覆盖扫描/图表密集样本，检查末页有效内容、各阶段耗时、RAM、磁盘、结果体积和错误/重投。
 
-2026-09-18 代码核对发现的长任务约束（本节记录问题，不代表已经修改配置）：
+当前代码的长任务约束：
 
 | 层次 | 当前行为 | 千页验收要求 |
 | --- | --- | --- |
@@ -241,17 +238,17 @@ Redis visibility timeout 到期可使未确认任务被重新投递；扩大它�
 
 不得直接把 PDF 切成 50/100 页后声称行为等价。若单份整本在预算内不能完成，应先调整资源/窗口、档位选择及执行机制；必须分段时另行设计源页偏移、跨段表格/段落/脚注衔接、图像去重与完整性验收。当前公共 API 不提供此类透明分段恢复能力。
 
-## 13. API 与解析容量分离（Python 3.13 维护）
+## 13. API 与解析容量分离
 
 六个上传入口按 1 MiB 在线程池落盘，不再整文件读取；Office/broker 操作移出事件循环。解析 Future 直接异步等待，不再每个长请求占用一个等待线程。HTTP 超时后的源文件等实际任务结束才清理。
 
-`MINERU_PARSE_SLOTS` 缺省 3，在同一主机为 API、普通任务和 two-stage 共享解析上限；全部进程必须配置相同 `MINERU_PARSE_SLOT_DIR`（缺省 `/tmp/tiangong_mineru_parse_slots`）。槽位涵盖 MinerU 推理、资产保存和结果归一化；不限制后续独立图片模型并发。等待超时缺省 1800 秒，并计入 scheduler hard timeout。跨主机需独立容量规划，不能把本机文件锁当作分布式调度。增加 API worker 不会增加这个上限；锁文件不能在运行中删除。
+`MINERU_PARSE_SLOTS` 缺省 3，在同一主机为 API、普通任务和 two-stage 共享解析上限；全部进程必须配置相同 `MINERU_PARSE_SLOT_DIR`（缺省使用系统临时目录下的 tiangong_mineru_parse_slots）。槽位涵盖 MinerU 推理、资产保存和结果归一化；不限制后续独立图片模型并发。等待超时缺省 1800 秒，并计入 scheduler hard timeout。跨主机需独立容量规划，不能把本机文件锁当作分布式调度。增加 API worker 不会增加这个上限；锁文件不能在运行中删除。
 
-隔离升级的 177 项基线测试通过；input 的 11 份 PDF 共 18 项回归通过（p2 四档、九页论文和 fese 整本，其余抽页）。上传优化以九项失败测试复现后修复，并增加超时/分块/写入失败检查。共享容量验证跨进程上限、异常释放、超时及 owner 被杀而渲染子进程仍在时的回收。
+相关验证覆盖上传分块、写入失败、超时清理、跨进程共享槽位、异常释放，以及父进程被杀后的租约回收。测试入口见[验证指南](validation.md)。
 
 ### HTTP 派发对照（6 个真实 p2 请求）
 
-使用独立 loopback Gunicorn 端口，Python 3.13/MinerU 4.0.2、同一个模型服务、共享解析上限 3，先预热一次，再同时上传 6 份 input/p2.pdf；每份检查两页与 1600 关键值，同时轮询 /health。不是千页文档或长时间稳定性测试。
+以下测量使用独立 loopback Gunicorn 端口，Python 3.13/MinerU 4.0.2、同一个模型服务、共享解析上限 3，先预热一次，再同时上传 6 份 input/p2.pdf；每份检查两页与 1600 关键值，同时轮询 /health。不是千页文档或长时间稳定性测试。
 
 | API worker | 每池派发 1：整批秒 | 每池派发 3：整批秒 |
 | --- | ---: | ---: |
@@ -259,10 +256,10 @@ Redis visibility timeout 到期可使未确认任务被重新投递；扩大它�
 | 4 | 16.62 | 8.99 |
 | 8 | 8.94 | 8.51 |
 
-连接分配不均会使每 API 进程原先的单通道队列串行等待。`MINERU_SCHEDULER_WORKERS=3` 增加的是隔离派发进程，实际 MinerU 执行仍受共享 3 槽限制；这会增加进程与基础内存，不能无界加大。此次保留 API 4 worker，避免仅凭短样本将 8 worker 的小幅差异当作普遍收益。优化后 /health 采样 P95 约 2.3–2.4 ms；只是该负载下的观测，不是最大 HTTP 容量证明。
+连接分配不均会使每 API 进程原先的单通道队列串行等待。`MINERU_SCHEDULER_WORKERS=3` 增加的是隔离派发进程，实际 MinerU 执行仍受共享 3 槽限制；这会增加进程与基础内存，不能无界加大。部署模板使用 API 4 worker，避免仅凭短样本将 8 worker 的小幅差异当作普遍收益。优化后 /health 采样 P95 约 2.3–2.4 ms；只是该负载下的观测，不是最大 HTTP 容量证明。
 
-Gunicorn 使用 uvloop/httptools 的 UvicornWorker；配置集中 `deploy/gunicorn.conf.py`，`API_WORKERS` 缺省 4。`API_MAX_REQUESTS` 从 500 调为 5000，jitter 为 500，减少频繁轮询造成的周期回收；这是回收频率折中，仍需长期监测 RSS，不能据短测认定不存在内存增长。PM2 API kill_timeout 1900 秒与 Gunicorn 退出窗口对齐。`preload_app=false` 避免复制已初始化的调度器/客户端。
+Gunicorn 使用 uvloop/httptools 的 UvicornWorker；配置集中 `deploy/gunicorn.conf.py`，`API_WORKERS` 缺省 4。`API_MAX_REQUESTS` 缺省 5000，jitter 为 500，减少频繁轮询造成的周期回收；这是回收频率折中，仍需长期监测 RSS，不能据短测认定不存在内存增长。PM2 API kill_timeout 1900 秒与 Gunicorn 退出窗口对齐。`preload_app=false` 避免复制已初始化的调度器/客户端。
 
 复现：`uv run python -m src.scripts.benchmark_api --output output/http-benchmark-new --workers 2 4 8`。输出目录必须不存在；端口默认 17771，仅绑定 loopback。脚本会访问真实模型，需在维护/测试窗口执行，不能在满负荷生产期间直接加压。
 
-统一批量客户端见 [批量操作](batch-processing.md)：三种异步模式共用在途窗口，缺省 2，按文件及请求校验续跑。客户端窗口/超时不替代本节服务端长任务保障；默认 2 也不是内存安全保证。
+统一批量客户端见 [批量操作](batch-processing.md)：三种异步模式共用在途窗口，缺省 2，按文件及请求校验续跑。客户端窗口/超时不替代第 12 节的服务端长任务保障；默认 2 也不是内存安全保证。

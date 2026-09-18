@@ -14,31 +14,31 @@
 
 ## 直接使用
 
-在仓库根目录执行；生产同机缺省地址是 `http://127.0.0.1:7770`，远程用 `--base-url https://your-service/prefix`，保留反向代理路径前缀。认证优先 `FASTAPI_BEARER_TOKEN` 环境变量，其次仓库 `.env`，最后仓库 `.secrets/secrets.toml` 的 `FASTAPI.BEARER_TOKEN`。不通过命令行传令牌。无鉴权的测试 API 才显式使用 `--no-auth`。
+先准备输入目录，以下示例在仓库根目录执行；生产同机缺省地址是 `http://127.0.0.1:7770`，远程用 `--base-url https://your-service/prefix`，保留反向代理路径前缀。认证优先 `FASTAPI_BEARER_TOKEN` 环境变量，其次仓库 `.env`，最后仓库 `.secrets/secrets.toml` 的 `FASTAPI.BEARER_TOKEN`。不通过命令行传令牌。无鉴权的测试 API 才显式使用 `--no-auth`。
 
 ```bash
 # 预览文件数和总字节数，不上传、不创建输出目录、不验证服务容量
 uv run python -m src.scripts.batch_parse \
-  --input-dir /path/to/pdfs --output-dir /path/to/results-parse --dry-run
+  --input-dir input/batch --output-dir output/batch-parse --dry-run
 
 # 纯解析；一次成功落盘后补下一份
 uv run python -m src.scripts.batch_parse \
-  --mode parse --input-dir /path/to/pdfs --output-dir /path/to/results-parse \
+  --mode parse --input-dir input/batch --output-dir output/batch-parse \
   --max-in-flight 2
 
 # 分阶段图片增强
 uv run python -m src.scripts.batch_parse \
-  --mode two-stage --input-dir /path/to/pdfs --output-dir /path/to/results-images \
+  --mode two-stage --input-dir input/batch --output-dir output/batch-images \
   --max-in-flight 2
 
 # 普通队列图片增强，可显式指定 provider/model/prompt
 uv run python -m src.scripts.batch_parse \
-  --mode images --input-dir /path/to/pdfs --output-dir /path/to/results-ordinary-images
+  --mode images --input-dir input/batch --output-dir output/batch-ordinary-images
 ```
 
 默认只扫描目录第一层 PDF；`--recursive` 扫描子目录，`--extensions pdf,docx,pptx` 选择格式，`--extensions all` 采用服务支持的 PDF、图片及 Office 格式清单，不包含 TXT/Markdown。目录和同名不同扩展名分别保存，不会相互覆盖。扫描结果为空直接失败。输入目录是本批次的稳定清单，运行/续跑过程中不要移动、删除或修改已经提交的文件。
 
-输出为 `results/<输入相对路径及扩展名>.json`，例如 `results/部门A/年报.pdf.json`；保存的是业务对象，包括 `result` 列表和可选 `txt`，不是外层任务状态。`.tasks/<输入相对路径>.json` 保存 SHA-256、请求、task_id、尝试次数、历史任务 ID 和结果摘要；`.batch.json` 保存批次身份。文件原子替换并同步到磁盘，凭证不写入这些记录。
+输出为 `results/<输入相对路径及扩展名>.json`，例如 `results/部门A/年报.pdf.json`；保存的是业务对象，包括 `result` 列表和可选 `txt`，不是外层任务状态。`.tasks/<输入相对路径及扩展名>.json` 保存 SHA-256、请求、task_id、尝试次数、历史任务 ID 和结果摘要；`.batch.json` 保存批次身份。文件原子替换并同步到磁盘，凭证不写入这些记录。运行日志写入 stderr，结束汇总 JSON 写入 stdout；客户端不会默认创建日志文件，需要时由调用方重定向保存。
 
 `--chunk-type` 缺省开启，关闭用 `--no-chunk-type`；`--return-txt` 按需增加全文。默认不重复返回一份 TXT。两个普通入口由客户端把这两个字段放入 query，two-stage 放入 form；调用方不用切换写法。
 

@@ -1,6 +1,6 @@
 # AI 开发者文档拆解接入指南
 
-适用接口：TianGong AI Unstructure Serve / MinerU 4.0.2。最后核对：2026-09-18。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
+适用接口：TianGong AI Unstructure Serve / MinerU 4.0.2。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
 
 **先读取目标部署的 `/openapi.json`，再按本文选择工作流。** 本文解释接口语义、恢复规则和结果处理，实际参数枚举以部署中的 OpenAPI 为准。API `info.version` 当前为 `1.0`，不是 MinerU 版本，也不足以标识全部部署变更；集成时保存 schema 摘要和服务发布记录。
 
@@ -170,7 +170,6 @@ from pathlib import Path
 
 import httpx
 
-
 def wait_for_result(client, task_path, task_id, *, deadline_seconds=1800):
     """task_path 例如 /two_stage/task；超时不取消、不重新提交。"""
     deadline = time.monotonic() + deadline_seconds
@@ -210,7 +209,6 @@ def wait_for_result(client, task_path, task_id, *, deadline_seconds=1800):
         time.sleep(min(delay, max(0, deadline - time.monotonic())))
         delay = min(delay * 1.5, 5.0)
 
-
 # API_BASE 和凭证由客户端配置注入；不在代码中写实际地址或密钥。
 # headers = {"Authorization": f"Bearer {token}"}
 # with httpx.Client(base_url=api_base.rstrip("/") + "/", headers=headers) as client:
@@ -224,23 +222,23 @@ HTTP 客户端超时通常是连接/读写阶段超时，不是远端任务截�
 
 `uv run python -m src.scripts.batch_parse` 覆盖全部三个异步入口。`--mode parse` 为纯解析 `/mineru/task`；`images` 为普通图片增强 `/mineru_with_images/task`；`two-stage` 为分阶段图片增强 `/two_stage/task`。科研同步接口不提供批量队列模式。
 
-在已安装本仓库客户端的机器运行：
+在已安装本仓库依赖的机器上，从仓库根目录运行；先准备 `input/batch`，示例文件路径均相对当前工作目录：
 
 ```bash
 # 先预览清单，不上传
 uv run python -m src.scripts.batch_parse \
-  --input-dir /path/to/pdfs --output-dir /path/to/results-parse --dry-run
+  --input-dir input/batch --output-dir output/batch-parse --dry-run
 
 # 纯解析；图片增强改 --mode two-stage，并使用独立输出目录
 uv run python -m src.scripts.batch_parse \
   --base-url http://127.0.0.1:7770 --mode parse \
-  --input-dir /path/to/pdfs --output-dir /path/to/results-parse \
+  --input-dir input/batch --output-dir output/batch-parse \
   --tier advanced --max-in-flight 2
 ```
 
 远程替换 `--base-url`，支持反向代理路径前缀。令牌优先环境 `FASTAPI_BEARER_TOKEN`，其次仓库 `.env`，再回退仓库 TOML 的 FASTAPI.BEARER_TOKEN，不放命令行。仅无鉴权 API 使用 `--no-auth`。
 
-默认扫描第一层 PDF；`--recursive` 包含子目录，`--extensions pdf,docx,pptx` 选格式，`--extensions all` 包含服务支持的 PDF/图片/Office，不含 TXT/Markdown。输入为空报错。缺省 advanced、chunk_type=true、return_txt=false；可用 `--tier flash/basic/standard`、`--no-chunk-type`、`--return-txt`。客户端自动处理普通入口 query 与 two-stage form 的区别。图片模式支持 `--provider`、`--model`、`--prompt`；纯解析禁止传图片选项。
+默认扫描第一层 PDF；`--recursive` 包含子目录，`--extensions pdf,docx,pptx` 选格式，`--extensions all` 包含服务支持的 PDF/图片/Office，不含 TXT/Markdown。输入为空报错。缺省 advanced、chunk_type=true、return_txt=false；`--tier` 可选 `flash`、`basic`、`standard`、`advanced`；另有 `--no-chunk-type`、`--return-txt`。客户端自动处理普通入口 query 与 two-stage form 的区别。图片模式支持 `--provider`、`--model`、`--prompt`；纯解析禁止传图片选项。
 
 | 新 CLI 参数 | 缺省 | 用途 |
 | --- | ---: | --- |
@@ -260,14 +258,13 @@ HTTP 上传流式发送；网络阶段超时不等于整次请求墙钟截止时
 
 停机前可停止原 CLI，再以原命令加 `--resume-only` 运行：只收取已有任务，不补交文件或重试失败任务；未提交文件计入 deferred。服务恢复后去掉该选项继续提交。输入与请求参数仍须匹配已有批次。
 
-
 旧 `src/scripts/two_stage_enqueue.py` 保留 TWO_STAGE_* 环境变量、pickle 输出和旧记录续跑，缺省仍为开发端口 8770、在途 6、轮询预算 800 秒、POST 120 秒；不要与新客户端混用输出目录。新批次优先使用统一客户端。
 
 ### 5.3 多份 400–1000 页 PDF 的投递流程
 
 **选择异步队列，一份完整 PDF 一个任务，客户端按小窗口持续补位。不要用多个同步长连接顶住整批，也不要默认拆成单页/每十页任务。** 页数不是资源需求的充分指标：扫描分辨率、图表密度、文件体积和图片模型速度都会改变耗时与峰值。
 
-当前验收边界：千页样本此前只抽查首/中/末页，已测整本主要是短 PDF、九页论文和 46 页报告；这不等于已经通过多份千页整本并发验收。调用方不能仅凭本指南或 `/ready=200` 判断这种容量已验证。
+当前验收边界：千页样本的回归只覆盖首页、第 11 页和末页；整本回归覆盖两页 p2、九页论文和 46 页报告；这不等于已经通过多份千页整本并发验收。调用方不能仅凭本指南或 `/ready=200` 判断这种容量已验证。
 
 #### A. 确定工作流与服务端准备情况
 
@@ -284,7 +281,7 @@ HTTP 上传流式发送；网络阶段超时不等于整次请求墙钟截止时
 
 1. 选一份有代表性的 400–1000 页文档，以 `advanced` 提交一个异步任务并保存 task_id。首次可使用第 4 节 curl 和第 5.1 节查询函数，便于在失败后先检查原因，而非马上自动重试。
 2. 等到整本 SUCCESS，记录上传、排队、解析、视觉及最终取回结果的耗时；核对关键数字/表格、首尾有效内容和连续阅读顺序。空白页可能没有业务块，不能只靠最大 page_number 判断是否完整。
-3. 再分别试 2 个、3 个在途文档。只有内存/磁盘稳定、无重复执行、无视觉积压且吞吐改善时才扩大；旧脚本默认 6 的短文档对照不能直接外推。混合很长和短文档时，可由客户端为长文档单独限制预算；当前 API 没有长短文档自动分类队列。
+3. 再分别试 2 个、3 个在途文档。只有内存/磁盘稳定、无重复执行、无视觉积压且吞吐改善时才扩大；短文档并发结果不能直接外推。混合很长和短文档时，可由客户端为长文档单独限制预算；当前 API 没有长短文档自动分类队列。
 4. 大目录保留在客户端，一份成功便持久化结果并补下一份。关注活跃文件大小与图片数，不只看任务数量；即使只有 2 份也可能包含数千张待识别图片。
 
 #### C. 验收后使用保守的批量示例
@@ -294,7 +291,7 @@ HTTP 上传流式发送；网络阶段超时不等于整次请求墙钟截止时
 ```bash
 uv run python -m src.scripts.batch_parse \
   --base-url http://127.0.0.1:7770 --mode parse \
-  --input-dir /path/to/large-pdfs --output-dir /path/to/large-results-run-01 \
+  --input-dir input/large-batch --output-dir output/large-batch-run-01 \
   --tier advanced --max-in-flight 2 \
   --poll-interval 5 --poll-timeout 21600 \
   --upload-timeout 600 --query-timeout 60
@@ -391,7 +388,7 @@ curl --fail-with-body "$API_BASE/openapi.json" -o openapi.json
 
 可提供公开 GitHub 的[本指南页面](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/ai-integration.md)或[原始 Markdown](https://raw.githubusercontent.com/tiangong-ai/unstructure-serve/main/docs/ai-integration.md)。GitHub main 可能领先实际部署：字段仍要以目标部署的 schema 为准；可将 URL 中 main 替换为部署 commit 固定说明版本。
 
-本机 `localhost/127.0.0.1` 不会让云端 AI 自动访问你的服务器。远程需要管理员配置可达的 HTTPS 域名、反向代理或受控网络入口，并向客户端单独提供凭证。本次提供文档路由不等于已创建公网域名、TLS、隧道或完成任意云端客户端连通性配置。
+本机 `localhost/127.0.0.1` 不会让云端 AI 自动访问你的服务器。远程需要管理员配置可达的 HTTPS 域名、反向代理或受控网络入口，并向客户端单独提供凭证。文档路由本身不提供公网域名、TLS 或隧道，需要验证目标 AI 的实际连通性。
 
 ### 9.3 llms.txt 能做什么
 
@@ -403,7 +400,7 @@ curl --fail-with-body "$API_BASE/openapi.json" -o openapi.json
 
 建议未来只包装明确的工具，如 `submit_document`、`get_document_task`，由工具层选择纯解析/图片增强并持久化任务 ID。长任务提交后立即返回 ID，后续工具调用查询；不要让一次 MCP 工具调用持续等待整份大文件。二进制文件如何进入服务须按目标客户端的附件/上传能力设计，不能假定远端 MCP 能读取用户机器上的任意本地路径。
 
-当前项目**没有 MCP server**；以上工具名是建议设计，不是已实现入口。远程 MCP 的 transport/authorization 应按目标客户端与[MCP 工具规范](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)和[授权规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)实现；现有静态 Bearer API 不能直接宣称具备 MCP OAuth 授权流程。也不要无筛选地把 运维接口和所有 HTTP 路由转换成模型工具。
+当前项目**没有 MCP server**；以上工具名是建议设计，不是已实现入口。远程 MCP 的 transport/authorization 应按目标客户端与[MCP 工具规范](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)和[授权规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)实现；现有静态 Bearer API 不能直接宣称具备 MCP OAuth 授权流程。也不要无筛选地把运维接口和所有 HTTP 路由转换成模型工具。
 
 ### 9.5 对外部署时的边界
 

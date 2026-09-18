@@ -1,0 +1,39 @@
+# 依赖与 Python 维护
+
+本文件供开发维护使用，不通过服务文档路由提供。应用版本以 `.python-version`、`pyproject.toml` 和 `uv.lock` 为准；模型环境以 `deploy/mineru-vllm/Dockerfile` 及实际镜像为准。
+
+## 环境边界
+
+| 环境 | 当前约定 | 验证方式 |
+| --- | --- | --- |
+| 应用 | Python 3.13.15、MinerU 4.0.2 基础包、CPU ONNX；不安装 Torch/vLLM | `uv sync --locked --group dev --check`、`uv pip check` |
+| Docker 模型 | vLLM 0.21.0 配套的 Torch/CUDA，镜像内安装 MinerU 4.0.2 | 构建中的 `pip check`、容器 CUDA 计算及真实 PDF |
+| 系统工具 | LibreOffice、Poppler、Pandoc 等 | [部署检查](mineru_4_upgrade_usage.md)与 Office 回归 |
+
+四档质量是解析选项，不是安装 extras。CPU ONNX 加 Docker VLM 的应用使用基础 `mineru`；不要为了 `flash/basic/standard/advanced` 安装包含本地模型引擎的 extra。`uv.lock` 可能含其他操作系统的条件依赖，不能只搜索锁文件中的包名来判断本机是否安装。
+
+## 兼容升级流程
+
+1. 在独立 Git 分支或 worktree 中保存修改，记录原部署提交、锁文件、Python 版本、模型镜像及私有配置。
+2. 先读目标版本发行说明和依赖约束，再运行解析器求解；兼容最新版不等于忽略上游版本上限。不要以单独 `pip install -U` 替换已锁定环境。
+3. 在隔离环境生成候选锁文件，检查升级与移除项，再运行常规测试及[真实 PDF 回归](validation.md)。应用与 Docker 分别检查，不混用依赖。
+4. 确认在途任务收敛后，按[升级与回滚](mineru_4_upgrade_usage.md#升级与回滚)切换；保存中间提交，逐次审查暂存改动。
+
+以下命令只在隔离的开发环境执行，不直接修改运行服务使用的环境：
+
+```bash
+uv lock --upgrade
+uv sync --locked --group dev
+uv pip check
+uv run --group dev pytest
+```
+
+锁文件已经过审查、只需初始化时使用 `uv sync --locked`，不要附加升级选项。根据改动范围重新检查四档、Office、视觉、任务失败传播、进程退出和文档字段。
+
+## Python 版本选择
+
+更换 Python 可能改善部分 CPU 工作，但模型推理、网络或磁盘占主要耗时时，端到端收益可能很小。用相同 PDF、档位、模型、并发和预热条件分别测量；不能把调度优化收益归因于 Python 升级。
+
+迁移前确认所有依赖有兼容的 wheel，并专项验证 multiprocessing 的启动方式、嵌套渲染池、文件锁和退出清理。不要替换系统 Python；不要移动正在运行的虚拟环境。Python 版本范围和 `.python-version` 应与锁文件及验证结果同步更新。
+
+性能测量方法见[调优指南](performance-tuning.md)；升级前的依赖快照与已完成评估由 Git 历史追溯，不作为安装依据。

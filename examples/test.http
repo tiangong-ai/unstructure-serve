@@ -1,4 +1,5 @@
 # REST Client examples. Set token to the deployed FASTAPI_BEARER_TOKEN.
+# File includes are relative to this .http file in examples/.
 # Syntax: https://github.com/Huachao/vscode-restclient#request-body
 @baseUrl = http://127.0.0.1:7770
 @token = replace-with-your-token
@@ -21,7 +22,7 @@ advanced
 Content-Disposition: form-data; name="file"; filename="p2.pdf"
 Content-Type: application/pdf
 
-< ./input/p2.pdf
+< ../input/p2.pdf
 --mineru-example--
 
 ### Ordinary task: requires deploy/pm2/ecosystem.celery.json worker.
@@ -41,7 +42,7 @@ normal
 Content-Disposition: form-data; name="file"; filename="p2.pdf"
 Content-Type: application/pdf
 
-< ./input/p2.pdf
+< ../input/p2.pdf
 --mineru-example--
 
 ### Ordinary task result
@@ -69,7 +70,7 @@ true
 Content-Disposition: form-data; name="file"; filename="p2.pdf"
 Content-Type: application/pdf
 
-< ./input/p2.pdf
+< ../input/p2.pdf
 --mineru-example--
 
 ### Two-stage result

@@ -4,7 +4,7 @@
 
 本文件覆盖 `POST /mineru/task` 和 `POST /mineru_with_images/task`；后者额外进行图片视觉识别。两者使用 Celery app `src.services.celery_app`，分别运行 `mineru.parse` / `mineru.parse_images`，通过同路径的 `GET .../{task_id}` 查询结果。
 
-环境、模型和 Docker 准备见[部署说明](mineru_4_upgrade_usage.md)。当前主机已运行普通及 two-stage worker；独立部署本文件接口时需启动普通 worker。
+环境、模型和 Docker 准备见[部署说明](mineru_4_upgrade_usage.md)。使用本文件接口时需启动普通 worker。
 
 ## Worker 与队列
 
