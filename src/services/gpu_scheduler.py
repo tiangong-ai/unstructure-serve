@@ -367,12 +367,6 @@ class GPUScheduler:
         fut.add_done_callback(_done_cb)
         return fut
 
-    def status(self) -> Dict[str, object]:
-        with self._lock:
-            gpus = [{"gpu_id": e.gpu_id, "pending": e.pending} for e in self._executors]
-            total_pending = sum(e.pending for e in self._executors)
-        return {"gpus": gpus, "total_pending": total_pending}
-
     def shutdown(self, wait: bool = False) -> None:
         with self._lock:
             if self._closed:

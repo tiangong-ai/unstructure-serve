@@ -82,7 +82,7 @@
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `nvidia-uvm` 和 `nvidia-uvm-tools` 设备节点，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
 - PM2 API 为 `unstructured-gunicorn`，Gunicorn timeout/graceful-timeout 1900 秒。科研入口另有自己的 HTTP 等待窗口；具体超时以模板/运行环境为准。
 - 远程 AI 使用实际部署 `/openapi.json` 与 `/guides/ai-integration.md`，`/llms.txt` 仅为文档索引，不是 MCP。两个文档路由继承业务鉴权；FastAPI 自动 `/openapi.json`、`/docs`、`/redoc` 不自动继承业务 Depends 保护，需私有时由网关额外限制。索引链接保留 root_path 前缀，不链接调优文档。
-- `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/独立视觉模型，也不执行实际推理。结合 `/gpu/status` 和 `/two_stage/queue_status` 检查任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
+- `/health` 仅检查 API 存活；`/ready` 并行检查 MinerU VLM 端点的 `/health`，不可用返回 503，不检查 Redis/独立视觉模型，也不执行实际推理。通过 `/two_stage/queue_status` 及 Celery inspect 检查队列，按 task_id 查询任务状态，启用鉴权时带 Bearer。日志默认 INFO，httpx/httpcore 降到 WARNING，视觉提示词仅 DEBUG；不输出密钥或完整 PM2 环境。
 - 维护先定位当前服务树和 active/reserved 任务，按具体任务清理。不要在日常说明中使用全局 PM2 删除、Redis flushdb 或无差别清空共享任务目录。
 
 - 统一批量 CLI 将进度日志写入 stderr、汇总 JSON 写入 stdout；需要文件日志时由调用方重定向。只有兼容 two-stage 脚本默认写入 output/logs，接受 TWO_STAGE_LOG_FILE。不要将兼容脚本的日志位置、6 个在途或 800 秒等待写成统一客户端默认值。
@@ -116,4 +116,4 @@ uv run --group dev pytest
 
 ## 功能边界
 
-业务结果通过 HTTP 返回，批量客户端保存本地 JSON；不提供远端对象存储接口或资产上传选项。对象存储合同移除的回归见 test_removed_storage_contract.py，不恢复已删除实现。工作区中的共享服务、输入和结果不属于文档清理范围。
+业务结果通过 HTTP 返回，批量客户端保存本地 JSON；不提供远端对象存储接口或资产上传选项。对象存储合同移除的回归见 test_removed_api_contracts.py，不恢复已删除实现。不提供 GPU 调度状态 HTTP 接口；解析池的待处理计数仅用于内部任务分配。工作区中的共享服务、输入和结果不属于接口清理范围。

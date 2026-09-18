@@ -23,3 +23,8 @@ def test_response_contains_only_document_fields():
 )
 def test_removed_storage_endpoints_are_not_registered(client, method, path):
     assert getattr(client, method)(path).status_code == 404
+
+
+def test_gpu_status_is_not_exposed(client):
+    assert client.get("/gpu/status").status_code == 404
+    assert "/gpu/status" not in client.get("/openapi.json").json()["paths"]

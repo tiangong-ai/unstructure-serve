@@ -356,7 +356,7 @@ uv run python -m src.scripts.batch_parse \
 | 同步超时 | 可能仍在执行；根据文件规模改用队列，不直接循环重传 |
 | 队列 PENDING 不动 | 对应 worker 是否部署、队列一致性、ID/结果是否过期 |
 
-`/health` 仅 API 存活；`/ready` 检查 MinerU VLM 端点健康，不检查独立图片模型、Redis，也不做真实推理。`/gpu/status` 和 `/two_stage/queue_status` 是运维诊断，不能替代 task_id 查询或最终成功判定。集成验收应提交一个允许使用的小样本，验证真实 SUCCESS 与内容。
+`/health` 仅 API 存活；`/ready` 检查 MinerU VLM 端点健康，不检查独立图片模型、Redis，也不做真实推理。`/two_stage/queue_status` 是队列诊断，不能替代 task_id 查询或最终成功判定。集成验收应提交一个允许使用的小样本，验证真实 SUCCESS 与内容。
 
 ## 9. 让远程 AI 获取说明的推荐方式
 
