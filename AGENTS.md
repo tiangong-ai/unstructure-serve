@@ -28,6 +28,7 @@
 | `src/services/mineru_with_images_service.py` | 图片描述并发及同步 DOCX TXT 增强 |
 | `src/services/mineru_task_runner.py` / `tasks/mineru_tasks.py` | 普通 Celery 任务，复用 scheduler 与响应合同 |
 | `src/services/two_stage_pipeline.py` | 独立 Celery app 的 parse/dispatch/vision/merge |
+| `src/services/job_store.py` | 持久任务身份、原始输入、阶段锁、原子结果和过期墓碑 |
 | `src/services/vision_service.py` / `vision_service_openai_compatible.py` | provider/model 兜底与 OpenAI-compatible 客户端池 |
 | `src/services/vision_prompts.py` | 视觉提示词；原生 DOCX 图片使用严格 OCR |
 | `src/services/pdf_text_layer_reconcile.py` | 按同页 PDF 文本层修正 checkbox 状态 |
@@ -61,6 +62,8 @@
 - 六个解析上传入口统一通过 `src/utils/upload_io.py` 在线程池内按 1 MiB 分块持久化；Office 和 broker 提交不直接阻塞事件循环。同步解析用 shield/wrap_future 等待，HTTP 超时后源文件延迟到实际任务结束再清理。Pydantic 响应直接序列化 JSON，保留 null/pretty 合同。
 
 ## 队列与进程
+
+- 持久任务存储通过 `MINERU_JOB_STORE_DIR` 指定，缺省仓库 `output/jobs`；所有 API/worker 必须共享同一可靠本地文件系统。任务身份绑定原始文件摘要、文件名、模式及参数；同幂等键不能替换内容。原子文件提交结果，元数据落盘失败不能抹掉已提交结果；清理须取得独占生命周期锁并保留过期墓碑，不能删除仍在执行的任务或锁文件。该存储不是跨主机分布式协调。
 
 - 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`；普通 worker 不消费 two-stage 的解析/视觉/default merge 队列，防止不同 Celery app 抢到未注册任务。
 - two-stage 部署显式配置 normal 队列 `queue_parse_gpu/queue_vision/queue_dispatch/default`；四类 urgent 为 `queue_parse_urgent/queue_vision_urgent/queue_dispatch_urgent/queue_merge_urgent`。API 与每个 worker 必须配置一致，不能只改 worker 的 `-Q`。
