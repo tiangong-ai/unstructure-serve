@@ -107,6 +107,8 @@ uv run --group dev pytest
 - 400–1000 页批量必须引用 AI 指南第 5.3 节与调优指南第 12 节：整本单文件验收后从 1→2→3 个在途试起，默认 6/800 秒不作千页容量承诺。当前长样本仅抽页验证；two-stage 直接 parse_doc 不走 scheduler hard timeout，late ack 仍需核对 Redis 默认一小时 visibility timeout，不能以延长客户端等待宣称长任务已经可用。调优配置细节只保存在仓库指南，不通过文档服务提供。
 - 批量脚本采用滚动在途窗口（`TWO_STAGE_MAX_IN_FLIGHT`，默认 6），输出目录 `.tasks` 原子保存任务 ID/文件摘要/请求参数，重启续查已有任务。查询故障或本地等待超时不重投；只有服务端确认 FAILURE/REVOKED 才有界重试。提交响应丢失时保留 SUBMITTING 并明确停止，不能假定服务器未接收。单输出目录由文件锁限制一个 CLI 写入进程。脚本认证优先环境/.env，再回退本地 TOML 的 FASTAPI.BEARER_TOKEN，不记录令牌。
 
+- `MINERU_RUN_API_PDFS=1` 启用 `test_live_api_pdfs.py`，真实访问部署 API、普通 Celery、two-stage 和基于 p2 的 Office 转换；MinIO 子项需私有 MINERU_TEST_MINIO_* 配置，只创建并清理本用例随机桶。它不会替换为路由替身；维护窗口执行并保存 task_id，HTTP 查询超时不重投。
+
 ## 本机状态
 
 2026-09-18：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；parse 为三个独立 solo/1，其余各一个，共六个 worker。缺省档位为 advanced；ONNX 16/1、VLM 并发 8、窗口 64。standard/advanced 同步请求及真实 Celery 任务已验收。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。驱动升级重启后的 UVM 映射缺失已修复，新增 `/ready`；同步隔离渲染池收尾与批量脚本滚动/续跑已优化，见[第二轮记录](docs/mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)；并发与线程对照见[优化记录](docs/mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。回滚与验收日志见[部署记录](docs/mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。
