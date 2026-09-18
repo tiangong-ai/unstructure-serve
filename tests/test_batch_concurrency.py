@@ -32,13 +32,21 @@ def filename(request):
     return re.search(rb'filename="([^"]+)"', request.read()).group(1).decode()
 
 
+def requested_task(request):
+    parts = request.url.path.rsplit("/", 2)
+    return parts[-2] if parts[-1] in {"status", "result"} else parts[-1]
+
+
 def reply(request, task_id=None, state="SUCCESS"):
+    business = {"result": [{"text": "ok", "page_number": 1}]}
+    if request.url.path.endswith("/result"):
+        return httpx.Response(200, json=business)
     return httpx.Response(
         200,
         json={
-            "task_id": task_id or request.url.path.rsplit("/", 1)[-1],
+            "task_id": task_id or requested_task(request),
             "state": state,
-            "result": {"result": [{"text": "ok", "page_number": 1}]},
+            "result": business,
         },
     )
 
@@ -53,7 +61,7 @@ def test_slow_upload_does_not_block_other_result_collection(tmp_path):
             if name == "0.pdf":
                 assert fast_collected.wait(2), "slow upload blocked other task collection"
             return reply(request, name)
-        if request.url.path.endswith("1.pdf"):
+        if requested_task(request) == "1.pdf":
             fast_collected.set()
         return reply(request)
 
@@ -71,7 +79,7 @@ def test_slow_query_does_not_block_refilling_the_window(tmp_path):
             if name == "2.pdf":
                 third_submitted.set()
             return reply(request, name)
-        if request.url.path.endswith("0.pdf"):
+        if requested_task(request) == "0.pdf":
             assert third_submitted.wait(2), "slow GET blocked collecting/refilling other tasks"
         return reply(request)
 
@@ -277,7 +285,7 @@ def test_existing_version_one_journal_resumes_without_new_header_or_upload(tmp_p
 
     def handle(request):
         assert request.method == "GET"
-        assert request.url.path.endswith("earlier-task-id")
+        assert requested_task(request) == "earlier-task-id"
         return reply(request)
 
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:

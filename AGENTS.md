@@ -126,6 +126,7 @@ uv run --group dev pytest
 - 新批次优先 `uv run python -m src.scripts.batch_parse`，`--mode parse/images/two-stage` 覆盖全部三个异步 API；缺省 advanced、在途 2、等待 21600 秒、尝试 1 次、chunk_type=true、return_txt=false。上传/查询/连接超时独立可配置，HTTPX 流式 multipart；网络阶段超时不是服务端任务期限。普通模式 query 与 two-stage form 自动区分，普通任务 HTTP 500 的 FAILURE/REVOKED 作为终态处理。详见 [统一批量说明](docs/batch-processing.md)。
 - 新 CLI 上传/查询线程上限分别为 `--upload-concurrency=2` / `--query-concurrency=4`，在途窗口包含上传中的文件；仅主线程写 journal。上传从经原摘要校验的匿名快照读取，故障收尾仍保存其他已发请求返回的 ID；identity version 1 保持，改变并发预算允许续跑。幂等键由批次、输入相对身份和尝试次数导出，不含凭证；兼容 requests 脚本保留串行网络行为。
 - 新 CLI 收到 503 且有合法 task_id/publication=uncertain 时保存该 ID 后停止新增提交；续跑查询原 ID，发布恢复仍由运维显式执行。已有 FAILED 记录续跑时也先查询原 ID，以收取服务端显式 resume 的结果；不将 CLI 续查写成自动执行服务端 resume。
+- 新 CLI 优先查询 `/tasks/{id}/status`，仅 SUCCESS 后下载 `/tasks/{id}/result`；仅 status 404 回退旧模式 GET，认证、网络或其他 HTTP 错误不触发兼容回退，EXPIRED 明确停止。下载在客户端按原模式保持普通结果省略 null、two-stage 保留 null，批次 identity version 1 不变。
 - 新批量输出 `results/<相对路径及扩展名>.json`，`.batch.json` 记录批次身份，`.tasks` 记录输入/请求/结果摘要和任务 ID；完成后仍校验输入，输入或请求改变、已记录文件被筛除时拒绝混用。结果缺失/损坏只重取原 ID；SUBMITTING 不重投；改变等待预算允许续跑，改变工作流或档位需新目录。旧脚本保留 pickle/旧记录合同，不与新脚本混用输出目录。
 - 新 CLI `--resume-only` 只收取已有任务，禁止补交及失败重试，未提交文件计入 deferred；要求已有批次目录。计划停机先停止原客户端再按原命令加此选项收尾，恢复后去掉选项继续提交；它不取消服务端任务，也不绕过 SUBMITTING 核查或输入一致性检查。
 - `MINERU_RUN_BATCH_PDFS=1` 启用 `tests/test_batch_input_pdfs.py`，使用 input/p2 和九页论文整本验证三模式、续跑；常规边界由 `test_batch_parse.py` 覆盖。本客户端更新不改变千页长任务服务端验收边界。

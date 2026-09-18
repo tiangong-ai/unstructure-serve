@@ -21,6 +21,7 @@ import uuid
 from dotenv import load_dotenv
 import httpx
 
+from src.models.models import ResponseWithPageNum
 from src.scripts.batch_runner import (
     InputChangedBeforeUpload,
     PublicationUncertain,
@@ -210,6 +211,41 @@ class TaskAPI:
         return task_id
 
     def fetch(self, client, task_id, token):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        timeout = httpx.Timeout(self.opts.query_timeout, connect=self.opts.connect_timeout)
+        task_url = self.opts.base_url.rstrip("/") + f"/tasks/{quote(task_id, safe='')}"
+        response = client.get(f"{task_url}/status", headers=headers, timeout=timeout)
+        if response.status_code == 404:
+            # Old deployments and jobs created before durable storage retain
+            # their original status/result endpoint. Other errors are not a
+            # reason to issue a second request through a different route.
+            return self._fetch_legacy(client, task_id, token)
+        response.raise_for_status()
+        try:
+            data = response.json()
+        except ValueError:
+            raise ValueError(f"Invalid JSON for task {task_id}") from None
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid task response for {task_id}")
+        if data.get("state") == "EXPIRED":
+            raise RuntimeError(f"Task {task_id} has expired; its retained result is unavailable")
+        if data.get("state") == "SUCCESS":
+            download = client.get(f"{task_url}/result", headers=headers, timeout=timeout)
+            download.raise_for_status()
+            try:
+                result = download.json()
+            except ValueError:
+                raise ValueError(f"Invalid result JSON for task {task_id}") from None
+            if not isinstance(result, dict) or not isinstance(result.get("result"), list):
+                raise ValueError(f"Task {task_id} succeeded without a business result list")
+            # Downloaded storage JSON contains nullable fields. Keep the same
+            # business output as each mode's original Pydantic HTTP response.
+            data["result"] = ResponseWithPageNum.model_validate(result).model_dump(
+                exclude_none=self.opts.mode != "two-stage"
+            )
+        return data
+
+    def _fetch_legacy(self, client, task_id, token):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         response = client.get(
             f"{self.url}/{quote(task_id, safe='')}",

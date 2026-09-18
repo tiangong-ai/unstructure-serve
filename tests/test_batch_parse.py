@@ -21,12 +21,15 @@ def options(tmp_path, **overrides):
 
 
 def response(request, *, state="SUCCESS", status=200):
+    business = {"result": [{"text": "1600", "page_number": 1}], "txt": "1600"}
+    if request.url.path.endswith("/result"):
+        return httpx.Response(status, json=business)
     return httpx.Response(
         status,
         json={
             "task_id": "task-1",
             "state": state,
-            "result": {"result": [{"text": "1600", "page_number": 1}], "txt": "1600"},
+            "result": business,
         },
     )
 
@@ -45,8 +48,9 @@ def test_modes_send_real_contract_and_resume_without_post(tmp_path, mode, endpoi
 
     def handle(request):
         seen.append(request)
-        assert request.url.path.startswith("/prefix/" + endpoint)
+        assert request.url.path.startswith(("/prefix/" + endpoint, "/prefix/tasks/"))
         if request.method == "POST":
+            assert request.url.path == "/prefix/" + endpoint
             body = request.read()
             assert b'name="tier"\r\n\r\nadvanced' in body
             if mode == "two-stage":
@@ -61,7 +65,7 @@ def test_modes_send_real_contract_and_resume_without_post(tmp_path, mode, endpoi
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         assert batch.run(opts, client=client, token="private-token")["successes"] == 1
         assert batch.run(opts, client=client, token="private-token")["skipped"] == 1
-    assert len(seen) == 2
+    assert len(seen) == 3
     assert json.loads((opts.output_dir / "results/p2.pdf.json").read_text())["txt"] == "1600"
     assert "private-token" not in "".join(p.read_text() for p in opts.output_dir.rglob("*.json"))
 
@@ -72,11 +76,13 @@ def test_ordinary_http_500_terminal_failure_is_reported_not_polled_forever(tmp_p
 
     def handle(request):
         seen.append(request.method)
+        if request.url.path.endswith("/status"):
+            return httpx.Response(404)
         return response(request, state="FAILURE", status=500 if request.method == "GET" else 200)
 
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         assert batch.run(opts, client=client, token="")["failures"] == 1
-    assert seen == ["POST", "GET"]
+    assert seen == ["POST", "GET", "GET"]
 
 
 def test_network_poll_error_keeps_same_task(tmp_path):
@@ -91,7 +97,7 @@ def test_network_poll_error_keeps_same_task(tmp_path):
 
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         batch.run(opts, client=client, token="")
-    assert calls == ["POST", "GET", "GET"]
+    assert calls == ["POST", "GET", "GET", "GET"]
 
 
 def test_unknown_submission_is_never_reposted(tmp_path):
@@ -171,7 +177,7 @@ def test_corrupt_result_is_refetched_without_upload(tmp_path):
         batch.run(opts, client=client, token="")
         (opts.output_dir / "results/p2.pdf.json").write_text("partial")
         batch.run(opts, client=client, token="")
-    assert methods == ["POST", "GET", "GET"]
+    assert methods == ["POST", "GET", "GET", "GET", "GET"]
 
 
 def test_output_lock_prevents_second_writer(tmp_path):
