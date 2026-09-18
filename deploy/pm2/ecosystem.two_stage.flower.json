@@ -7,13 +7,12 @@
       "interpreter": ".venv/bin/python",
       "args": "-A src.services.two_stage_pipeline flower --address=0.0.0.0 --port=5555",
       "env": {
-        "CELERY_BROKER_URL": "redis://localhost:6379/0",
-        "CELERY_RESULT_BACKEND": "redis://localhost:6379/0",
-        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu",
+                "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu",
         "CELERY_TASK_VISION_QUEUE": "queue_vision",
         "CELERY_TASK_DISPATCH_QUEUE": "queue_dispatch",
         "CELERY_TASK_MERGE_QUEUE": "default"
-      }
+      },
+      "kill_timeout": 1900000
     }
   ]
 }

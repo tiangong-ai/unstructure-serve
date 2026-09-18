@@ -9,6 +9,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from loguru import logger
 
+from src.services.parse_capacity import parse_slot
 from src.services.pdf_text_layer_reconcile import reconcile_content_list_checkboxes
 from src.utils.mineru_backend import normalize_backend, resolve_tier
 
@@ -291,27 +292,30 @@ def parse_doc(
             if current_tier in {"standard", "advanced"}
             else None
         )
-        result = mineru_parse(
-            source,
-            tier=current_tier,
-            ocr_mode=effective_method,
-            page_range=requested_pages if is_pdf else "",
-            vlm_config=connection,
-        )
-        if result is None:
-            raise RuntimeError(f"MinerU returned no result for {source.name}")
-        result.save(FileBasedDataWriter(str(artifact_dir)))
-        try:
-            saved = ParseResult.from_json((artifact_dir / "middle_json.json").read_text("utf-8"))
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(f"Invalid MinerU materialized result for {source.name}") from exc
-        last_content_list = _normalize_content_list(
-            render(saved.middle_json), artifact_dir, saved.middle_json
-        )
-        if is_pdf:
-            reconcile_content_list_checkboxes(last_content_list, source)
-        (artifact_dir / f"{source.stem}_content_list.json").write_text(
-            json.dumps(last_content_list, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        last_output = str(artifact_dir)
+        with parse_slot():
+            result = mineru_parse(
+                source,
+                tier=current_tier,
+                ocr_mode=effective_method,
+                page_range=requested_pages if is_pdf else "",
+                vlm_config=connection,
+            )
+            if result is None:
+                raise RuntimeError(f"MinerU returned no result for {source.name}")
+            result.save(FileBasedDataWriter(str(artifact_dir)))
+            try:
+                saved = ParseResult.from_json(
+                    (artifact_dir / "middle_json.json").read_text("utf-8")
+                )
+            except (OSError, ValueError) as exc:
+                raise RuntimeError(f"Invalid MinerU materialized result for {source.name}") from exc
+            last_content_list = _normalize_content_list(
+                render(saved.middle_json), artifact_dir, saved.middle_json
+            )
+            if is_pdf:
+                reconcile_content_list_checkboxes(last_content_list, source)
+            (artifact_dir / f"{source.stem}_content_list.json").write_text(
+                json.dumps(last_content_list, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            last_output = str(artifact_dir)
     return last_content_list, last_output, None

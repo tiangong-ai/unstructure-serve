@@ -1,6 +1,9 @@
 import asyncio
 import os
-import tempfile
+from starlette.concurrency import run_in_threadpool
+
+from src.utils.upload_io import persist_upload, await_parse_future, cleanup_after_parse
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
@@ -71,23 +74,16 @@ async def mineru(
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
-    file_bytes = await file.read()
-
-    # Use a persistent temp file so it survives queueing; we'll clean it up after processing
-    tmp = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
-    try:
-        tmp.write(file_bytes)
-        tmp.flush()
-        tmp_path = tmp.name
-    finally:
-        tmp.close()
+    tmp_path = await run_in_threadpool(persist_upload, file, suffix=file_ext)
 
     conversion_cleanup: list[str] = []
     processing_path = tmp_path
 
     if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
         try:
-            processing_path, conversion_cleanup = maybe_convert_to_pdf(tmp_path, file_ext)
+            processing_path, conversion_cleanup = await run_in_threadpool(
+                maybe_convert_to_pdf, tmp_path, file_ext
+            )
         except RuntimeError as exc:
             try:
                 os.unlink(tmp_path)
@@ -96,6 +92,7 @@ async def mineru(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     cleanup_paths = {tmp_path, *conversion_cleanup}
+    fut = None
 
     try:
         # Dispatch to GPU scheduler; this returns a Future
@@ -143,22 +140,15 @@ async def mineru(
         if return_txt:
             txt_text = build_plain_text(items)
         response_model = ResponseWithPageNum(result=items, txt=txt_text if return_txt else None)
-        return json_response(response_model, pretty)
+        return await run_in_threadpool(json_response, response_model, pretty)
+    except HTTPException:
+        raise
     except TimeoutError as e:  # from hard timeout in worker layer
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        for path in cleanup_paths:
-            try:
-                os.unlink(path)
-            except Exception:
-                pass
+        cleanup_after_parse(cleanup_paths, fut)
 
 
-# Small helper to await a concurrent.futures.Future inside async route
-async def _await_future(fut):
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, fut.result)
+_await_future = await_parse_future

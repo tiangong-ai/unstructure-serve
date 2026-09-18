@@ -1,16 +1,18 @@
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。当前运行基线是 MinerU 4.0.0 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.12。API 与 worker 仍在应用环境运行，`.venv` 不安装 vLLM。
+仓库为 `tiangong-ai/unstructure-serve`。目标部署基线是 MinerU 4.0.2 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。本轮运行切换状态以部署记录为准。
 
 ## 文档与修改约定
 
 - **每次修改代码、配置或说明，都同步更新本文件涉及的规则或入口。**
 - 新增 [AI 接入指南](docs/ai-integration.md) 与 [调优指南](docs/performance-tuning.md)。调优文档正常纳入 Git，但仅供仓库开发运维使用，不通过服务路由、静态目录或 llms.txt 暴露。接口变更同步更新 AI 指南；硬件/调度规则变更同步更新调优指南。
 - [依赖与 Python 审计](docs/dependency-audit-2026-09-18.md)及[逐包清单](docs/dependency-inventory-2026-09-18.csv)为开发维护记录，不通过文档服务提供。审计候选不等于线上版本：MinerU 4.0.2 基础包在 ONNX+Docker 下四档已做隔离验证，all/full 不是四档开关；生产依赖仍以 uv.lock 与部署记录为准。Python 3.14 的默认 forkserver 与实际 semaphore 退出警告须专项处理，不能仅凭常规测试通过迁移。
-- 当前操作以 [README](README.md)、[部署与回归](mineru_4_upgrade_usage.md)、[普通异步任务](mineru_with_images_task_usage.md)、[two-stage](two_stage_task_usage.md) 为准。
-- [历史文档](docs/history/README.md)保留原版本的样本、评估和测试结果，不作为当前安装步骤。[多卡计划](multi_gpu_vllm_scaling_todolist.md)明确区分已实现与待验证能力。
+- 当前操作以 [README](README.md)、[部署与回归](docs/mineru_4_upgrade_usage.md)、[普通异步任务](docs/mineru_with_images_task_usage.md)、[two-stage](docs/two_stage_task_usage.md) 为准。
+- [历史文档](docs/history/README.md)保留原版本的样本、评估和测试结果，不作为当前安装步骤。[多卡计划](docs/multi_gpu_vllm_scaling_todolist.md)明确区分已实现与待验证能力。
 - `.env`、`.secrets/`、输入文件、模型、结果、日志和回滚环境保持私有。公共配置骨架为 `deploy/secrets.example.toml`；不要在 PM2 模板写凭证或实际视觉服务地址。
 - README 保持功能和入口简明；部署细节集中到部署说明，队列/字段细节集中到对应任务文档。例子中的默认值必须区分代码缺省、模板值和本机覆盖。
+
+- 根目录文档只保留 README.md 与 AGENTS.md；专题说明位于 docs，PM2 模板位于 deploy/pm2，Compose/Docker 位于 deploy/mineru-vllm。统一运维入口为 deploy/manage.sh，PM2 cjs 解析绝对项目路径；直接调用 JSON 模板必须在仓库根目录。Gunicorn 参数集中 deploy/gunicorn.conf.py，缺省 4 worker、5000+0..500 请求回收，PM2 退出窗口 1900 秒。
 
 ## 主要入口
 
@@ -55,24 +57,28 @@
 - `/mineru`、`/mineru_with_images` 及两个普通任务支持 MinIO；科研/two-stage 不支持。保存转换后的 source.pdf、服务 parsed.json、逐页 JPEG 和可选 meta.txt。`chunk_type=true` 时 JSON 保留类型，`save_to_minio=false` 时忽略 minio_meta。
 - MinIO prefix 保留 Unicode/中文标点，空格和不可打印字符规范化；通用上传还支持 base64，空内容返回 400。不要用原生 MiddleJson 覆盖业务 parsed.json。
 
+- 六个解析上传入口统一通过 `src/utils/upload_io.py` 在线程池内按 1 MiB 分块持久化；Office、MinIO 和 broker 提交不直接阻塞事件循环。同步解析用 shield/wrap_future 等待，HTTP 超时后源文件延迟到实际任务结束再清理。Pydantic 响应直接序列化 JSON，保留 null/pretty 合同。
+
 ## 队列与进程
 
-- 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal,default`；普通 worker 不消费 two-stage 的解析/视觉队列。
+- 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`；普通 worker 不消费 two-stage 的解析/视觉/default merge 队列，防止不同 Celery app 抢到未注册任务。
 - two-stage 部署显式配置 normal 队列 `queue_parse_gpu/queue_vision/queue_dispatch/default`；四类 urgent 为 `queue_parse_urgent/queue_vision_urgent/queue_dispatch_urgent/queue_merge_urgent`。API 与每个 worker 必须配置一致，不能只改 worker 的 `-Q`。
 - 未配置时代码的 parse 回退到普通队列，dispatch/merge 回退到 default；`.env.example` 显式列出与 PM2 匹配的队列，详细规则见 two-stage 文档。
 - Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
-- scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
+- scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
 - 隔离任务在成功/失败后显式关闭本任务已加载的 DocVortex 渲染池，避免 Python 等待嵌套进程导致固定退出延迟；保留原 hard timeout 与进程组收尾作为兜底，不通过缩短等待或提前返回来跳过清理。
 - 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为三个独立 solo/1 worker（名称 parse、parse-2、parse-3），均消费 urgent/normal，prefetch=1；其余线程池。每个解析 worker 的 VLM 并发为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
 - API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
 - CPU ONNX 模板每个模型会话的 intra/inter 线程数为 16/1，防止高核数机器上自动线程池过度竞争；这是本机混合 PDF 测量后的配置，不是整个进程的线程上限。VLM 并发保持 8；4 线程及 VLM 16 均有对照证据，不凭单个短文档结果扩大并发。
 
+- `parse_capacity.py` 通过 Linux flock 在同一主机的 API 子进程/普通任务/two-stage 间共享解析槽，缺省 `MINERU_PARSE_SLOTS=3`、等待上限 1800 秒；目录由 `MINERU_PARSE_SLOT_DIR` 指定，缺省系统临时目录下 `tiangong_mineru_parse_slots`。所有参与进程必须使用相同目录/槽数；不是跨主机分布式锁。不删除正在使用的锁文件；fork 的渲染子进程关闭继承租约，进程退出自动释放。scheduler hard timeout 包括等待槽位时间。
+
 ## 配置与运维
 
 - 进程环境优先于 `.env`，再回退到 `.secrets/secrets.toml`。PM2 `env` 属于进程环境，不会被 `load_dotenv()` 覆盖；Python 加载 `.env` 不会替调用方 shell 导出变量。
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
-- 三卡部署入口为 `ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
+- 三卡部署入口为 `deploy/pm2/ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `deploy/mineru-vllm/compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - Docker 基线为 vLLM 0.21.0 配套 Torch/CUDA，模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `/dev/nvidia-uvm` 和 `/dev/nvidia-uvm-tools`，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
 - PM2 API 为 `unstructured-gunicorn`，Gunicorn timeout/graceful-timeout 1900 秒。科研入口另有自己的 HTTP 等待窗口；具体超时以模板/运行环境为准。
@@ -103,9 +109,9 @@ uv run --group dev pytest
 
 ## 本机状态
 
-2026-09-18：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；parse 为三个独立 solo/1，其余各一个，共六个 worker。缺省档位为 advanced；ONNX 16/1、VLM 并发 8、窗口 64。standard/advanced 同步请求及真实 Celery 任务已验收。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。驱动升级重启后的 UVM 映射缺失已修复，新增 `/ready`；同步隔离渲染池收尾与批量脚本滚动/续跑已优化，见[第二轮记录](mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)；并发与线程对照见[优化记录](mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。回滚与验收日志见[部署记录](mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。
+2026-09-18：API 7770，三卡 Docker project `mineru-vlm-parallel`、端口 30000、GPU 0/1/2、每卡显存比例 0.15，由 PM2 `mineru-vlm-docker-parallel` 管理。API 和四类 two-stage worker 已切换地址并在线；parse 为三个独立 solo/1，其余各一个，共六个 worker。缺省档位为 advanced；ONNX 16/1、VLM 并发 8、窗口 64。standard/advanced 同步请求及真实 Celery 任务已验收。旧 31000 单卡容器已移除，缓存卷保留；旧 MinerU 本机 vLLM 启动项已移除，另一仓库的 embedding 服务独立运行。PM2 stop 已验证容器正常退出，并完成重新启动验收及 pm2 save。驱动升级重启后的 UVM 映射缺失已修复，新增 `/ready`；同步隔离渲染池收尾与批量脚本滚动/续跑已优化，见[第二轮记录](docs/mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)；并发与线程对照见[优化记录](docs/mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。回滚与验收日志见[部署记录](docs/mineru_4_upgrade_usage.md#本机部署与回滚记录2026-09-17)。
 
 
-2026-09-18 第二轮：三个 parse worker（solo/1，prefetch=1）、ONNX 16/1、VLM 并发 8 和 64 页窗口保持；修复同步隔离任务渲染池退出等待。批量脚本采用 6 个在途任务并保存可续跑日志。图片请求继续关闭 thinking，本机和公开 Qwen3.5 模板采样 0.7/0.8/20/1.5；同步窗口仍 3、two-stage vision threads/32。API 和六个 two-stage worker 已重载，九页论文与 6 张图的真实任务通过，PM2 已保存。性能证据和限制见[第二轮记录](mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)及[图片描述优化](mineru_4_upgrade_usage.md#图片描述优化)。
+2026-09-18 第二轮：三个 parse worker（solo/1，prefetch=1）、ONNX 16/1、VLM 并发 8 和 64 页窗口保持；修复同步隔离任务渲染池退出等待。批量脚本采用 6 个在途任务并保存可续跑日志。图片请求继续关闭 thinking，本机和公开 Qwen3.5 模板采样 0.7/0.8/20/1.5；同步窗口仍 3、two-stage vision threads/32。API 和六个 two-stage worker 已重载，九页论文与 6 张图的真实任务通过，PM2 已保存。性能证据和限制见[第二轮记录](docs/mineru_4_upgrade_usage.md#队列与单文件优化2026-09-18第二轮)及[图片描述优化](docs/mineru_4_upgrade_usage.md#图片描述优化)。
 
 2026-09-18 文档入口：两份完整指南位于 `docs/ai-integration.md`、`docs/performance-tuning.md`，均提交 Git；只有前者经 `/guides/ai-integration.md` 与 `/llms.txt` 提供给调用者。API 已重载、鉴权与调优文档不暴露已验收，177 项常规测试通过。没有新增公网域名或 MCP 服务。

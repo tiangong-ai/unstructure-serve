@@ -5,7 +5,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn_worker.UvicornWorker -w 4 -b 0.0.0.0:7770 --timeout 1900 --graceful-timeout 1900 --keep-alive 30 --max-requests 500 --max-requests-jitter 50 src.main:app",
+      "args": "-c deploy/gunicorn.conf.py src.main:app",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
         "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",
@@ -21,9 +21,10 @@
         "MINERU_INTRA_OP_NUM_THREADS": "16",
         "MINERU_INTER_OP_NUM_THREADS": "1"
       },
-      "out_file": "gunicorn.log",
-      "error_file": "gunicorn.log",
-      "time": true
+      "out_file": "output/logs/unstructured-gunicorn.log",
+      "error_file": "output/logs/unstructured-gunicorn.log",
+      "time": true,
+      "kill_timeout": 1900000
     }
   ]
 }

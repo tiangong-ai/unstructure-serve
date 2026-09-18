@@ -43,7 +43,7 @@ PY
 ## 启动和监控
 
 ```bash
-pm2 start ecosystem.two_stage.celery.json
+pm2 start deploy/pm2/ecosystem.two_stage.celery.json
 uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout=5
 pm2 status
 ```
@@ -54,7 +54,7 @@ pm2 status
 
 parse 的 PM2 停止窗口为 1900 秒，让在途任务完成；这不是任务 hard timeout，维护前仍需等待 active/reserved 清空。API 和 parse 模板的 SDK 窗口均为 64 页，整本结果仍统一后处理。并发基准和配置选择见[部署记录](mineru_4_upgrade_usage.md#重启修复与并发优化2026-09-18)。
 
-需要监控时启动 `ecosystem.two_stage.flower.json`，默认 5555；普通 Celery Flower 使用另一个 app，同机同时开两个需改端口。
+需要监控时启动 `deploy/pm2/ecosystem.two_stage.flower.json`，默认 5555；普通 Celery Flower 使用另一个 app，同机同时开两个需改端口。
 
 ```bash
 API_BASE=http://127.0.0.1:7770
@@ -71,7 +71,7 @@ pm2 logs celery-two-stage-parse --lines 100
 
 | 字段 | 默认值 / 含义 |
 | --- | --- |
-| `file` | 必填；支持类型见 [README](README.md#解析接口)，Office 先转 PDF |
+| `file` | 必填；支持类型见 [README](../README.md#解析接口)，Office 先转 PDF |
 | `tier` | `advanced`；`flash/basic/standard/advanced`，非法值返回 422，任务保留提交时选择 |
 | `chunk_type` | `false`；保留标题、页眉、页脚和图片类型及阅读顺序 |
 | `return_txt` | `false`；返回拼接纯文本 |
@@ -119,7 +119,7 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
 
 ## 批量脚本
 
-**400–1000 页 PDF 不直接套用默认 6 个在途/800 秒等待。** 先按 [AI 指南的大文件流程](docs/ai-integration.md#53-多份-4001000-页-pdf-的投递流程)做整本单文件验收，核对服务端长任务确认期限与资源，再小窗口投递。延长客户端等待不会改变 Redis 的消息重投或服务端执行期限。
+**400–1000 页 PDF 不直接套用默认 6 个在途/800 秒等待。** 先按 [AI 指南的大文件流程](ai-integration.md#53-多份-4001000-页-pdf-的投递流程)做整本单文件验收，核对服务端长任务确认期限与资源，再小窗口投递。延长客户端等待不会改变 Redis 的消息重投或服务端执行期限。
 
 `src/scripts/two_stage_enqueue.py` 读取目录中的 PDF，默认维持最多 6 个在途任务，有任务完成就立即补位，成功结果原子保存为 `<stem>.pkl`，跳过已有同名输出。队列可以持续保持三个解析 worker 有活可做，不需要一次上传全部文件。
 

@@ -307,10 +307,10 @@ class _GPUExecutor:
 
 
 class GPUScheduler:
-    """A simple GPU-aware scheduler: one worker process per GPU, queued tasks per GPU.
+    """Isolated task dispatch; actual parsing shares host-wide capacity leases.
 
-    - Set env GPU_IDS="0,1,2" (default: "0") to control GPUs used.
-    - Each GPU runs one task at a time; additional tasks on that GPU queue automatically.
+    GPU_IDS retains legacy child-environment routing. Multiple dispatch workers
+    prevent HTTP connection affinity from serializing an otherwise idle host.
     """
 
     def __init__(self):
@@ -321,10 +321,15 @@ class GPUScheduler:
             # Conservative default: single GPU 0
             gpu_ids = ["0"]
 
+        dispatch_workers = int(os.getenv("MINERU_SCHEDULER_WORKERS", "3"))
+        if dispatch_workers < 1:
+            raise ValueError("MINERU_SCHEDULER_WORKERS must be positive")
         self._executors: List[_GPUExecutor] = [
             _GPUExecutor(
                 gpu_id=gid,
-                pool=ProcessPoolExecutor(max_workers=1, initializer=_worker_init, initargs=(gid,)),
+                pool=ProcessPoolExecutor(
+                    max_workers=dispatch_workers, initializer=_worker_init, initargs=(gid,)
+                ),
             )
             for gid in gpu_ids
         ]

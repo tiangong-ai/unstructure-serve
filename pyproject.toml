@@ -7,7 +7,7 @@ name = "tiangong-ai-unstructure-serve"
 version = "0.1.0"
 description = "FastAPI service for TianGong AI unstructured document processing."
 readme = "README.md"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.13,<3.14"
 license = { file = "LICENSE" }
 authors = [
     { name = "linancn" },
@@ -25,13 +25,19 @@ dependencies = [
     "toml>=0.10.2",
     "openai>=2,<3",
     "google-genai>=2.24.0",
-    "mineru[torch]>=4.0.0,<5",
+    "mineru>=4.0.2,<4.1",
     "python-docx>=1.2.0",
     "pillow>=12.3.0",
     "loguru>=0.7.3",
-    "torch>=2.14.0",
-    "protobuf>=7.36.1",
+    "protobuf>=7.36.2",
     "minio>=7.2.20",
+    "httpx>=0.28.1",
+    "requests>=2.32.5",
+    "pypdfium2>=5",
+    "docvortex>=0.4.12,<0.5",
+    "kombu[redis]>=5.6",
+    "redis>=6.4,<6.5",
+    "python-multipart>=0.0.22",
 ]
 
 [dependency-groups]
@@ -46,7 +52,7 @@ packages = ["src"]
 
 [tool.black]
 line-length = 100
-target-version = ["py312"]
+target-version = ["py313"]
 exclude = '''
 (
     /\.venv/
@@ -59,7 +65,7 @@ testpaths = ["tests"]
 markers = ["mineru_integration: real input PDFs and prepared MinerU model services"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]

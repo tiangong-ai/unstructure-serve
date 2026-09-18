@@ -10,6 +10,10 @@ from typing import Optional
 
 from celery import states
 from celery.result import AsyncResult
+from starlette.concurrency import run_in_threadpool
+
+from src.utils.upload_io import persist_upload
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.config.config import MINERU_TASK_STORAGE_DIR
@@ -163,9 +167,8 @@ async def two_stage_task(
     target_filename = _normalize_filename(filename, file_ext)
     target_path = workspace / target_filename
 
-    file_bytes = await file.read()
     try:
-        target_path.write_bytes(file_bytes)
+        await run_in_threadpool(persist_upload, file, target_path)
     except Exception:
         shutil.rmtree(workspace, ignore_errors=True)
         raise HTTPException(
@@ -177,7 +180,9 @@ async def two_stage_task(
 
     if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
         try:
-            processing_path, cleanup_paths = maybe_convert_to_pdf(str(target_path), file_ext)
+            processing_path, cleanup_paths = await run_in_threadpool(
+                maybe_convert_to_pdf, str(target_path), file_ext
+            )
             extra_cleanup.update(cleanup_paths)
         except Exception as exc:
             shutil.rmtree(workspace, ignore_errors=True)
@@ -185,7 +190,8 @@ async def two_stage_task(
 
     queue_names = resolve_two_stage_queues(priority)
     try:
-        async_result = submit_two_stage_job(
+        async_result = await run_in_threadpool(
+            submit_two_stage_job,
             processing_path,
             backend=backend_value,
             chunk_type=chunk_type,
@@ -207,7 +213,10 @@ async def two_stage_task(
             status_code=503, detail=f"Failed to enqueue two-stage task: {exc}"
         ) from exc
 
-    return {"task_id": async_result.id, "state": async_result.state}
+    return {
+        "task_id": async_result.id,
+        "state": await run_in_threadpool(lambda: async_result.state),
+    }
 
 
 @router.get(

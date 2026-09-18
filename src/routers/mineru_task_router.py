@@ -6,6 +6,10 @@ from typing import Optional
 
 from celery import states
 from celery.result import AsyncResult
+from starlette.concurrency import run_in_threadpool
+
+from src.utils.upload_io import persist_upload
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.config.config import MINERU_TASK_STORAGE_DIR
@@ -111,9 +115,8 @@ async def mineru_task(
     target_filename = _normalize_filename(filename, file_ext)
     target_path = workspace / target_filename
 
-    file_bytes = await file.read()
     try:
-        target_path.write_bytes(file_bytes)
+        await run_in_threadpool(persist_upload, file, target_path)
     except Exception:
         shutil.rmtree(workspace, ignore_errors=True)
         raise HTTPException(
@@ -125,7 +128,8 @@ async def mineru_task(
     )
 
     try:
-        async_result = run_mineru_task.apply_async(
+        async_result = await run_in_threadpool(
+            run_mineru_task.apply_async,
             args=[
                 {
                     "source_path": str(target_path),
@@ -152,7 +156,9 @@ async def mineru_task(
             status_code=503, detail=f"Failed to enqueue MinerU task: {exc}"
         ) from exc
 
-    response_model = MineruTaskSubmitResponse(task_id=async_result.id, state=async_result.state)
+    response_model = MineruTaskSubmitResponse(
+        task_id=async_result.id, state=await run_in_threadpool(lambda: async_result.state)
+    )
     return json_response(response_model, pretty)
 
 

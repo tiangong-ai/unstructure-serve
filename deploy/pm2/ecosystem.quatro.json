@@ -5,7 +5,7 @@
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8770 src.main:app",
+      "args": "-c deploy/gunicorn.conf.py -w 1 -b 0.0.0.0:8770 src.main:app",
       "env": {
         "GPU_IDS": "0",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -20,16 +20,17 @@
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
       },
-      "out_file": "gunicorn-0.log",
-      "error_file": "gunicorn-0.log",
-      "time": true
+      "out_file": "output/logs/unstructured-gunicorn-0.log",
+      "error_file": "output/logs/unstructured-gunicorn-0.log",
+      "time": true,
+      "kill_timeout": 1900000
     },
     {
       "name": "unstructured-gunicorn-1",
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8771 src.main:app",
+      "args": "-c deploy/gunicorn.conf.py -w 1 -b 0.0.0.0:8771 src.main:app",
       "env": {
         "GPU_IDS": "1",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -44,16 +45,17 @@
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30001"
       },
-      "out_file": "gunicorn-1.log",
-      "error_file": "gunicorn-1.log",
-      "time": true
+      "out_file": "output/logs/unstructured-gunicorn-1.log",
+      "error_file": "output/logs/unstructured-gunicorn-1.log",
+      "time": true,
+      "kill_timeout": 1900000
     },
     {
       "name": "unstructured-gunicorn-2",
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8772 src.main:app",
+      "args": "-c deploy/gunicorn.conf.py -w 1 -b 0.0.0.0:8772 src.main:app",
       "env": {
         "GPU_IDS": "2",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -68,16 +70,17 @@
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30002"
       },
-      "out_file": "gunicorn-2.log",
-      "error_file": "gunicorn-2.log",
-      "time": true
+      "out_file": "output/logs/unstructured-gunicorn-2.log",
+      "error_file": "output/logs/unstructured-gunicorn-2.log",
+      "time": true,
+      "kill_timeout": 1900000
     },
     {
       "name": "unstructured-gunicorn-3",
       "cwd": ".",
       "script": ".venv/bin/gunicorn",
       "interpreter": "none",
-      "args": "-k uvicorn_worker.UvicornWorker --timeout 120 -b 0.0.0.0:8773 src.main:app",
+      "args": "-c deploy/gunicorn.conf.py -w 1 -b 0.0.0.0:8773 src.main:app",
       "env": {
         "GPU_IDS": "3",
         "MINERU_MODEL_SOURCE": "modelscope",
@@ -92,9 +95,10 @@
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30003"
       },
-      "out_file": "gunicorn-3.log",
-      "error_file": "gunicorn-3.log",
-      "time": true
+      "out_file": "output/logs/unstructured-gunicorn-3.log",
+      "error_file": "output/logs/unstructured-gunicorn-3.log",
+      "time": true,
+      "kill_timeout": 1900000
     }
   ]
 }

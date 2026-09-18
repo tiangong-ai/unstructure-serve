@@ -1,6 +1,9 @@
 import os
-import tempfile
 from typing import Optional
+
+from starlette.concurrency import run_in_threadpool
+
+from src.utils.upload_io import persist_upload, await_parse_future, cleanup_after_parse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
@@ -135,23 +138,16 @@ async def mineru_with_images(
         # Ignore meta payloads when MinIO persistence is disabled.
         minio_meta = None
 
-    file_bytes = await file.read()
-
-    # Use a persistent temp file so it survives queueing; we'll clean it up after processing
-    tmp = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
-    try:
-        tmp.write(file_bytes)
-        tmp.flush()
-        tmp_path = tmp.name
-    finally:
-        tmp.close()
+    tmp_path = await run_in_threadpool(persist_upload, file, suffix=file_ext)
 
     conversion_cleanup: list[str] = []
     processing_path = tmp_path
 
     if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
         try:
-            processing_path, conversion_cleanup = maybe_convert_to_pdf(tmp_path, file_ext)
+            processing_path, conversion_cleanup = await run_in_threadpool(
+                maybe_convert_to_pdf, tmp_path, file_ext
+            )
         except RuntimeError as exc:
             try:
                 os.unlink(tmp_path)
@@ -160,6 +156,7 @@ async def mineru_with_images(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     cleanup_paths = {tmp_path, *conversion_cleanup}
+    fut = None
 
     try:
         minio_context: MinioContext = None
@@ -170,7 +167,8 @@ async def mineru_with_images(
                     status_code=400,
                     detail="MinIO storage requires a PDF input after preprocessing.",
                 )
-            minio_context = initialize_minio_context(
+            minio_context = await run_in_threadpool(
+                initialize_minio_context,
                 save_to_minio,
                 minio_address,
                 minio_access_key,
@@ -247,14 +245,16 @@ async def mineru_with_images(
         minio_assets_summary: Optional[MinioAssetSummary] = None
         if minio_context:
             assert minio_prefix_value is not None  # for mypy
-            minio_assets_summary = upload_pdf_assets(
+            minio_assets_summary = await run_in_threadpool(
+                upload_pdf_assets,
                 minio_context,
                 minio_prefix_value,
                 processing_path,
                 chunks_with_pages,
             )
             if minio_meta is not None:
-                meta_object = upload_meta_text(
+                meta_object = await run_in_threadpool(
+                    upload_meta_text,
                     minio_context,
                     minio_prefix_value,
                     minio_meta,
@@ -265,22 +265,13 @@ async def mineru_with_images(
             txt=txt_text if return_txt else None,
             minio_assets=minio_assets_summary,
         )
-        return json_response(response_model, pretty)
+        return await run_in_threadpool(json_response, response_model, pretty)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        for path in cleanup_paths:
-            try:
-                os.unlink(path)
-            except Exception:
-                pass
+        cleanup_after_parse(cleanup_paths, fut)
 
 
-# Small helper to await a concurrent.futures.Future inside async route
-async def _await_future(fut):
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, fut.result)
+_await_future = await_parse_future

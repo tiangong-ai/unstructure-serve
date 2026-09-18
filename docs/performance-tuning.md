@@ -2,9 +2,9 @@
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
 
-适用基线：MinerU 4.0.0、Python 3.12、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。最后核对：2026-09-18。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
+适用基线：MinerU 4.0.2、Python 3.13.15、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。最后核对：2026-09-18。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
 
-安装与故障恢复见[部署与回归](https://github.com/tiangong-ai/unstructure-serve/blob/main/mineru_4_upgrade_usage.md)，接口调用见 [AI 接入指南](ai-integration.md)。先按部署文档获得能正确解析的系统，再调性能。
+安装与故障恢复见[部署与回归](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/mineru_4_upgrade_usage.md)，接口调用见 [AI 接入指南](ai-integration.md)。先按部署文档获得能正确解析的系统，再调性能。
 
 ## 1. 先确定要优化的目标
 
@@ -55,7 +55,7 @@ free -h
 nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu --format=csv
 df -h /tmp .
 pm2 status
-docker compose -p mineru-vlm-parallel -f compose.mineru.yaml -f compose.mineru.parallel.yaml ps
+docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/compose.mineru.yaml -f deploy/mineru-vllm/compose.mineru.parallel.yaml ps
 ```
 
 还需记录容器或 cgroup 的 CPU/内存配额、NUMA、GPU 间互联、共享 GPU 上其他服务的峰值、Redis/磁盘/网络延迟。宿主机总核数和总内存不一定是本服务可用资源。
@@ -139,7 +139,7 @@ DP/TP 原理参考 [vLLM 官方部署说明](https://docs.vllm.ai/en/latest/serv
 
 ### 6.2 本仓库具体修改位置
 
-三卡模板 `compose.mineru.parallel.yaml` 中的 `device_ids`、`--data-parallel-size` 和 `--tensor-parallel-size` 是显式值。卡数变化须一起修改，并检查测试/PM2/文档；不存在只改 `GPU_IDS` 就自动扩卡的能力。基础 `compose.mineru.yaml` 的 `MINERU_DOCKER_GPU_ID` 只用于单卡拓扑。
+三卡模板 `deploy/mineru-vllm/compose.mineru.parallel.yaml` 中的 `device_ids`、`--data-parallel-size` 和 `--tensor-parallel-size` 是显式值。卡数变化须一起修改，并检查测试/PM2/文档；不存在只改 `GPU_IDS` 就自动扩卡的能力。基础 `deploy/mineru-vllm/compose.mineru.yaml` 的 `MINERU_DOCKER_GPU_ID` 只用于单卡拓扑。
 
 `MINERU_DOCKER_GPU_MEMORY` 在 Compose/PM2 中设置，当前 0.15 是给共享 GPU 留空间后的本机配置，不是所有机器建议。max-model-len=8192、max-num-seqs=16 在 Compose command 中固定；修改镜像、模型、长度或序列数要重新测峰值和启动所需显存。扩大最大上下文不是免费提速，并发序列数也不是每秒吞吐。
 
@@ -151,7 +151,7 @@ MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换
 
 先固定模型配置，再扫解析 worker 数，例如 1→2→3；每个都使用独立节点名、solo/1、prefetch=1，保留 urgent/normal 队列顺序。随后扫每 parser 的 `MINERU_MODEL_VLM_MAX_CONCURRENCY`，例如 4→8→16。三进程×8 表示多个独立客户端可能同时产生请求，不等于服务器固定只有 24 个序列，也不包含别的 API 或客户端流量。
 
-当前两个 Celery app 的消费队列不同：普通 worker 消费 `queue_urgent,queue_normal,default`；two-stage 使用各自 parse/vision/dispatch/merge 队列。API 和 worker 的队列环境必须一致。不要把“有 Celery worker 在线”当成某个入口一定有人消费；也不要让普通 worker 无意抢占 two-stage 的共享 default 队列任务。
+当前两个 Celery app 的消费队列不同：普通 worker 消费 `queue_urgent,queue_normal`；two-stage 使用各自 parse/vision/dispatch/merge 队列。API 和 worker 的队列环境必须一致。不要把“有 Celery worker 在线”当成某个入口一定有人消费；也不要让普通 worker 无意抢占 two-stage 的共享 default 队列任务。
 
 长任务的预取会影响公平性，相关行为参考 [Celery 优化文档](https://docs.celeryq.dev/en/stable/userguide/optimizing.html)。parse 使用 solo 是为了允许 SDK 再创建渲染子进程，不随意换成 daemonic prefork。
 
@@ -240,3 +240,27 @@ Redis visibility timeout 到期可使未确认任务被重新投递；扩大它�
 容量验收中应同时检查同一 task_id 的执行事件/日志，避免两个 worker 重复处理同一工作区；客户端没有重复 POST 不代表 broker 不会重投。图像任务一次 fan-out，API 也没有全局按页数/图片数/字节的准入预算；客户端在途 2 是起始实验，不是内存安全保证。若缺少可接受的任务时长上界、可靠终止或恢复能力，先补齐执行隔离/幂等与监控，再开放大规模长任务。
 
 不得直接把 PDF 切成 50/100 页后声称行为等价。若单份整本在预算内不能完成，应先调整资源/窗口、档位选择及执行机制；必须分段时另行设计源页偏移、跨段表格/段落/脚注衔接、图像去重与完整性验收。当前公共 API 不提供此类透明分段恢复能力。
+
+## 13. API 与解析容量分离（Python 3.13 维护）
+
+六个上传入口按 1 MiB 在线程池落盘，不再整文件读取；Office/MinIO/broker 操作移出事件循环。解析 Future 直接异步等待，不再每个长请求占用一个等待线程。HTTP 超时后的源文件等实际任务结束才清理。
+
+`MINERU_PARSE_SLOTS` 缺省 3，在同一主机为 API、普通任务和 two-stage 共享解析上限；全部进程必须配置相同 `MINERU_PARSE_SLOT_DIR`（缺省 `/tmp/tiangong_mineru_parse_slots`）。槽位涵盖 MinerU 推理、资产保存和结果归一化；不限制后续独立图片模型并发。等待超时缺省 1800 秒，并计入 scheduler hard timeout。跨主机需独立容量规划，不能把本机文件锁当作分布式调度。增加 API worker 不会增加这个上限；锁文件不能在运行中删除。
+
+隔离升级的 177 项基线测试通过；input 的 11 份 PDF 共 18 项回归通过（p2 四档、九页论文和 fese 整本，其余抽页）。上传优化以九项失败测试复现后修复，并增加超时/分块/写入失败检查。共享容量验证跨进程上限、异常释放、超时及 owner 被杀而渲染子进程仍在时的回收。
+
+### HTTP 派发对照（6 个真实 p2 请求）
+
+使用独立 loopback Gunicorn 端口，Python 3.13/MinerU 4.0.2、同一个模型服务、共享解析上限 3，先预热一次，再同时上传 6 份 input/p2.pdf；每份检查两页与 1600 关键值，同时轮询 /health。不是千页文档或长时间稳定性测试。
+
+| API worker | 每池派发 1：整批秒 | 每池派发 3：整批秒 |
+| --- | ---: | ---: |
+| 2 | 16.68 | 9.13 |
+| 4 | 16.62 | 8.99 |
+| 8 | 8.94 | 8.51 |
+
+连接分配不均会使每 API 进程原先的单通道队列串行等待。`MINERU_SCHEDULER_WORKERS=3` 增加的是隔离派发进程，实际 MinerU 执行仍受共享 3 槽限制；这会增加进程与基础内存，不能无界加大。此次保留 API 4 worker，避免仅凭短样本将 8 worker 的小幅差异当作普遍收益。优化后 /health 采样 P95 约 2.3–2.4 ms；只是该负载下的观测，不是最大 HTTP 容量证明。
+
+Gunicorn 使用 uvloop/httptools 的 UvicornWorker；配置集中 `deploy/gunicorn.conf.py`，`API_WORKERS` 缺省 4。`API_MAX_REQUESTS` 从 500 调为 5000，jitter 为 500，减少频繁轮询造成的周期回收；这是回收频率折中，仍需长期监测 RSS，不能据短测认定不存在内存增长。PM2 API kill_timeout 1900 秒与 Gunicorn 退出窗口对齐。`preload_app=false` 避免复制已初始化的调度器/客户端。
+
+复现：`uv run python -m src.scripts.benchmark_api --output output/http-benchmark-new --workers 2 4 8`。输出目录必须不存在；端口默认 17771，仅绑定 loopback。脚本会访问真实模型，需在维护/测试窗口执行，不能在满负荷生产期间直接加压。

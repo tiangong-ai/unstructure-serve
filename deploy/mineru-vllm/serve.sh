@@ -21,9 +21,9 @@ for ((attempt=0; attempt<60; attempt++)); do
   fi
   sleep 2
 done
-compose=(docker compose --project-name "mineru-vlm-$mode" --file "$repo_root/compose.mineru.yaml")
+compose=(docker compose --env-file "$repo_root/.env" --project-name "mineru-vlm-$mode" --file "$repo_root/deploy/mineru-vllm/compose.mineru.yaml")
 if [[ "$mode" == parallel ]]; then
-  compose+=(--file "$repo_root/compose.mineru.parallel.yaml")
+  compose+=(--file "$repo_root/deploy/mineru-vllm/compose.mineru.parallel.yaml")
 fi
 
 # Stay attached so PM2 stop/restart also stops/restarts the container.

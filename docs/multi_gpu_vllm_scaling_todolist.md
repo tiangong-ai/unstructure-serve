@@ -4,7 +4,7 @@
 
 ## 已具备
 
-- [x] `ecosystem.vllm.parallele.config.json` 通过前台 Compose 管理三卡模型服务；GPU 0/1/2，DP=3、TP=1。
+- [x] `deploy/pm2/ecosystem.vllm.parallele.config.json` 通过前台 Compose 管理三卡模型服务；GPU 0/1/2，DP=3、TP=1。
 - [x] 单个 `MINERU_MODEL_VLM_SERVER_URL`，由 vLLM 根据副本队列分配推理请求，无需应用维护三个 URL。
 - [x] Docker 模型与缓存持久化，应用进程不加载大模型。
 - [x] SDK 兼容层与页面/图片/Office/MinIO 合同；two-stage 分离 parse、vision、dispatch、merge，支持 normal/urgent 队列。
