@@ -27,9 +27,9 @@ def test_parallel_compose_exposes_three_gpus_and_internal_load_balancing():
             "--env-file",
             "/dev/null",
             "-f",
-            str(ROOT / "compose.mineru.yaml"),
+            str(ROOT / "deploy/mineru-vllm/compose.mineru.yaml"),
             "-f",
-            str(ROOT / "compose.mineru.parallel.yaml"),
+            str(ROOT / "deploy/mineru-vllm/compose.mineru.parallel.yaml"),
             "config",
             "--format",
             "json",
@@ -56,7 +56,9 @@ def test_parallel_compose_exposes_three_gpus_and_internal_load_balancing():
 
 
 def test_pm2_parallel_runs_one_foreground_compose_service():
-    apps = json.loads((ROOT / "ecosystem.vllm.parallele.config.json").read_text())["apps"]
+    apps = json.loads((ROOT / "deploy/pm2/ecosystem.vllm.parallele.config.json").read_text())[
+        "apps"
+    ]
     assert len(apps) == 1
     app = apps[0]
     assert app["name"] == "mineru-vlm-docker-parallel"
@@ -90,7 +92,7 @@ def test_launcher_resolves_repo_and_keeps_compose_attached(tmp_path):
         check=True,
     )
     args = capture.read_text().splitlines()
-    assert str(repo / "compose.mineru.parallel.yaml") in args
+    assert str(repo / "deploy/mineru-vllm/compose.mineru.parallel.yaml") in args
     assert "mineru-vlm-parallel" in args
     assert "--exit-code-from" in args
     assert "--abort-on-container-exit" in args
@@ -128,7 +130,7 @@ def test_launcher_fails_when_uvm_devices_never_appear(tmp_path):
 
 
 def test_parse_workers_have_unique_names_and_bounded_concurrency():
-    apps = json.loads((ROOT / "ecosystem.two_stage.celery.json").read_text())["apps"]
+    apps = json.loads((ROOT / "deploy/pm2/ecosystem.two_stage.celery.json").read_text())["apps"]
     parsers = [app for app in apps if app["name"].startswith("celery-two-stage-parse")]
     assert len(parsers) == 3
     names = set()
@@ -145,7 +147,54 @@ def test_parse_workers_have_unique_names_and_bounded_concurrency():
         assert app["env"]["MINERU_INTRA_OP_NUM_THREADS"] == "16"
         assert app["env"]["MINERU_INTER_OP_NUM_THREADS"] == "1"
     assert len(names) == 3
-    api = json.loads((ROOT / "ecosystem.config.json").read_text())["apps"][0]
+    api = json.loads((ROOT / "deploy/pm2/ecosystem.config.json").read_text())["apps"][0]
     assert api["env"]["MINERU_PROCESSING_WINDOW_SIZE"] == "64"
     assert api["env"]["MINERU_INTRA_OP_NUM_THREADS"] == "16"
     assert api["env"]["MINERU_INTER_OP_NUM_THREADS"] == "1"
+
+
+def test_ordinary_worker_does_not_steal_two_stage_merge_tasks():
+    ordinary = json.loads((ROOT / "deploy/pm2/ecosystem.celery.json").read_text())["apps"]
+    staged = json.loads((ROOT / "deploy/pm2/ecosystem.two_stage.celery.json").read_text())["apps"]
+
+    def queues(apps):
+        result = set()
+        for app in apps:
+            args = shlex.split(app["args"])
+            result.update(args[args.index("-Q") + 1].split(","))
+        return result
+
+    assert not (queues(ordinary) & queues(staged))
+
+
+def test_api_stop_window_covers_gunicorn_graceful_timeout(monkeypatch):
+    import runpy
+
+    monkeypatch.setenv("API_WORKERS", "4")
+    monkeypatch.setenv("API_WORKER_TIMEOUT", "1900")
+    monkeypatch.setenv("API_MAX_REQUESTS", "5000")
+    config = runpy.run_path(str(ROOT / "deploy/gunicorn.conf.py"))
+    api = json.loads((ROOT / "deploy/pm2/ecosystem.config.json").read_text())["apps"][0]
+    assert config["worker_class"] == "uvicorn_worker.UvicornWorker"
+    assert config["preload_app"] is False
+    assert config["workers"] == 4
+    assert config["max_requests"] == 5000
+    assert api["kill_timeout"] >= config["graceful_timeout"] * 1000
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node required for PM2 config")
+def test_pm2_config_has_absolute_paths_from_any_directory(tmp_path):
+    config = ROOT / "deploy/pm2/ecosystem.config.cjs"
+    result = subprocess.run(
+        ["node", "-e", "console.log(JSON.stringify(require(process.argv[1])))", str(config)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    apps = json.loads(result.stdout)["apps"]
+    assert len({app["name"] for app in apps}) == len(apps)
+    for app in apps:
+        assert app["cwd"] == str(ROOT)
+        assert Path(app["script"]).is_absolute()
+        assert Path(app["out_file"]).is_absolute()

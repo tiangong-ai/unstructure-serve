@@ -4,7 +4,7 @@
       "name": "mineru-vlm-docker-0",
       "cwd": ".",
       "script": "docker",
-      "args": "compose -p mineru-gpu0 -f compose.mineru.yaml up --build mineru-vlm",
+      "args": "compose --env-file .env -p mineru-gpu0 -f deploy/mineru-vllm/compose.mineru.yaml up --build mineru-vlm",
       "interpreter": "none",
       "autorestart": true,
       "max_restarts": 5,

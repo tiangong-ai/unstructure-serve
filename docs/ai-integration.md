@@ -1,6 +1,6 @@
 # AI 开发者文档拆解接入指南
 
-适用接口：TianGong AI Unstructure Serve / MinerU 4.0.0。最后核对：2026-09-18。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
+适用接口：TianGong AI Unstructure Serve / MinerU 4.0.2。最后核对：2026-09-18。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
 
 **先读取目标部署的 `/openapi.json`，再按本文选择工作流。** 本文解释接口语义、恢复规则和结果处理，实际参数枚举以部署中的 OpenAPI 为准。API `info.version` 当前为 `1.0`，不是 MinerU 版本，也不足以标识全部部署变更；集成时保存 schema 摘要和服务发布记录。
 
@@ -27,7 +27,7 @@
 3. 同时需要图片描述与 MinIO：使用同步或普通异步图片接口。不要把 MinIO 字段塞到 two-stage 后假定已上传。
 4. 不要用 two-stage 假装纯解析：当前没有 `with_images=false` 开关。其图片筛选和去重也与同步图片接口不同，不能期待两个入口逐字相同。
 
-部署可能只启用了 two-stage worker。API 有某个路由或提交返回 200，并不保证对应队列有人消费。普通与 two-stage 的 worker 配置见[普通任务说明](https://github.com/tiangong-ai/unstructure-serve/blob/main/mineru_with_images_task_usage.md)和[two-stage 说明](https://github.com/tiangong-ai/unstructure-serve/blob/main/two_stage_task_usage.md)。
+部署可能只启用了 two-stage worker。API 有某个路由或提交返回 200，并不保证对应队列有人消费。普通与 two-stage 的 worker 配置见[普通任务说明](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/mineru_with_images_task_usage.md)和[two-stage 说明](https://github.com/tiangong-ai/unstructure-serve/blob/main/docs/two_stage_task_usage.md)。
 
 ## 2. 接入前需要的三项信息
 

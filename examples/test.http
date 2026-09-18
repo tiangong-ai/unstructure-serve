@@ -24,7 +24,7 @@ Content-Type: application/pdf
 < ./input/p2.pdf
 --mineru-example--
 
-### Ordinary task: requires ecosystem.celery.json worker.
+### Ordinary task: requires deploy/pm2/ecosystem.celery.json worker.
 POST {{baseUrl}}/mineru/task?chunk_type=true&return_txt=true
 Authorization: Bearer {{token}}
 Content-Type: multipart/form-data; boundary=mineru-example

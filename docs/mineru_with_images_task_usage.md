@@ -16,7 +16,7 @@
 在仓库根目录启动：
 
 ```bash
-pm2 start ecosystem.celery.json
+pm2 start deploy/pm2/ecosystem.celery.json
 uv run celery -A src.services.celery_app inspect active_queues --timeout=5
 pm2 logs celery-worker --lines 100
 ```
@@ -25,11 +25,11 @@ pm2 logs celery-worker --lines 100
 
 ```bash
 uv run celery -A src.services.celery_app worker \
-  -l info -Q queue_urgent,queue_normal,default \
+  -l info -Q queue_urgent,queue_normal \
   -P solo -c 1 --prefetch-multiplier=1
 ```
 
-两者选择一种。解析会再创建子进程，不使用 prefork 池。若启用监控，使用 `ecosystem.celery.flower.json`；默认 5555，与 two-stage Flower 同时运行需改端口。
+两者选择一种。解析会再创建子进程，不使用 prefork 池。若启用监控，使用 `deploy/pm2/ecosystem.celery.flower.json`；默认 5555，与 two-stage Flower 同时运行需改端口。
 
 ## 请求参数
 
@@ -106,7 +106,7 @@ MinIO 的 `parsed.json` 保留服务输出；`chunk_type=true` 时保留类型�
 
 ## 排查
 
-- 一直 PENDING：检查 `celery-worker` 是否在线、`active_queues` 是否包含 `queue_urgent,queue_normal,default`、API/worker 是否使用同一个 Redis DB；仅有 two-stage worker 不会消费这些任务。
+- 一直 PENDING：检查 `celery-worker` 是否在线、`active_queues` 是否包含 `queue_urgent,queue_normal`、API/worker 是否使用同一个 Redis DB；仅有 two-stage worker 不会消费这些任务。
 - 任务 FAILURE：查看返回 `error` 和 `pm2 logs celery-worker`。重点检查 Docker MinerU 端点 `MINERU_MODEL_VLM_SERVER_URL`、独立视觉端点 `VLLM_BASE_URLS`、CPU 模型文件、LibreOffice、共享任务目录和任务超时。
 - 入队前 422：检查 tier 和请求字段类型；普通图片接口不会因为未知 provider/model 直接 422。
 - 调整 worker 前查看 `inspect active`、`inspect reserved` 和 `inspect active_queues`；上传工作区需等任务完成后按具体任务清理。不要把整个共享临时目录当作普通任务的独占目录。

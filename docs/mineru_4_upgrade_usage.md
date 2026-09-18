@@ -1,15 +1,15 @@
 # MinerU 4 部署与回归
 
-当前发布基线为 MinerU 4.0.0：应用调用无状态 SDK `mineru.parser.parse`，小模型使用 CPU ONNX，VLM 通过 Docker 提供。应用 `.venv` 不安装 vLLM。质量档位和请求参数见 [README](README.md#解析接口)，升级前分析保存在[历史评估](docs/history/mineru_4_upgrade_evaluation.md)。
+当前发布基线为 MinerU 4.0.2：应用调用无状态 SDK `mineru.parser.parse`，小模型使用 CPU ONNX，VLM 通过 Docker 提供。应用 `.venv` 不安装 vLLM。质量档位和请求参数见 [README](../README.md#解析接口)，升级前分析保存在[历史评估](history/mineru_4_upgrade_evaluation.md)。
 
 ## 首次安装
 
-所有命令在仓库根目录执行。系统需要 Python 3.12、uv、Docker Compose 2.24.4+、PM2，以及支持本机 GPU 的 NVIDIA 驱动和 Container Toolkit。Docker 需已注册 `nvidia` runtime；Compose 显式指定该 runtime，以兼容本机 CDI 模式。
+所有命令在仓库根目录执行。系统需要 Python 3.13.15、uv 0.12.16 或更新版本、Docker Compose 2.24.4+、PM2，以及支持本机 GPU 的 NVIDIA 驱动和 Container Toolkit。Docker 需已注册 `nvidia` runtime；Compose 显式指定该 runtime，以兼容本机 CDI 模式。
 
 ```bash
 sudo apt update
 sudo apt install -y libmagic-dev poppler-utils libreoffice pandoc graphicsmagick
-uv python install 3.12
+uv python install 3.13.15
 uv sync --locked --group dev
 mkdir -p .secrets
 cp -n deploy/secrets.example.toml .secrets/secrets.toml
@@ -23,7 +23,7 @@ cp -n .env.example .env
 ```bash
 MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
 MINERU_MODEL_SMALL_BACKEND=onnx uv run mineru-kit models verify --tier basic --small-backend onnx
-pm2 start ecosystem.vllm.parallele.config.json
+pm2 start deploy/pm2/ecosystem.vllm.parallele.config.json
 pm2 logs mineru-vlm-docker-parallel --lines 100
 ```
 
@@ -58,7 +58,7 @@ Python 配置优先级为 **进程环境 > `.env` > `.secrets/secrets.toml` 的�
 | `CELERY_TASK_*_QUEUE` | 模板显式设置普通与 two-stage 队列；[队列映射](two_stage_task_usage.md#队列与配置)必须与 worker 的 `-Q` 一致 |
 | `MINERU_TASK_STORAGE_DIR` | 默认系统临时目录下的 `tiangong_mineru_tasks`；跨容器时共享相同绝对路径 |
 
-Office 转换模板超时为 600 秒。普通/图片解析 hard timeout 为 1800 秒；科研入口另有 110 秒 HTTP 等待窗口和 300 秒子进程 hard timeout。API 的 Gunicorn timeout/graceful-timeout 均为 1900 秒。具体模板见 `.env.example`、`ecosystem.config.json`，不要把这些数值理解为所有任务统一的超时。
+Office 转换模板超时为 600 秒。普通/图片解析 hard timeout 为 1800 秒；科研入口另有 110 秒 HTTP 等待窗口和 300 秒子进程 hard timeout。API 的 Gunicorn timeout/graceful-timeout 均为 1900 秒。具体模板见 `.env.example`、`deploy/pm2/ecosystem.config.json`，不要把这些数值理解为所有任务统一的超时。
 
 旧 backend 仅用于直接调用和在途 payload 兼容：`pipeline`→`basic`、`hybrid-*`→`standard`、`vlm-*`→`advanced`；对应大模型推理仍使用 Docker。新请求只使用 `tier`。旧 `MINERU_DEFAULT_LANG`、hybrid batch/force-pipeline 参数不再传给上游。
 
@@ -67,22 +67,22 @@ Office 转换模板超时为 600 秒。普通/图片解析 hard timeout 为 1800
 先确认共享配置、Redis 和模型服务就绪，再启动所需任务系统：
 
 ```bash
-pm2 start ecosystem.config.json
-pm2 start ecosystem.two_stage.celery.json
+pm2 start deploy/pm2/ecosystem.config.json
+pm2 start deploy/pm2/ecosystem.two_stage.celery.json
 pm2 save
 ```
 
 | 文件 | 用途 |
 | --- | --- |
-| `ecosystem.vllm.parallele.config.json` | 三卡模型入口，PM2 进程 `mineru-vlm-docker-parallel`，单容器 DP=3 / TP=1 |
+| `deploy/pm2/ecosystem.vllm.parallele.config.json` | 三卡模型入口，PM2 进程 `mineru-vlm-docker-parallel`，单容器 DP=3 / TP=1 |
 | `deploy/mineru-vllm/serve.sh` | 前台执行 Compose，`parallel` 合并两份 YAML，project 固定为 `mineru-vlm-parallel` |
-| `compose.mineru.yaml` / `compose.mineru.parallel.yaml` | 单卡基础 / 三卡覆盖；三卡命令必须带两份文件 |
-| `ecosystem.config.json` | API `unstructured-gunicorn`，端口 7770 |
-| `ecosystem.two_stage.celery.json` | 当前部署使用的六个 worker：parse 三个，vision/dispatch/merge 各一个 |
-| `ecosystem.celery.json` | 普通任务 worker，调用两个普通 `/task` 接口时另行启动 |
-| `ecosystem.two_stage.flower.json` / `ecosystem.celery.flower.json` | 对应 Celery app 的可选监控；都默认 5555，同时使用时须更改端口 |
-| `ecosystem.vllm.config.json` / `ecosystem.vllm.quatro.json` | 可选单卡 / 四个独立端点模板，不属于三卡内部 DP 部署 |
-| `ecosystem.quatro.json` | 多 API 实例示例，不等于自动扩容 Docker 推理服务 |
+| `deploy/mineru-vllm/compose.mineru.yaml` / `deploy/mineru-vllm/compose.mineru.parallel.yaml` | 单卡基础 / 三卡覆盖；三卡命令必须带两份文件 |
+| `deploy/pm2/ecosystem.config.json` | API `unstructured-gunicorn`，端口 7770 |
+| `deploy/pm2/ecosystem.two_stage.celery.json` | 当前部署使用的六个 worker：parse 三个，vision/dispatch/merge 各一个 |
+| `deploy/pm2/ecosystem.celery.json` | 普通任务 worker，调用两个普通 `/task` 接口时另行启动 |
+| `deploy/pm2/ecosystem.two_stage.flower.json` / `deploy/pm2/ecosystem.celery.flower.json` | 对应 Celery app 的可选监控；都默认 5555，同时使用时须更改端口 |
+| `deploy/pm2/ecosystem.vllm.config.json` / `deploy/pm2/ecosystem.vllm.quatro.json` | 可选单卡 / 四个独立端点模板，不属于三卡内部 DP 部署 |
+| `deploy/pm2/ecosystem.quatro.json` | 多 API 实例示例，不等于自动扩容 Docker 推理服务 |
 
 API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16，保守手动启动可用 solo/1；two-stage parse 为三个独立 solo/1，其余为线程池，详情见各自任务说明。GPU 调度器会再创建子进程，不使用 Celery prefork 执行这类解析。
 
@@ -90,7 +90,7 @@ API 使用 `uvicorn_worker.UvicornWorker`。普通 worker 模板为 threads/16�
 
 ```bash
 pm2 status
-docker compose -p mineru-vlm-parallel -f compose.mineru.yaml -f compose.mineru.parallel.yaml ps
+docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/compose.mineru.yaml -f deploy/mineru-vllm/compose.mineru.parallel.yaml ps
 curl --fail http://127.0.0.1:30000/health
 curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/ready
 curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/gpu/status
@@ -100,33 +100,33 @@ pm2 logs unstructured-gunicorn --lines 100
 
 `/health` 仅返回 API 存活状态；`/ready` 并行探测全部配置的 MinerU VLM `/health`，不可用时返回 503，单端点超时 3 秒。它沿用解析端点及认证配置，不探测 Redis、MinIO 或独立图片描述服务，也不能代替真实 PDF 回归。
 
-三卡服务和应用 URL 均使用 `30000`；启动脚本的 project 参数优先于 `.env` 中旧的 `COMPOSE_PROJECT_NAME`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
+三卡服务和应用 URL 均使用 `30000`；启动脚本的 project 参数优先于 `.env` 中旧的 `COMPOSE_PROJECT_NAME`。更新服务时先确认队列及 active/reserved 任务，等待当前解析收敛，再对指定进程执行 `pm2 reload deploy/pm2/ecosystem.config.json --update-env` 或重启对应 worker。改动 `.env` 时检查 PM2 `env` 是否覆盖同名字段。
 
 模型维护命令：
 
 ```bash
 pm2 logs mineru-vlm-docker-parallel --lines 100
-pm2 restart ecosystem.vllm.parallele.config.json --update-env
+pm2 restart deploy/pm2/ecosystem.vllm.parallele.config.json --update-env
 pm2 stop mineru-vlm-docker-parallel
 # 需要恢复时执行，再保存 PM2 状态
-pm2 start ecosystem.vllm.parallele.config.json
+pm2 start deploy/pm2/ecosystem.vllm.parallele.config.json
 pm2 save
 ```
 
-模型重启或停止前先排空解析任务。PM2 管理前台 Compose，stop/restart 会传递至容器；容器退出窗口 60 秒，PM2 强制退出窗口 70 秒。PM2 的 online 只代表启动命令存活，须另查容器 healthy 或模型 `/health`。API 停机用 `pm2 stop ecosystem.config.json`，worker 用对应模板。运行清理应定位本项目具体任务或工作目录；共享 Redis、PM2 和 GPU 上还有其他服务，不提供全局清空或按端口强杀作为日常维护步骤。结果过期不等于任务目录可以无条件删除。
+模型重启或停止前先排空解析任务。PM2 管理前台 Compose，stop/restart 会传递至容器；容器退出窗口 60 秒，PM2 强制退出窗口 70 秒。PM2 的 online 只代表启动命令存活，须另查容器 healthy 或模型 `/health`。API 停机用 `pm2 stop deploy/pm2/ecosystem.config.json`，worker 用对应模板。运行清理应定位本项目具体任务或工作目录；共享 Redis、PM2 和 GPU 上还有其他服务，不提供全局清空或按端口强杀作为日常维护步骤。结果过期不等于任务目录可以无条件删除。
 
 ## Docker 与多卡
 
-镜像基于 `vllm/vllm-openai:v0.21.0`，安装 MinerU 4.0.0，保留基础镜像配套的 Torch 2.11.0/CUDA 13。Dockerfile 补齐 Pycairo/Cairo 依赖并执行 `pip check`。FastAPI/Starlette/instrumentator 组合已验证；应用 OpenAI SDK 固定在 MinerU `<3` 约束内的 2.54.0。应用升级依据 `uv.lock`，镜像升级需重新验证其完整依赖组合。
+镜像基于 `vllm/vllm-openai:v0.21.0`，安装 MinerU 4.0.2，保留基础镜像配套的 Torch 2.11.0/CUDA 13。Dockerfile 补齐 Pycairo/Cairo 依赖并执行 `pip check`。FastAPI/Starlette/instrumentator 组合已验证；应用 OpenAI SDK 固定在 MinerU `<3` 约束内的 2.54.0。应用升级依据 `uv.lock`，镜像升级需重新验证其完整依赖组合。
 
 模型为 `MinerU2.5-Pro-2605-1.2B`，容器公开名 `mineru4`，最大上下文长度按模型配置设置为 8192。端口默认仅绑定宿主 `127.0.0.1`；跨机器部署需另行配置可达地址和认证。
 
 当前三卡方案恢复旧部署的 **内部数据并行**：GPU 0/1/2 各一份完整模型，`--data-parallel-size 3 --tensor-parallel-size 1`，单个 API 入口由 vLLM 根据副本队列分配推理请求。它不是把同一模型切成三片，也无需配置三个应用 URL。详见 [vLLM 0.21 内部负载均衡](https://docs.vllm.ai/en/v0.21.0/serving/data_parallel_deployment/#internal-load-balancing)。
 
 ```bash
-pm2 start ecosystem.vllm.parallele.config.json
+pm2 start deploy/pm2/ecosystem.vllm.parallele.config.json
 # 排查时查看最终三卡配置（不要只使用基础 YAML）
-docker compose -p mineru-vlm-parallel -f compose.mineru.yaml -f compose.mineru.parallel.yaml config
+docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/compose.mineru.yaml -f deploy/mineru-vllm/compose.mineru.parallel.yaml config
 curl --fail http://127.0.0.1:30000/metrics
 ```
 
@@ -135,13 +135,13 @@ curl --fail http://127.0.0.1:30000/metrics
 主机升级驱动/重启后，如果 `nvidia-smi` 正常但 CUDA 报错，检查容器是否有 `/dev/nvidia-uvm` 和 `/dev/nvidia-uvm-tools`。Docker Snap 的启动期 CDI 扫描可能早于这些节点生成。基础 Compose 显式映射两设备，PM2 启动脚本最多等待约 120 秒；缺失时明确失败，不从应用脚本加载内核模块或重启共享 Docker。确认主机设备存在后，仅重启本项目模型进程。实际 CUDA 验证可用：
 
 ```bash
-docker exec mineru-vlm-parallel-mineru-vlm-1 python -c 'import torch; assert torch.cuda.device_count() == 3; print([torch.ones(1, device=f"cuda:{i}").item() for i in range(3)])'
+docker exec mineru-vlm-parallel-mineru-vlm-1 python3 -c 'import torch; assert torch.cuda.device_count() == 3; print([torch.ones(1, device=f"cuda:{i}").item() for i in range(3)])'
 ```
 
 只有一张卡时，选择单卡模板并将应用 URL 与其端口保持一致，不要同时启动三卡模板：
 
 ```bash
-pm2 start ecosystem.vllm.config.json
+pm2 start deploy/pm2/ecosystem.vllm.config.json
 ```
 
 其他拓扑可使用每卡独立 Compose project 和不同端口。应用的 `MINERU_VLLM_SERVER_URLS` 列表仅进程内轮换（单 URL 优先），没有跨任务负载均衡、熔断或故障重试保证；这与当前 vLLM 内部 DP 不同。多节点容错、吞吐和队列调优见[后续工作](multi_gpu_vllm_scaling_todolist.md)。
@@ -310,12 +310,21 @@ API 与六个 two-stage worker 已重载并完成整本线上验收：同一九�
 
 ## AI 接入文档入口（2026-09-18）
 
-面向调用者的完整指南为 [AI 接入指南](docs/ai-integration.md)，通过 `GET /guides/ai-integration.md` 返回 UTF-8 Markdown；`GET /llms.txt` 提供指向该指南与部署 `/openapi.json` 的小型索引，支持 root_path 前缀。两条新增路由继承现有业务 Bearer 鉴权，不挂载文件目录。FastAPI 自动 `/docs`、`/redoc`、`/openapi.json` 不因此增加鉴权，需要限制时在网关另行配置。
+面向调用者的完整指南为 [AI 接入指南](ai-integration.md)，通过 `GET /guides/ai-integration.md` 返回 UTF-8 Markdown；`GET /llms.txt` 提供指向该指南与部署 `/openapi.json` 的小型索引，支持 root_path 前缀。两条新增路由继承现有业务 Bearer 鉴权，不挂载文件目录。FastAPI 自动 `/docs`、`/redoc`、`/openapi.json` 不因此增加鉴权，需要限制时在网关另行配置。
 
-[调优指南](docs/performance-tuning.md) 正常纳入 Git，作为开发运维文档维护，但没有服务路由，也不出现在 llms.txt 中；没有新增 Git 忽略规则。服务不提供 MCP，远程域名/TLS/网络可达性仍由部署方配置。
+[调优指南](performance-tuning.md) 正常纳入 Git，作为开发运维文档维护，但没有服务路由，也不出现在 llms.txt 中；没有新增 Git 忽略规则。服务不提供 MCP，远程域名/TLS/网络可达性仍由部署方配置。
 
 本次 177 项常规测试通过、20 项模型测试默认跳过；只变更说明与文档只读入口，未重跑模型性能基准。API 已重载，PM2 状态已保存；两个文档入口带凭证 200、无凭证 401，调优文件路径 404，`/health` 与 `/ready` 为 200。轮询示例另验证了成功、普通任务 HTTP 500 失败、two-stage HTTP 200 失败及代理路径前缀。
 
 ## Python 3.13 与 MinerU 4.0.2 维护（实施中）
 
 应用目标为 Python 3.13.15、MinerU 4.0.2 基础包、DocVortex 0.4.12；不安装应用 Torch/vLLM。直接使用的 HTTP/PDF/Celery/上传依赖显式声明，uv.lock 锁定兼容稳定更新。Docker 单独更新 MinerU 至 4.0.2，保留 vLLM 0.21.0 的 Torch/CUDA 组合。此节在部署验收完成前不代表线上版本已经切换。
+
+
+### 统一部署入口与队列隔离
+
+根目录仅保留 README/AGENTS 两份说明，其余位于 docs；所有 PM2 JSON 移入 deploy/pm2。优先使用 `deploy/manage.sh`，其 cjs 配置按自身路径定位仓库，PM2 保存绝对 cwd/解释器/日志路径，避免重启恢复受调用目录影响。可选四实例旧拓扑模板仍在该目录，不能与默认三卡 project 混用。
+
+普通 worker 现在只消费 queue_urgent/queue_normal，不消费 default；default 留给 two-stage merge，避免两个 Celery app 抢到对方未注册任务。手动向普通 app 的 default 投递不属于这些 API 的提交路径，也不会由普通模板消费。API、各 worker 和 .env 的队列配置必须保持一致。
+
+应用、worker、模型的启动/停止/恢复命令见仓库 README。API HTTP 容量与解析容量独立配置，具体压测与边界见调优指南第 13 节。配置变更后应重启对应组件并验证实际进程参数，而不只修改模板。

@@ -5,12 +5,12 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.celery_app worker -l info -Q queue_urgent,queue_normal,default -P threads -c 16 --prefetch-multiplier=1",
+      "args": "-A src.services.celery_app worker -l info -Q queue_urgent,queue_normal -P threads -c 16 --prefetch-multiplier=1",
       "env": {
-        "CELERY_BROKER_URL": "redis://localhost:6379/0",
         "CELERY_TASK_MINERU_QUEUE": "queue_normal",
         "CELERY_TASK_URGENT_QUEUE": "queue_urgent"
-      }
+      },
+      "kill_timeout": 1900000
     }
   ]
 }

@@ -1,91 +1,130 @@
 # TianGong AI Unstructure Serve
 
-基于 FastAPI 的文档解析服务，提供 MinerU 解析、图片视觉增强、Celery 异步任务、MinIO 资产存储及 Markdown→DOCX。当前使用 **MinerU 4.0.0 + Docker vLLM**，Python 应用依赖由 `uv.lock` 固定。
+把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表，也可把 PDF、JSON 和逐页图片保存到 MinIO。支持单文件同步调用和可续查的异步任务。
 
-仓库已迁至 [tiangong-ai/unstructure-serve](https://github.com/tiangong-ai/unstructure-serve)，保留原有历史。组织迁移背景见[迁移公告](https://github.com/tiangong-ai/cli-toolkit/releases/tag/v0.0.63)。
+当前技术栈：**Python 3.13.15 · MinerU 4.0.2 · CPU ONNX · Docker vLLM 0.21.0 · FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
-## 文档入口
+## 先理解需要运行什么
 
-| 文档 | 内容 |
-| --- | --- |
-| [AI 接入指南](docs/ai-integration.md) | 纯解析/图片增强、参数、任务恢复、结果消费、OpenAPI 与远程 AI 接入 |
-| [依赖与 Python 审计](docs/dependency-audit-2026-09-18.md) | extras 含义、逐包升级约束与 Python 隔离验证；开发维护资料 |
-| [调优指南](docs/performance-tuning.md) | 开发运维文档：硬件/模型变化后的测量与调优；不通过服务接口提供 |
-| [部署与回归](mineru_4_upgrade_usage.md) | 安装、配置优先级、Docker/PM2、验证、当前主机与回滚记录 |
-| [普通异步任务](mineru_with_images_task_usage.md) | `/mineru/task`、`/mineru_with_images/task`、普通 worker 与 MinIO |
-| [两段式任务](two_stage_task_usage.md) | `/two_stage/task`、四类 worker、队列与批量脚本 |
-| [多卡后续工作](multi_gpu_vllm_scaling_todolist.md) | 已有能力与尚未实现的调度、容错和压测工作 |
-| [代理说明](AGENTS.md) | 代码入口、兼容合同和修改要求 |
-| [历史记录](docs/history/README.md) | 3.x DOCX 评估、4.0 升级前评估和旧视觉改动 |
+| 程序 | 用途 | 何时需要 |
+| --- | --- | --- |
+| Docker MinerU VLM | 解析模型；默认 GPU 0/1/2，DP=3、单地址 30000 | standard/advanced |
+| Gunicorn API | 上传、提交、查询，默认 7770 | 所有服务调用 |
+| Redis | Celery 队列与结果状态 | 异步任务 |
+| 普通 Celery worker | 纯解析或完整图片增强任务，支持 MinIO | 两个普通 `/task` 接口 |
+| two-stage 六个 worker | 三个解析 worker，加图片调度、识别、合并 | 图片增强批处理 |
+| 独立图片模型服务 | 为提取出来的图片生成描述 | 图片增强；与 MinerU VLM 是两个服务 |
 
-## 开始运行
+不带图片识别的批量任务优先 `/mineru/task`；带图片识别的批量优先 `/two_stage/task`。需要 MinIO 的图片任务使用 `/mineru_with_images/task`。**队列名称和消费者必须配套，不能只启动 API。**
 
-首次部署先按[部署说明](mineru_4_upgrade_usage.md)安装系统工具，准备 `.env`、`.secrets/secrets.toml`、CPU 模型和 Redis。以下命令均在仓库根目录执行：
+## 首次初始化
+
+以下命令在仓库根目录执行。准备 Linux、支持 GPU 的 NVIDIA 驱动/Container Toolkit、Docker Compose 2.24.4+、PM2，以及较新的 uv（建议 0.12.16+）。系统组件安装及单卡方案见[部署说明](docs/mineru_4_upgrade_usage.md#首次安装)。不要修改系统 `/usr/bin/python3`。
 
 ```bash
-uv python install 3.12
+sudo apt install -y libmagic-dev poppler-utils libreoffice pandoc graphicsmagick
+uv python install 3.13.15
 uv sync --locked --group dev
-pm2 start ecosystem.vllm.parallele.config.json
-pm2 start ecosystem.config.json
-pm2 start ecosystem.two_stage.celery.json
+mkdir -p .secrets
+cp -n deploy/secrets.example.toml .secrets/secrets.toml
+cp -n .env.example .env
+```
+
+编辑 `.env` 和 `.secrets/secrets.toml`，至少确认：
+
+- API 鉴权与令牌；即使主要使用环境变量，也保留 TOML 必需段落。
+- MinerU 模型地址，默认 `http://127.0.0.1:30000`；小模型使用 ONNX。
+- Redis broker/backend 与任务目录，API 和 worker 保持一致。
+- 图片增强另填 `VLLM_BASE_URLS`、模型名和凭证。
+- 三卡模板要求 GPU 0/1/2 可用；CPU/显存不足时按[调优指南](docs/performance-tuning.md)降低容量。
+
+准备 CPU 模型：
+
+```bash
+uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
+uv run mineru-kit models verify --tier basic --small-backend onnx
+```
+
+Redis 可以复用已有服务。全新单机没有 Redis 时，按[部署说明](docs/mineru_4_upgrade_usage.md#首次安装)创建；不要重建或清空已有共享 Redis。
+
+启动模型并等待健康检查成功，再启动应用：
+
+```bash
+./deploy/manage.sh start model
+./deploy/manage.sh logs model
+# 首次下载/编译可能较久；以下成功后继续
+curl --fail http://127.0.0.1:30000/health
+./deploy/manage.sh start app
+./deploy/manage.sh start ordinary
 pm2 save
 ```
 
-上述模型模板使用 GPU 0、1、2，在一个 Docker 容器中启动三个 vLLM 副本，通过单一 `30000` 端口内部负载均衡；单卡替代步骤见部署说明。
+`app` 包含 API 和六个 two-stage worker；`ordinary` 启动普通 worker。统一脚本可从任意目录用绝对路径调用。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
 
-API 默认端口为 `7770`，Swagger 位于 `/docs`，机器可读合同为 `/openapi.json`。AI 可读取 `/llms.txt` 和 `/guides/ai-integration.md`；这两个只读路由沿用业务 Bearer 鉴权，调优指南不在服务索引和路由中。普通 `/mineru/task` 和 `/mineru_with_images/task` 还需要单独启动 `ecosystem.celery.json`；仅启动 two-stage worker 不会消费普通任务。
+## 重启后恢复与日常维护
 
-开发时可单独启动 API：
+已配置 PM2 开机服务并保存进程列表时会自动恢复。首次配置时执行 `pm2 startup`，按其提示安装系统服务，然后 `pm2 save`。需要手动恢复保存列表时使用 `pm2 resurrect`，它会恢复该用户保存的全部项目。
+
+只恢复本项目时：
 
 ```bash
-uv run uvicorn src.main:app --host 127.0.0.1 --port 7770
+./deploy/manage.sh start model
+curl --fail http://127.0.0.1:30000/health
+./deploy/manage.sh start app
+./deploy/manage.sh start ordinary
+./deploy/manage.sh status
 ```
 
-## 解析接口
+修改 `.env`/应用代码后，确认 active/reserved 任务已收敛，再执行相应 `restart api`、`restart workers` 或 `restart ordinary`；模型维护使用 `restart model`。停止对应组件用 `stop`。**不要用全局 `pm2 delete all`、Redis flush 或清空共享任务目录。** 更新 Python/依赖时先按[部署与回滚](docs/mineru_4_upgrade_usage.md)保留旧环境并停妥本项目进程，不能直接覆盖正在运行的 `.venv`。
 
-| POST 路径 | 执行方式 | 图片视觉增强 | MinIO |
-| --- | --- | --- | --- |
-| `/mineru` | 同步 | 否 | 支持 |
-| `/mineru_sci` | 同步科研入口 | 否 | 不支持 |
-| `/mineru_with_images` | 同步 | 是 | 支持 |
-| `/mineru/task` | 普通 Celery | 否 | 支持 |
-| `/mineru_with_images/task` | 普通 Celery | 是 | 支持 |
-| `/two_stage/task` | parse/dispatch/vision/merge | 是 | 不支持 |
+`/health` 只确认 API 存活；`/ready` 检查 MinerU 模型端点；还需核对队列消费者、独立图片服务和一次真实 PDF。若驱动升级后 GPU 可见但无法推理，按[Docker 故障排查](docs/mineru_4_upgrade_usage.md#docker-与多卡)检查 UVM 设备。
 
-支持 PDF、PNG/JPEG/WebP/BMP/TIFF，以及[Office 转换清单](src/utils/file_conversion.py)中的格式。Office 主结果先经 LibreOffice 转 PDF；Markdown/TXT 不走解析接口。MinerU 上游新增的所有原生格式并未自动向本服务开放。
+## 如何调用
 
-六个接口均接受 multipart 表单字段 `file` 和 `tier`。`tier` 不传固定使用 `advanced`，与 API 进程环境变量无关；异步任务保留提交时的选择，非法值返回 422。
-
-| tier | 用途 |
-| --- | --- |
-| `flash` | 读取原生文本层，无推理模型；适合电子 PDF 预览，扫描件应选择 OCR 档位 |
-| `basic` | 小模型进行 OCR、公式和表格识别；本部署使用 CPU ONNX |
-| `standard` | 小模型结合 Docker VLM |
-| `advanced` | 默认，使用更多 VLM 推理计算处理困难文档 |
-
-`chunk_type`、`return_txt` 在前五个接口中是 **URL 查询参数**，仅 `/two_stage/task` 把它们定义为表单字段。`chunk_type=true` 保留标题、页眉、页脚及原阅读顺序；视觉增强流程为图片识别块标注 `image`。普通正文或表格不保证有 `type` 字段。`return_txt=true` 返回拼接纯文本，页码从 1 开始。
-
-以下示例要求 shell 中已有实际的 `FASTAPI_BEARER_TOKEN`；Python 会读取 `.env`，curl 不会自动读取：
+启用鉴权时带 Bearer。下面假定 shell 已有 `FASTAPI_BEARER_TOKEN`；curl 不会自动读取 `.env`。
 
 ```bash
 curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=true' \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' \
-  -F 'tier=advanced'
+  -F 'file=@input/p2.pdf' -F 'tier=advanced'
 ```
 
-更多请求示例见 [test.http](test.http)。图片描述使用独立的 `VISION_*` / `VLLM_BASE_URLS` 配置；`tier` 控制 MinerU 拆解，不选择图片描述模型。同步 DOCX 的原生 TXT-only 分支固定使用 `flash`，主 JSON 结果仍使用 Office→PDF 后的所选档位。
+| POST 接口 | 执行方式 | 图片增强 | MinIO |
+| --- | --- | --- | --- |
+| `/mineru` | 同步 | 否 | 是 |
+| `/mineru_sci` | 同步科研入口 | 否 | 否 |
+| `/mineru_with_images` | 同步 | 是 | 是 |
+| `/mineru/task` | 普通队列 | 否 | 是 |
+| `/mineru_with_images/task` | 普通队列 | 是 | 是 |
+| `/two_stage/task` | 分阶段队列 | 是 | 否 |
 
-## 检查与测试
+六个接口均上传 `file`，可选表单 `tier`；`flash` 适合电子 PDF 文本层预览，`basic` 使用 OCR 小模型，`standard/advanced` 调用 Docker VLM。`chunk_type`、`return_txt` 在前五个接口中是 URL 查询参数，仅 two-stage 使用表单。返回页码从 1 开始，`return_txt=true` 附加按阅读顺序拼接的文本。
+
+支持 PDF、PNG/JPEG/WebP/BMP/TIFF 和[Office 转换清单](src/utils/file_conversion.py)，不接受 Markdown/TXT 作为解析输入。异步提交后保存 task_id，持续查询对应 `/task/{task_id}`；查询超时不能视为任务失败并盲目重投。
+
+大量 400–1000 页 PDF 应整本入队，先单文件验证，再逐步增加在途数量；不能把默认并发或抽页回归当作千页容量保证。带图片识别可用[可续跑批量脚本](docs/two_stage_task_usage.md#批量脚本)。完整选择规则和可运行客户端见 [AI 接入指南](docs/ai-integration.md)。
+
+## 文档与开发
+
+| 文档 | 内容 |
+| --- | --- |
+| [部署与回归](docs/mineru_4_upgrade_usage.md) | 配置、模型、队列、恢复、回滚和实测记录 |
+| [AI 接入指南](docs/ai-integration.md) | 端点选择、上传字段、轮询、失败处理、大文档批量 |
+| [普通任务](docs/mineru_with_images_task_usage.md) / [two-stage](docs/two_stage_task_usage.md) | 各自队列、字段及批量示例 |
+| [架构说明](docs/architecture.md) | 模块职责、容量与生命周期、部署目录 |
+| [调优指南](docs/performance-tuning.md) | CPU/GPU/模型变化后的测量和参数选择 |
+| [依赖审计](docs/dependency-audit-2026-09-18.md) | 升级前版本约束与隔离验证 |
+| [HTTP 示例](examples/test.http) / [历史记录](docs/history/README.md) | 调用样例与旧版本证据 |
+
+远程 AI 可读取 `/llms.txt`、`/guides/ai-integration.md` 和 `/openapi.json`；前两个继承业务鉴权。调优、架构和部署文档仅在仓库维护，不经服务公开。Swagger `/docs` 与 OpenAPI 如需私有，由网关额外保护。
 
 ```bash
+# 开发 API（不要与生产争用 7770）
+uv run uvicorn src.main:app --host 127.0.0.1 --port 8770
+# 常规检查
 uv run --group dev black .
 uv run --group dev ruff check src
 uv run --group dev pytest
+# 真实 input PDF 回归；需要可用模型
+MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v
 ```
-
-真实模型测试默认跳过。模型和 `input` 样本准备好后，按[PDF 回归说明](mineru_4_upgrade_usage.md#验证与回归)执行；常规测试通过不代表所有长 PDF 已完整解析。
-
-多文件处理优先使用[两段式批量脚本](two_stage_task_usage.md#批量脚本)，滚动入队并保存任务 ID 以便续跑。它包含图片描述阶段，与同步纯解析接口的功能不同。
-
-`/health` 检查 API 存活，`/ready` 检查 MinerU 模型是否就绪；任务状态由 `/gpu/status`、`/two_stage/queue_status` 提供。日常维护使用指定项目、容器或 PM2 进程的命令，见[运维说明](mineru_4_upgrade_usage.md#启动与维护)。
