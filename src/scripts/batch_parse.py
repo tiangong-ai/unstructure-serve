@@ -55,6 +55,7 @@ class Options:
     connect_timeout: float = 10
     no_auth: bool = False
     dry_run: bool = False
+    resume_only: bool = False
 
 
 def validate(opts):
@@ -124,8 +125,8 @@ def bearer_token():
 
 
 class TaskAPI:
-    def __init__(self, opts, root, batch_id):
-        self.opts, self.root, self.batch_id = opts, root, batch_id
+    def __init__(self, opts):
+        self.opts = opts
         self.url = opts.base_url.rstrip("/") + ENDPOINTS[opts.mode]
         self.form = {"tier": opts.tier, "priority": opts.priority}
         flags = {
@@ -197,8 +198,7 @@ class TaskAPI:
 def run(opts, *, client=None, token=None):
     validate(opts)
     root, paths = discover(opts)
-    # Validate destination configuration even for dry-run, before making a POST.
-    api = TaskAPI(opts, root, "")
+    api = TaskAPI(opts)
     if opts.dry_run:
         return {
             "files": len(paths),
@@ -210,6 +210,8 @@ def run(opts, *, client=None, token=None):
     if token is None:
         token = "" if opts.no_auth else bearer_token()
     output = Path(opts.output_dir).resolve()
+    if opts.resume_only and not (output / ".batch.json").is_file():
+        raise ValueError("--resume-only requires an existing batch output directory")
     output.mkdir(parents=True, exist_ok=True)
     with (output / ".batch.lock").open("a") as lock:
         try:
@@ -222,10 +224,8 @@ def run(opts, *, client=None, token=None):
             manifest = json.loads(manifest_path.read_text())
             if manifest["identity"] != identity:
                 raise ValueError("Input directory or request changed; use a new output directory")
-            api.batch_id = manifest["batch_id"]
         else:
-            api.batch_id = uuid.uuid4().hex
-            _atomic_write(manifest_path, {"identity": identity, "batch_id": api.batch_id})
+            _atomic_write(manifest_path, {"identity": identity, "batch_id": uuid.uuid4().hex})
         with (
             nullcontext(client) if client is not None else httpx.Client(follow_redirects=False)
         ) as session:
@@ -244,6 +244,7 @@ def run(opts, *, client=None, token=None):
                 key_for_path=lambda p: p.relative_to(root).as_posix(),
                 output_format="json",
                 strict=True,
+                resume_only=opts.resume_only,
             )
 
 
@@ -269,6 +270,11 @@ def main(argv=None):
     )
     for name in ("recursive", "no-auth", "dry-run"):
         parser.add_argument("--" + name, action="store_true")
+    parser.add_argument(
+        "--resume-only",
+        action="store_true",
+        help="Collect existing tasks only; do not submit or retry files",
+    )
     for name, default in (("max-in-flight", 2), ("max-attempts", 1)):
         parser.add_argument("--" + name, type=int, default=default)
     for name, default in (

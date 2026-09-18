@@ -54,6 +54,7 @@ def run_batch(
     key_for_path=lambda path: path.stem,
     output_format="pickle",
     strict=False,
+    resume_only=False,
 ):
     """Feed a bounded window, retaining task IDs across restarts and poll errors.
 
@@ -68,6 +69,8 @@ def run_batch(
     waiting = deque()
     active = {}
     summary = {"successes": 0, "failures": 0, "skipped": 0}
+    if resume_only:
+        summary["deferred"] = 0
     stems = set()
     suffix = ".pkl" if output_format == "pickle" else ".json"
     result_dir = output_dir / "results" if strict else output_dir
@@ -119,6 +122,8 @@ def run_batch(
         if state.get("task_id") and state["state"] in {"SUBMITTED", "SUCCESS"}:
             record["deadline"] = time.monotonic() + poll_timeout
             active[state["task_id"]] = record
+        elif resume_only:
+            summary["failures" if state["state"] == "FAILED" else "deferred"] += 1
         else:
             waiting.append(record)
 
@@ -191,7 +196,10 @@ def run_batch(
                 _atomic_write(record["state_path"], record["state"])
                 logging.error("Task %s failed for %s", task_id, record["path"])
                 del active[task_id]
-                waiting.append(record)
+                if resume_only:
+                    summary["failures"] += 1
+                else:
+                    waiting.append(record)
                 finished = True
             elif status not in {"PENDING", "STARTED", "RETRY", "RECEIVED"}:
                 raise RuntimeError(f"Unexpected state {status!r} for task {task_id}")

@@ -30,7 +30,7 @@
 
 ```text
 请安全停止 /home/david/projects/TianGong-AI-Unstructure-Serve 的文档解析设施。
-先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止本项目批量客户端及其他提交来源，保留其输出目录和任务记录；保持 API/worker/模型可用，让已提交任务继续完成并保存结果。
+先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止新增提交，保留各批量客户端的输入、输出目录和任务记录；统一客户端可停止后用原命令加 --resume-only 重新运行，只查询并保存已提交任务，不补交或重试文件。其他提交来源也停止新增请求，保持 API/worker/模型可用直到已有任务结果已收取。
 检查普通和 two-stage 的 ready、active、reserved、scheduled/unacked 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
 任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、stop workers、stop model，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
 Redis 和独立图片模型如为共享或其他项目管理的服务，保持运行；仅在确认专用于本项目且停止不会影响其他服务时，按其已有启动方式停止。不删除容器卷、模型缓存、结果、任务记录或私有配置，不使用 pm2 delete all、Redis flush 或全局进程清理。

@@ -109,6 +109,7 @@ uv run --group dev pytest
 - 批量脚本采用滚动在途窗口（`TWO_STAGE_MAX_IN_FLIGHT`，默认 6），输出目录 `.tasks` 原子保存任务 ID/文件摘要/请求参数，重启续查已有任务。查询故障或本地等待超时不重投；只有服务端确认 FAILURE/REVOKED 才有界重试。提交响应丢失时保留 SUBMITTING 并明确停止，不能假定服务器未接收。单输出目录由文件锁限制一个 CLI 写入进程。脚本认证优先环境/.env，再回退本地 TOML 的 FASTAPI.BEARER_TOKEN，不记录令牌。
 - 新批次优先 `uv run python -m src.scripts.batch_parse`，`--mode parse/images/two-stage` 覆盖全部三个异步 API；缺省 advanced、在途 2、等待 21600 秒、尝试 1 次、chunk_type=true、return_txt=false。上传/查询/连接超时独立可配置，HTTPX 流式 multipart；网络阶段超时不是服务端任务期限。普通模式 query 与 two-stage form 自动区分，普通任务 HTTP 500 的 FAILURE/REVOKED 作为终态处理。详见 [统一批量说明](docs/batch-processing.md)。
 - 新批量输出 `results/<相对路径及扩展名>.json`，`.batch.json` 记录批次身份，`.tasks` 记录输入/请求/结果摘要和任务 ID；完成后仍校验输入，输入或请求改变、已记录文件被筛除时拒绝混用。结果缺失/损坏只重取原 ID；SUBMITTING 不重投；改变等待预算允许续跑，改变工作流或档位需新目录。旧脚本保留 pickle/旧记录合同，不与新脚本混用输出目录。
+- 新 CLI `--resume-only` 只收取已有任务，禁止补交及失败重试，未提交文件计入 deferred；要求已有批次目录。计划停机先停止原客户端再按原命令加此选项收尾，恢复后去掉选项继续提交；它不取消服务端任务，也不绕过 SUBMITTING 核查或输入一致性检查。
 - `MINERU_RUN_BATCH_PDFS=1` 启用 `tests/test_batch_input_pdfs.py`，使用 input/p2 和九页论文整本验证三模式、续跑；常规边界由 `test_batch_parse.py` 覆盖。本客户端更新不改变千页长任务服务端验收边界。
 
 - `MINERU_RUN_API_PDFS=1` 启用 `test_live_api_pdfs.py`，真实访问部署 API、普通 Celery、two-stage 和基于 p2 的 Office 转换。它不会替换为路由替身；维护窗口执行并保存 task_id，HTTP 查询超时不重投。

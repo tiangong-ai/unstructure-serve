@@ -272,3 +272,59 @@ def test_timeout_and_smaller_window_resume_existing_jobs(tmp_path, monkeypatch):
         complete[0] = True
         assert batch.run(opts, client=client, token="")["successes"] == 2
     assert len(posts) == 2
+
+
+def test_resume_only_collects_existing_tasks_without_refill_or_retry(tmp_path, monkeypatch):
+    from src.scripts import batch_runner
+
+    opts = options(tmp_path, max_in_flight=1, poll_timeout=1)
+    (opts.input_dir / "second.pdf").write_bytes(b"second")
+    clock = [0]
+    monkeypatch.setattr(batch_runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(batch_runner.time, "sleep", lambda _: clock.__setitem__(0, clock[0] + 1))
+    methods = []
+    complete = [False]
+
+    def handle(request):
+        methods.append(request.method)
+        return response(request, state="SUCCESS" if complete[0] else "STARTED")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(TimeoutError):
+            batch.run(opts, client=client, token="")
+        complete[0] = True
+        opts.resume_only = True
+        result = batch.run(opts, client=client, token="")
+    assert methods.count("POST") == 1
+    assert result == {"successes": 1, "skipped": 0, "failures": 0, "deferred": 1}
+    assert not (opts.output_dir / "results/second.pdf.json").exists()
+
+
+def test_resume_only_requires_existing_batch(tmp_path):
+    opts = options(tmp_path)
+    opts.resume_only = True
+    with pytest.raises(ValueError, match="existing batch"):
+        batch.run(opts, token="")
+
+
+def test_resume_only_does_not_retry_newly_failed_task(tmp_path, monkeypatch):
+    from src.scripts import batch_runner
+
+    opts = options(tmp_path, poll_timeout=1, max_attempts=3)
+    clock = [0]
+    monkeypatch.setattr(batch_runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(batch_runner.time, "sleep", lambda _: clock.__setitem__(0, clock[0] + 1))
+    methods = []
+    failed = [False]
+
+    def handle(request):
+        methods.append(request.method)
+        return response(request, state="FAILURE" if failed[0] else "STARTED")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(TimeoutError):
+            batch.run(opts, client=client, token="")
+        opts.resume_only = True
+        failed[0] = True
+        assert batch.run(opts, client=client, token="")["failures"] == 1
+    assert methods.count("POST") == 1
