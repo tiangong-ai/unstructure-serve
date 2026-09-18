@@ -62,3 +62,14 @@ MINERU_RUN_API_PDFS=1 MINERU_RUN_BATCH_PDFS=1 \
 可复现的 API 派发对照保留在[调优指南](performance-tuning.md#13-api-与解析容量分离)。其短样本结果不能外推为 Python 升级收益，也不能作为单卡/三卡的完整吞吐对照。
 
 千页样本目前只在固定页抽样用例中覆盖，尚未承诺千页整本并发或 20 万页批量容量。正式处理前按[大文档流程](ai-integration.md#53-多份-4001000-页-pdf-的投递流程)先做整本单文件，再测试 2、3 个在途文件及故障恢复。
+
+## 长文档样本构造
+
+`src/scripts/build_pdf_case.py` 将输入 PDF 按顺序循环复制到指定页数，不修改原件、不拆分服务任务。输出目录必须新建；case.pdf 与 manifest.json 保存文件摘要和逐页来源，仅留在私有 output。
+
+```bash
+uv run python -m src.scripts.build_pdf_case --sources input/p2.pdf input/fese.pdf \
+  --pages 400 --output output/long-cases/mixed-400
+```
+
+复制扩页用于检查页号、重复图片、内存和任务生命周期，不等同于同规模不同内容文档的性能；须同时测试原生长文档。质量断言应从实际源页建立，不能只要求返回 SUCCESS。
