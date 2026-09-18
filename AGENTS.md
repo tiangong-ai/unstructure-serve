@@ -1,6 +1,6 @@
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。当前运行基线是 MinerU 4.0.0 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.12。API 与 worker 仍在应用环境运行，`.venv` 不安装 vLLM。
+仓库为 `tiangong-ai/unstructure-serve`。目标部署基线是 MinerU 4.0.2 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。本轮运行切换状态以部署记录为准。
 
 ## 文档与修改约定
 

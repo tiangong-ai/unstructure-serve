@@ -315,3 +315,7 @@ API 与六个 two-stage worker 已重载并完成整本线上验收：同一九�
 [调优指南](docs/performance-tuning.md) 正常纳入 Git，作为开发运维文档维护，但没有服务路由，也不出现在 llms.txt 中；没有新增 Git 忽略规则。服务不提供 MCP，远程域名/TLS/网络可达性仍由部署方配置。
 
 本次 177 项常规测试通过、20 项模型测试默认跳过；只变更说明与文档只读入口，未重跑模型性能基准。API 已重载，PM2 状态已保存；两个文档入口带凭证 200、无凭证 401，调优文件路径 404，`/health` 与 `/ready` 为 200。轮询示例另验证了成功、普通任务 HTTP 500 失败、two-stage HTTP 200 失败及代理路径前缀。
+
+## Python 3.13 与 MinerU 4.0.2 维护（实施中）
+
+应用目标为 Python 3.13.15、MinerU 4.0.2 基础包、DocVortex 0.4.12；不安装应用 Torch/vLLM。直接使用的 HTTP/PDF/Celery/上传依赖显式声明，uv.lock 锁定兼容稳定更新。Docker 单独更新 MinerU 至 4.0.2，保留 vLLM 0.21.0 的 Torch/CUDA 组合。此节在部署验收完成前不代表线上版本已经切换。
