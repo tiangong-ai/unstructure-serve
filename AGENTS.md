@@ -116,6 +116,7 @@ uv run --group dev pytest
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产，其他测试覆盖阅读顺序、DOCX、视觉和进程生命周期。
 - `src/scripts/benchmark_vision.py` 对私有图片/上下文/正则检查清单进行真实多端点重复测量，保存图像摘要、原始响应、质量检查和 token/耗时；正则通过不等于完整语义正确，仍需人工对图核验。
 - 图片验收须包含低清密集图表；已有真实气象图暴露双端点超时及 stop 结束后的虚构数列，不得以技术 SUCCESS、仅缩短输出或删去错误数字宣称质量通过。失败证据、单图检查点及候选对照保持私有；通用数列拒收规则须有合法表格负例和图像依据，不能盲目上线。
+- 持久流水线已完成真实构造 400 页 advanced 纯解析、全部页码/表格/摘要及 CLI 原 ID 续取验收，并与九页含图论文并行完成；这不能替代带图 400 页的质量验收，实测条件与失败边界统一见调优指南。
 - `src/scripts/build_pdf_case.py` 构造私有扩页 PDF，保存逐页来源与摘要，禁止覆盖；合成重复页与原生长文档分别记录，不把缓存命中收益外推到新内容。
 - 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。按测试中的固定 PDF_NAMES 清单读取 input，新增文件不自动进入回归；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
 - 视觉真实回归：`MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.py -v` 从 input 论文第五页真实解析图像并请求已配置多模态模型，检查图中关键数值及单位；需同时具备 MinerU 与图片模型服务，不用替身。
