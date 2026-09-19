@@ -1,6 +1,6 @@
 services:
   mineru-vlm:
-    image: tiangong/mineru-vlm:4.0.2-vllm0.21.0
+    image: tiangong/mineru-vlm:4.0.3-vllm0.21.0
     build:
       context: .
       args:

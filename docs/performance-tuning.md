@@ -2,7 +2,7 @@
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
 
-适用基线：MinerU 4.0.2、Python 3.13.15、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
+适用基线：MinerU 4.0.3、Python 3.13.15、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
 
 安装与故障恢复见[部署与恢复](mineru_4_upgrade_usage.md)，接口调用见 [AI 接入指南](ai-integration.md)。先按部署文档获得能正确解析的系统，再调性能。
 

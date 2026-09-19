@@ -1,6 +1,6 @@
 # AI 开发者文档拆解接入指南
 
-适用接口：TianGong AI Unstructure Serve / MinerU 4.0.2。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
+适用接口：TianGong AI Unstructure Serve / MinerU 4.0.3。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
 
 **先读取目标部署的 `/openapi.json`，再按本文选择工作流。** 本文解释接口语义、恢复规则和结果处理，实际参数枚举以部署中的 OpenAPI 为准。API `info.version` 当前为 `1.0`，不是 MinerU 版本，也不足以标识全部部署变更；集成时保存 schema 摘要和服务发布记录。
 
