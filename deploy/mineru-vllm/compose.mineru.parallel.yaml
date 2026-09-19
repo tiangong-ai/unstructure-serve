@@ -14,7 +14,7 @@ services:
       - --tensor-parallel-size
       - "1"
       - --gpu-memory-utilization
-      - "${MINERU_DOCKER_GPU_MEMORY:-0.15}"
+      - "${MINERU_DOCKER_GPU_MEMORY:-0.10}"
       - --max-model-len
       - "8192"
       - --max-num-seqs

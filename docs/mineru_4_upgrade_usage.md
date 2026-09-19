@@ -163,7 +163,7 @@ pm2 save
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，vllm/vllm-openai:v0.21.0 |
 | 应用模型镜像 | tiangong/mineru-vlm:4.0.3-vllm0.21.0 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
-| 对外端口 / 每卡显存比例 | 三卡 PM2 env 的 MINERU_DOCKER_PORT=30000、MINERU_DOCKER_GPU_MEMORY=0.15 |
+| 对外端口 / 每卡显存比例 | 三卡 PM2 env 的 MINERU_DOCKER_PORT=30000、MINERU_DOCKER_GPU_MEMORY=0.10；按实际硬件重新验收 |
 | GPU 绑定 / DP / TP | compose.mineru.parallel.yaml 中显式设置，扩卡时一起修改 |
 | 模型卷 / 下载缓存卷 | 默认 mineru-vlm-models / mineru-vlm-cache，可用 MINERU_DOCKER_MODEL_VOLUME / MINERU_DOCKER_CACHE_VOLUME 覆盖 |
 

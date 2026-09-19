@@ -13,7 +13,7 @@
       "kill_timeout": 70000,
       "env": {
         "MINERU_DOCKER_PORT": "30000",
-        "MINERU_DOCKER_GPU_MEMORY": "0.15"
+        "MINERU_DOCKER_GPU_MEMORY": "0.10"
       }
     }
   ]

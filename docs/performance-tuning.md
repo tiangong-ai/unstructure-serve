@@ -67,7 +67,7 @@ docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/comp
 - 每 GPU 显存需求包括权重、KV cache、视觉 encoder、中间激活及运行时保留。`gpu-memory-utilization` 是预算，不是 OS 级隔离，也不保证别的进程随后申请显存时仍有余量。
 - 稳态平均在途数可用 Little 定律 `L ≈ λ × W` 帮助理解；不要用平均值替代 P95 或忽略突发、失败重试和文件长尾。
 
-本机基线：3 个 parse solo worker、ONNX intra/inter=16/1、每 parser VLM 并发 8、处理窗口 64 页；Docker DP/TP=3/1、每 GPU 显存比例 0.15、max-model-len=8192、max-num-seqs=16；two-stage vision threads=32；同步图片每请求窗口 3；统一批量客户端在途 2；API、普通与 two-stage 共享实际解析上限 3。基础 Compose 的单卡替代与三卡模板不能同时管理同一 project。
+本机基线：3 个 parse solo worker、ONNX intra/inter=16/1、每 parser VLM 并发 8、处理窗口 64 页；Docker DP/TP=3/1、每 GPU 显存比例 0.10、max-model-len=8192、max-num-seqs=16；two-stage vision threads=32；同步图片每请求窗口 3；统一批量客户端在途 2；API、普通与 two-stage 共享实际解析上限 3。基础 Compose 的单卡替代与三卡模板不能同时管理同一 project。
 
 ## 4. 用同一套样本建立基准
 
@@ -141,7 +141,7 @@ DP/TP 原理参考 [vLLM 官方部署说明](https://docs.vllm.ai/en/v0.21.0/ser
 
 三卡模板 `deploy/mineru-vllm/compose.mineru.parallel.yaml` 中的 `device_ids`、`--data-parallel-size` 和 `--tensor-parallel-size` 是显式值。卡数变化须一起修改，并检查测试/PM2/文档；不存在只改 `GPU_IDS` 就自动扩卡的能力。基础 `deploy/mineru-vllm/compose.mineru.yaml` 的 `MINERU_DOCKER_GPU_ID` 只用于单卡拓扑。
 
-`MINERU_DOCKER_GPU_MEMORY` 在 Compose/PM2 中设置，当前 0.15 是给共享 GPU 留空间后的本机配置，不是所有机器建议。max-model-len=8192、max-num-seqs=16 在 Compose command 中固定；修改镜像、模型、长度或序列数要重新测峰值和启动所需显存。扩大最大上下文不是免费提速，并发序列数也不是每秒吞吐。
+`MINERU_DOCKER_GPU_MEMORY` 在 Compose/PM2 中设置，当前 0.10 是在共享 GPU 上验证后的本机配置，不是所有机器建议。max-model-len=8192、max-num-seqs=16 在 Compose command 中固定；修改镜像、模型、长度或序列数要重新测峰值和启动所需显存。扩大最大上下文不是免费提速，并发序列数也不是每秒吞吐。
 
 MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换成任意聊天模型。独立图片描述模型才通过 `VISION_MODEL` 等选择通用多模态模型。模型镜像升级仍在 Docker 内完成，不给应用 `.venv` 安装 vLLM。
 
@@ -165,6 +165,8 @@ MinerU 解析模型为 `MinerU2.5-Pro-2605-1.2B`，本地权重配置是稠密 `
 
 当前引擎启动日志已确认 prefix caching、chunked prefill、异步调度及 decoder CUDA graph 启用；重复添加这些开关不构成新的优化。视觉 encoder 的 compile/CUDA graph 需单独检查模型实现，不能把 decoder 的支持等同于 encoder 支持。`max-num-seqs`、批次 token 预算和显存预算只有在排队、KV cache 或 GPU 利用率证明确有瓶颈时再扫描；不要同时改变模型、并行方式和预算后归因。
 
+独立压测容器还须隔离 Compose 项目标签。经 Compose 构建的镜像可能带有 `com.docker.compose.project/service` 标签；`docker run --name` 和换端口不会清除这些标签。使用该镜像手动启动测试时显式覆盖 `--label com.docker.compose.project=mineru-benchmark --label com.docker.compose.service=benchmark`，启动后核对标签。否则测试容器退出可能触发生产 `--abort-on-container-exit`；不要为绕开此问题移除生产的前台生命周期管理。共享 GPU 上也应错开不同模型的启动/显存探测，最终验收在测试容器退出后进行。
+
 上述并行/预测边界依据本地模型配置、实际 vLLM 0.21.0 实现及 [EP 文档](https://docs.vllm.ai/en/v0.21.0/serving/expert_parallel_deployment/)和[推测解码文档](https://docs.vllm.ai/en/v0.21.0/features/speculative_decoding/)。硬件、模型或引擎变化后重新核验，不外推到独立图片模型。
 
 推测解码存在已复现的正确性限制：使用镜像中真实 `MinerULogitsProcessor` 构造重复 token 的最小输入，普通 `apply()` 将该 token 设为负无穷，`RejectionSampler.apply_logits_processors()` 的 draft 验证路径却未执行此自定义处理器。该路径只为 `MinTokensLogitsProcessor` 做了特殊处理；bonus token 路径执行自定义处理器并不能补足 draft 验证。因此当前不启用 n-gram/draft 推测解码，也不移除 MinerU 的重复抑制来换取速度。上游改变后须重跑这一契约与真实 PDF，再测吞吐。
@@ -182,6 +184,16 @@ MinerU 解析模型为 `MinerU2.5-Pro-2605-1.2B`，本地权重配置是稠密 `
 TP2 使用两卡，串行改善不到 1%，并发样本没有改善，未形成值得减少独立副本数的证据，生产保留 DP3/TP1。并发 8 的收益是多个请求重叠执行，不代表单页或单请求快四倍。以上请求已预热并可能命中 prefix/多模态缓存，不代表全新文档吞吐；部分布局/文本响应在配置间存在差异，`stop` 结束及耗时结果不能作为语义等价证明。短测试没有测生产 P95。
 
 同一生产 DP3 模型上，应用 4.0.2 与 4.0.3 各用 `benchmark_mineru` 的三进程、VLM 并发 8、窗口 64、ONNX 16/1，预热后解析 p2、九页论文、46 页报告各两份（114 页），完成时间分别为 71.97 / 71.04 秒，整本页码、资产和 p2 关键表格校验通过。单轮差异约 1.3%，只能作为升级未见明显性能退化的检查，不能作为提速承诺，也不包含 Celery 和独立图片识别。
+
+### 6.5 共享显存预算
+
+当前三卡配置将 `MINERU_DOCKER_GPU_MEMORY` 从 0.15 调整到 0.10，仍使用 BF16、DP3/TP1、16 序列、8192 上下文，不改变解析质量档位或图片分辨率。
+
+同一 4.0.3/0.21.0 镜像的三卡候选，每副本启动日志报告约 505,000 token 的 KV cache 容量，高于 `16 × 8192 = 131072` 的完整序列预算。NVML 对各容器 GPU 进程的快照总占用约为 41.48 GiB（0.15）与 28.08 GiB（0.10）；这是当时已加载容器的实占，不是容器硬性内存上限。不同并发、图捕获、缓存和同卡进程启动顺序会改变该值。
+
+0.10 候选按上一节相同的 114 页混合输入重复三轮，批次耗时 72.61、72.39、71.05 秒，整本页码、资产和关键表格均通过。与约 71–72 秒的原预算测量接近，本轮采用较小预算以节省显存，不宣称增加吞吐；该短样本也不能替代千页含图文档的质量与容量验收。原始证据为私有 `dp3-memory10-*/report.json`、`memory-candidate-ready.json` 及容器日志。
+
+重新调节时先读取每个 engine 的实际 KV token 容量，再观察等待队列、抢占、显存峰值和输出质量。换成更多 KV heads、更长上下文、更多序列或不同精度后重新核算；0.10 对较小显存 GPU 可能根本无法启动，不能当作通用参数。显存比例不是吞吐旋钮，也不是进程实际显存的严格上限。
 
 ## 7. 队列和文件并发
 
