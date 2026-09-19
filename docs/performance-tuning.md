@@ -147,6 +147,42 @@ MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换
 
 扩卡验收必须做实际推理，并验证每个预期 engine 的成功请求计数增长；只看 GPU 显存占用或 `/health` 不够。重启后检查 UVM 映射和容器内 CUDA 运算，避免 `nvidia-smi` 正常但推理失败。
 
+### 6.3 当前 MinerU 模型的适用边界
+
+本机核验为三张 RTX PRO 6000 Blackwell Max-Q（每张约 96 GiB）、96 核/192 线程 CPU 和约 1 TiB RAM。GPU 互联为 NODE/PHB，未发现 NVLink；另一个独立服务每卡占约 57 GiB，调参必须按实际剩余显存规划，不能按整卡显存预算。
+
+MinerU 解析模型为 `MinerU2.5-Pro-2605-1.2B`，本地权重配置是稠密 `Qwen2VLForConditionalGeneration`，24 层、14 个 attention heads、2 个 KV heads、BF16。它与独立图片描述端点的 Qwen3.8 模型不是同一个服务。
+
+| 方案 | 对当前解析模型的判断 |
+| --- | --- |
+| DP=3 / TP=1 | 保留三个完整副本；多个页面/图块请求可并发，单个自回归请求不因此缩短到三分之一 |
+| TP=4 | 本机只有三卡，且 14 个 attention heads 不能被 4 整除；增加第四卡也不能直接使用此配置 |
+| TP=3 / TP=2 | TP=3 同样不满足整除；TP=2 满足头数条件，但需实测通信成本与单请求延迟，也减少可用独立副本数 |
+| EP | 稠密模型没有专家；vLLM 会拒绝启用 EP，不是把 GPU 数写成 4 即可 |
+| 原生 MTP | 权重没有 MTP 层，vLLM 的 Qwen2-VL 实现也不是 MTP 模型；不能用一个开关补出预测头 |
+| n-gram / draft 推测解码 | 与原生 MTP 不同；还须验证 MinerU 的重复抑制 logits processor 在推测路径中正确生效，不能只看 token/s |
+| FP8/NVFP4 | 本模型 BF16 权重约 2.16 GiB，当前不受权重容量限制；没有匹配校准/质量对照时不改精度 |
+
+当前引擎启动日志已确认 prefix caching、chunked prefill、异步调度及 decoder CUDA graph 启用；重复添加这些开关不构成新的优化。视觉 encoder 的 compile/CUDA graph 需单独检查模型实现，不能把 decoder 的支持等同于 encoder 支持。`max-num-seqs`、批次 token 预算和显存预算只有在排队、KV cache 或 GPU 利用率证明确有瓶颈时再扫描；不要同时改变模型、并行方式和预算后归因。
+
+上述并行/预测边界依据本地模型配置、实际 vLLM 0.21.0 实现及 [EP 文档](https://docs.vllm.ai/en/v0.21.0/serving/expert_parallel_deployment/)和[推测解码文档](https://docs.vllm.ai/en/v0.21.0/features/speculative_decoding/)。硬件、模型或引擎变化后重新核验，不外推到独立图片模型。
+
+推测解码存在已复现的正确性限制：使用镜像中真实 `MinerULogitsProcessor` 构造重复 token 的最小输入，普通 `apply()` 将该 token 设为负无穷，`RejectionSampler.apply_logits_processors()` 的 draft 验证路径却未执行此自定义处理器。该路径只为 `MinTokensLogitsProcessor` 做了特殊处理；bonus token 路径执行自定义处理器并不能补足 draft 验证。因此当前不启用 n-gram/draft 推测解码，也不移除 MinerU 的重复抑制来换取速度。上游改变后须重跑这一契约与真实 PDF，再测吞吐。
+
+### 6.4 TP 对照与升级性能边界
+
+私有 `output/mineru403-audit` 保存升级前后锁文件、硬件与模型配置、真实 PDF 结果、原始模型请求及响应。`replay-manifest.json` 固定从实际 PDF SDK 调用中选取的 12 个请求，覆盖页面布局、长表格和短 OCR；`replay_backend.py` 先逐一预热，再按轮换顺序测三轮。测试使用 MinerU 4.0.3 / vLLM 0.21.0 / BF16、8192 上下文、16 并发序列、每卡显存比例 0.10；TP1 使用 GPU 1，TP2 使用通过 PHB 互联的 GPU 1/2。
+
+| 单副本配置 | 12 请求串行完成中位数（范围） | 同组请求并发 8 完成中位数（范围） |
+| --- | --- | --- |
+| TP1 | 8.700 秒（8.692–8.705） | 2.039 秒（2.038–2.053） |
+| TP2 | 8.623 秒（8.606–8.894） | 2.044 秒（2.027–2.146） |
+| TP1 返回复测 | 8.708 秒（8.707–8.864） | 2.042 秒（2.038–2.136） |
+
+TP2 使用两卡，串行改善不到 1%，并发样本没有改善，未形成值得减少独立副本数的证据，生产保留 DP3/TP1。并发 8 的收益是多个请求重叠执行，不代表单页或单请求快四倍。以上请求已预热并可能命中 prefix/多模态缓存，不代表全新文档吞吐；部分布局/文本响应在配置间存在差异，`stop` 结束及耗时结果不能作为语义等价证明。短测试没有测生产 P95。
+
+同一生产 DP3 模型上，应用 4.0.2 与 4.0.3 各用 `benchmark_mineru` 的三进程、VLM 并发 8、窗口 64、ONNX 16/1，预热后解析 p2、九页论文、46 页报告各两份（114 页），完成时间分别为 71.97 / 71.04 秒，整本页码、资产和 p2 关键表格校验通过。单轮差异约 1.3%，只能作为升级未见明显性能退化的检查，不能作为提速承诺，也不包含 Celery 和独立图片识别。
+
 ## 7. 队列和文件并发
 
 先固定模型配置，再扫解析 worker 数，例如 1→2→3；每个都使用独立节点名、solo/1、prefetch=1，保留 urgent/normal 队列顺序。随后扫每 parser 的 `MINERU_MODEL_VLM_MAX_CONCURRENCY`，例如 4→8→16。三进程×8 表示多个独立客户端可能同时产生请求，不等于服务器固定只有 24 个序列，也不包含别的 API 或客户端流量。
