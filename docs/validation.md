@@ -1,3 +1,19 @@
+---
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When developing or validating this repository independently or in a workspace."
+whenToUpdate: "When governance commands, entrypoints or validation requirements change."
+checkPaths:
+  - .docpact/config.yaml
+  - .github/workflows/docpact.yml
+lastReviewedAt: 2026-09-19
+lastReviewedCommit: 80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f
+---
+
 # 开发验证与验收范围
 
 所有命令在仓库根目录执行。本文件供开发运维使用，不经服务文档路由提供。原始 PDF、凭证、任务记录和测试输出保存在私有目录；公共文档只保留验证方法、适用条件和结论边界。
@@ -96,3 +112,16 @@ uv run python -m src.scripts.benchmark_vision \
 ```
 
 `--prompt-file` 替换默认提示词用于对照；采样由 `VLLM_VISION_*` 环境覆盖。输出目录必须新建，保存清单/图像摘要、逐请求原始响应、检查结果、token 和耗时；出现空/截断响应或检查失败时退出非零。每张图遍历每个配置端点及每个 seed，随机化执行顺序；记录分端点耗时与容量等待，不启用故障切换掩盖单端点问题。该工具直接调用图片模型，不测完整 PDF/Celery。人工复核数字归属、流程关系与遗漏，不能只凭正则通过采用更短的提示词。上下文、响应和图像均保持私有。
+
+## 文档治理检查
+
+独立仓库使用固定 docpact 0.1.9；无需父 workspace 或运行服务。
+
+```bash
+cargo install docpact --version 0.1.9 --locked
+docpact route --root . --paths src/routers/job_router.py --format json
+docpact validate-config --root . --strict
+docpact lint --root . --staged --mode enforce
+```
+
+`--staged` 包含新文件。也可用明确 `--base <sha> --head <sha>` 检查提交；实际复核后用 `docpact review mark --root . --path <文档>` 记录证据。配置按 API、处理/持久化、批量客户端、部署/依赖和验证分组复用现有 docs，不引入第二套架构说明。CI 对 PR 的 base/head 运行同样的强制检查，push 只检查配置有效性。治理检查不能替代上面的 Python 或真实服务验收。
