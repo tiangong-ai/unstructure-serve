@@ -1,6 +1,27 @@
+---
+docType: agent-contract
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When developing or validating this repository independently or in a workspace."
+whenToUpdate: "When governance commands, entrypoints or validation requirements change."
+checkPaths:
+  - .docpact/config.yaml
+  - .github/workflows/docpact.yml
+lastReviewedAt: 2026-09-19
+lastReviewedCommit: 80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f
+---
+
 # TianGong AI Unstructure Serve 代理说明
 
 仓库为 `tiangong-ai/unstructure-serve`。当前运行基线是 MinerU 4.0.2 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。验证范围与命令见 [验证指南](docs/validation.md)。
+
+
+## 文档治理
+
+本仓库使用本地 `.docpact/config.yaml`（`layout: repo`），独立 clone 也必须执行；workspace 配置负责跨仓集成，不能代替本仓库检查。使用 docpact 0.1.9（`cargo install docpact --version 0.1.9 --locked`），先按修改路径执行 `docpact route --root . --paths <路径列表> --format json`，阅读命中的说明；修改后执行严格配置检查和显式 diff lint，见 [验证指南](docs/validation.md#文档治理检查)。GitHub PR 使用同一版本强制检查。新文件须显式暂存或传 `--files`，不要用仅检查 tracked diff 的方式遗漏。
 
 ## 文档与修改约定
 

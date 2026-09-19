@@ -158,3 +158,6 @@ download_models_hf.py
 .log
 
 /minio/
+
+# Local documentation reports
+.docpact/runs/

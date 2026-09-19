@@ -1,0 +1,149 @@
+version: 1
+layout: repo
+lastReviewedAt: "2026-09-19"
+lastReviewedCommit: "80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f"
+repo:
+  id: unstructure-serve
+routing:
+  intents:
+    governance:
+      paths: [AGENTS.md, .docpact/**, .github/workflows/docpact.yml]
+    api:
+      paths: [src/main.py, src/routers/**, src/models/**]
+    processing:
+      paths: [src/services/**, src/utils/**]
+    batch:
+      paths: [src/scripts/**]
+    deployment:
+      paths: [deploy/**, src/config/**, .env.example, pyproject.toml, uv.lock]
+coverage:
+  include: [AGENTS.md, README.md, .docpact/**, .github/workflows/docpact.yml, docs/**, src/**, tests/**, deploy/**, .env.example, pyproject.toml, uv.lock, .python-version, .gitignore]
+  exclude: [.docpact/runs/**, src/services/templates/**, "**/__pycache__/**"]
+docInventory:
+  include: [AGENTS.md, README.md, .docpact/config.yaml, docs/**]
+  exclude: [.docpact/runs/**]
+freshness:
+  warn_after_commits: 50
+  warn_after_days: 90
+  critical_after_days: 180
+rules:
+  - id: unstructure-serve-governance
+    scope: repo
+    repo: unstructure-serve
+    triggers:
+      - path: AGENTS.md
+        kind: governance
+      - path: README.md
+        kind: governance
+      - path: .docpact/**
+        kind: governance
+      - path: .github/workflows/docpact.yml
+        kind: governance
+      - path: .gitignore
+        kind: governance
+      - path: docs/**
+        kind: governance
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: .docpact/config.yaml
+        mode: review_or_update
+      - path: docs/validation.md
+        mode: review_or_update
+    reason: Repository entrypoints and CI must describe the same standalone governance commands.
+  - id: unstructure-serve-api
+    scope: repo
+    repo: unstructure-serve
+    triggers:
+      - path: src/main.py
+        kind: api
+      - path: src/routers/**
+        kind: api
+      - path: src/models/**
+        kind: api
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: docs/architecture.md
+        mode: review_or_update
+      - path: docs/ai-integration.md
+        mode: review_or_update
+      - path: docs/mineru_with_images_task_usage.md
+        mode: review_or_update
+      - path: docs/two_stage_task_usage.md
+        mode: review_or_update
+    reason: HTTP and job contracts must match authentication, parameters, state and result documentation.
+  - id: unstructure-serve-processing
+    scope: repo
+    repo: unstructure-serve
+    triggers:
+      - path: src/__init__.py
+        kind: processing
+      - path: src/services/**
+        kind: processing
+      - path: src/utils/**
+        kind: processing
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: docs/architecture.md
+        mode: review_or_update
+      - path: docs/validation.md
+        mode: review_or_update
+      - path: docs/performance-tuning.md
+        mode: review_or_update
+      - path: docs/two_stage_task_usage.md
+        mode: review_or_update
+    reason: Parser, scheduler, durable stages and capacity changes require architecture, recovery and validation review.
+  - id: unstructure-serve-batch
+    scope: repo
+    repo: unstructure-serve
+    triggers:
+      - path: src/scripts/**
+        kind: batch
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: docs/batch-processing.md
+        mode: review_or_update
+      - path: docs/validation.md
+        mode: review_or_update
+    reason: Batch identity, resume and operator tools must retain their documented safety boundaries.
+  - id: unstructure-serve-deployment
+    scope: repo
+    repo: unstructure-serve
+    triggers:
+      - path: deploy/**
+        kind: deployment
+      - path: src/config/**
+        kind: deployment
+      - path: .env.example
+        kind: deployment
+      - path: .python-version
+        kind: deployment
+      - path: pyproject.toml
+        kind: deployment
+      - path: uv.lock
+        kind: deployment
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: docs/mineru_4_upgrade_usage.md
+        mode: review_or_update
+      - path: docs/dependencies.md
+        mode: review_or_update
+      - path: docs/validation.md
+        mode: review_or_update
+    reason: Runtime configuration and dependency changes must match deployment and recovery guidance.
+  - id: unstructure-serve-validation
+    scope: repo
+    repo: unstructure-serve
+    triggers:
+      - path: tests/**
+        kind: validation
+    requiredDocs:
+      - path: AGENTS.md
+        mode: review_or_update
+      - path: docs/validation.md
+        mode: review_or_update
+    reason: Test changes must preserve the distinction between isolated contracts and opt-in live model acceptance.
