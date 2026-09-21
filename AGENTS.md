@@ -10,8 +10,8 @@ whenToUpdate: "When governance commands, entrypoints or validation requirements 
 checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
 ---
 
 # TianGong AI Unstructure Serve 代理说明

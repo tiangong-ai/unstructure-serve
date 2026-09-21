@@ -1,3 +1,8 @@
+---
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
+---
+
 # 部署、维护与恢复
 
 应用使用 Python 3.13.15、MinerU 4.0.5 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。

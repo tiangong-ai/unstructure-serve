@@ -1,3 +1,8 @@
+---
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
+---
+
 # 依赖与 Python 维护
 
 本文件供开发维护使用，不通过服务文档路由提供。应用版本以 `.python-version`、`pyproject.toml` 和 `uv.lock` 为准；模型环境以 `deploy/mineru-vllm/Dockerfile` 及实际镜像为准。

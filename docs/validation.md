@@ -10,8 +10,8 @@ whenToUpdate: "When governance commands, entrypoints or validation requirements 
 checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
 ---
 
 # 开发验证与验收范围
@@ -35,7 +35,7 @@ uv run --group dev pytest
 
 故障回归须保留故障前后的输入摘要、任务 ID/generation、parse manifest 和已完成图片的 SHA256/mtime。实测九页论文在指定单图请求前注入一次失败，恢复后原解析及三张已完成图片未改变，六张最终图片各实际调用模型一次。另对真实 SDK 子进程定点 SIGKILL，检查快速失败、同 ID 恢复及任务进程组收尾。注入故障与上游实际超时分开报告，不全局停止共享模型或清空队列。
 
-持久流水线更新后，生产 API 与七个 worker 已完成真实 p2 的三类幂等任务、轻量下载及旧响应合同，以及同步 p2、普通任务、含图论文和 Office 转换验收；之后生产队列及 active/reserved/scheduled 为空。三卡 Docker 模型与独立 embedding 进程未重启，PM2 已保存。该验收不代表低清图片语义或长期满载测试通过，具体质量与长文档边界见调优指南。
+部署更新后，用实际 API 与七个 worker 验证 p2 的三类幂等任务、轻量下载和旧响应合同，以及同步解析、含图论文和 Office 转换。随后确认队列及 active/reserved/scheduled 收敛，核对本项目进程、共享服务状态并保存 PM2。该验收不代表低清图片语义或长期满载测试通过，具体质量与长文档边界见调优指南。
 
 Black 排除任意层级的 `.venv` 和根目录的 input/output/pdfs/pickle，避免格式化模型环境或结果。Ruff 规则以 `pyproject.toml` 为准。
 
@@ -63,7 +63,7 @@ MINERU_RUN_API_PDFS=1 MINERU_RUN_BATCH_PDFS=1 \
 
 `--basetemp` 会清理指定目录，每轮使用新目录。按测试代码配置 `MINERU_TEST_API_URL`、`MINERU_TEST_INPUT_DIR` 或 `MINERU_TEST_VLM_URL`；不同测试支持的覆盖变量不同，不把其中一个变量当作所有测试的全局设置。输入回归的文件清单由测试中的 `PDF_NAMES` 固定，往 input 添加文件不会自动扩大回归范围。
 
-任务成功后检查源页号、首尾有效内容、关键表格/数字、checkbox、阅读顺序与图片文件。空白页可能没有业务块，不能只看最大 page_number 判断整本完整性。
+任务成功后检查源页号、首尾有效内容、关键表格/数字、checkbox、阅读顺序与图片文件。真实 PDF 回归须按 SDK 保存后的图片引用加载完整像素，验证可解码且尺寸非零；图片命名和分辨率变更还需检查视觉筛选及图中数字，不能只检查非空文件。空白页可能没有业务块，不能只看最大 page_number 判断整本完整性。
 
 ## 运行设施验收
 
