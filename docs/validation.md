@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 46e09a0f73d21bd4228d0809fea1c771bd48ba1e
+lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
 ---
 
 # 开发验证与验收范围
@@ -30,6 +30,8 @@ uv run --group dev pytest
 `uv sync --check` 可能仅因 README/项目元数据变化而提示重建本项目的 editable 安装；先检查具体变更项，不把它直接当作第三方库漂移。只检查代码、且现有依赖已满足时，可用 `uv run --no-sync --group dev ...` 运行检查，避免同步运行环境；依赖变更仍须在隔离环境验证。
 
 常规测试用替身隔离外部依赖，覆盖路由参数、SDK 适配、资产完整性、阅读顺序、视觉失败、上传清理、共享解析槽和批量恢复；不代表模型解析质量或生产容量已验证。
+
+`test_vision_capacity_http.py` 使用本地真实 TCP/HTTP 连接模拟 TLS 握手不响应和 HTTP 503，验证快速切换、跨调用冷却及恢复后重新分配；正常响应刻意晚于连接预算，确保不会误用短预算截断推理。该测试的响应是固定样本，模型质量仍须使用下面的真实 PDF 验收。
 
 持久任务的针对性测试包括 `test_durable_jobs.py`、`test_durable_pipeline.py`、`test_job_api.py` 和 `test_manage_jobs.py`：覆盖发布结果不明、元数据落盘失败、旧代消息、逐阶段复用、文件校验、下载租约与保留期清理。共享视觉容量包含真实 fork/spawn/进程死亡，以及本地 HTTP fixture；只有显式模型回归才算实际推理。
 

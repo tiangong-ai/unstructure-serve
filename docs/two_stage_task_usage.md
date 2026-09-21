@@ -1,3 +1,21 @@
+---
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When submitting, operating or recovering two-stage document tasks."
+whenToUpdate: "When two-stage parameters, queue behavior, vision routing or recovery changes."
+checkPaths:
+  - src/services/two_stage_pipeline.py
+  - src/services/durable_pipeline.py
+  - src/services/vision_service_vllm.py
+  - src/routers/two_stage_router.py
+---
+
 # 两段式 MinerU + 视觉任务
 
 > 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
@@ -53,6 +71,8 @@ pm2 status
 ```
 
 图片任务默认提示词优先提取图中事实，避免重复 caption；固定前缀清理不代替内容校验。空响应或截断的 OpenAI-compatible 输出会导致失败。采样和实测见[图片服务调优](performance-tuning.md#8-独立多模态图片服务调优)。`VISION_BATCH_SIZE` 只影响同步/普通图片任务，two-stage 受 vision worker 的 `-c 32`、每波派发数及本机共享端点槽位共同约束。
+
+配置多个 vLLM 图片端点时，连接失败、超时或临时服务错误会自动尝试其他端点；故障端点冷却后自动重新参与轮换，无需客户端重新提交任务。全部端点失败仍使任务失败并保留检查点；400 等请求错误直接失败。该行为也适用于同步及普通图片任务，与 MinerU 文档解析端点分开管理。
 
 六个 worker（parse 三个，其余阶段各一个）均需在线；模板的 `-Q` 顺序为 urgent 在前。三个 parse 使用不同 Celery 节点名，共同消费同一队列，每个最多执行一份文档，prefetch=1。每个解析进程的 VLM 请求并发为 8，由单地址后端分配至三张卡；worker 与 GPU 没有一一绑定关系。parse 池不能使用 daemonic prefork，因为 SDK 还需要创建渲染子进程。dispatch 使用 `self.replace` 触发 chord，不在任务内同步等待 `result.get()`；Redis result backend 必须可用。
 

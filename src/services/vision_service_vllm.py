@@ -2,6 +2,7 @@ import os
 import math
 from typing import Any, Dict, List, Optional
 
+import httpx
 from loguru import logger
 from openai import APIConnectionError, APIStatusError
 
@@ -128,10 +129,18 @@ _RESOLVED_BASE_URLS = _resolve_base_urls()
 
 def _client_budgets() -> dict:
     timeout = float(os.getenv("VLLM_VISION_TIMEOUT_SECONDS", "180"))
+    connect_timeout = float(os.getenv("VLLM_VISION_CONNECT_TIMEOUT_SECONDS", "5"))
     retries = int(os.getenv("VLLM_VISION_MAX_RETRIES", "0"))
-    if not 0 < timeout < float("inf") or retries < 0:
-        raise ValueError("Vision timeout must be finite and positive; retries must be nonnegative")
-    return {"timeout": timeout, "max_retries": retries}
+    if not all(math.isfinite(value) and value > 0 for value in (timeout, connect_timeout)):
+        raise ValueError("Vision network and connection timeouts must be finite and positive")
+    if retries < 0:
+        raise ValueError("Vision retries must be nonnegative")
+    # A dead TCP/TLS endpoint must not consume the much larger generation budget.
+    # Keep existing short overall settings at least as strict as before.
+    return {
+        "timeout": httpx.Timeout(timeout, connect=min(timeout, connect_timeout)),
+        "max_retries": retries,
+    }
 
 
 _CLIENT_POOL = OpenAICompatibleClientPool(

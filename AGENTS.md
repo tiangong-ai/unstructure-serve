@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 46e09a0f73d21bd4228d0809fea1c771bd48ba1e
+lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -81,7 +81,7 @@ lastReviewedCommit: 46e09a0f73d21bd4228d0809fea1c771bd48ba1e
 - OpenAI/vLLM 复用客户端池。vLLM 通过 vision_capacity.py 在本机共享端点轮换和槽位，缺省每端点 16、等待 180 秒、临时故障冷却 30 秒。所有调用方共用 VLLM_VISION_SLOT_DIR；槽数变更须排空并统一新目录，不能删除在用锁。等价 URL 去重，不同 DNS 别名指向同一服务需配置方确认。连接/超时/408/429/5xx 可冷却切换，400 等请求错误直接失败；请求只编码一次。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
 - 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.8 Flash Next 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
 - 默认 OpenAI-compatible 提示词放在 system，文档上下文作为 user 数据；自定义 prompt 保持优先。图表只提取印出的值，不根据柱高/坐标估算；流程图保留中间步骤。增强时以独立视觉结果替换 SDK 生成的图示正文，仍保留印刷标题/脚注；纯解析和被筛除图片保持 SDK 内容。
-- vLLM 视觉客户端默认单次读写阶段超时 180 秒、SDK 重试 0 次，分别由 VLLM_VISION_TIMEOUT_SECONDS/MAX_RETRIES 控制，故障继续尝试下一端点；不是整份任务的墙钟截止时间。
+- vLLM 视觉客户端默认连接/TLS 预算 5 秒（VLLM_VISION_CONNECT_TIMEOUT_SECONDS），单次读写阶段预算 180 秒（VLLM_VISION_TIMEOUT_SECONDS），SDK 重试 0 次（VLLM_VISION_MAX_RETRIES）；若读写预算更短，连接也采用该较短值。连接失败、超时或临时服务错误切换其他端点，故障端点共享冷却后自动重试参与轮换；这些不是整份任务的墙钟截止时间，不用缩短推理预算代替连接故障切换。
 - 默认图片提示词保留图中数字、单位、标签和关系，合并同类数据，避免重复 caption、无关引言和推断数值；不压缩图片或按字数硬截断。清理仅处理开头完整 thinking 段和确定的中英文套话，保留正文及不确定性。原生 DOCX 严格 OCR 不启用套话、Page/ChunkType 或 Image Description 标记清理，避免误删原图文字。自定义 prompt 继续优先。
 - two-stage 保留相对面积、分辨率、体积和长宽比筛选，不设每页数量截断；印刷图题独立于 SDK 生成正文，有图题的稀疏图不能仅因压缩字节少而丢弃。所有图片增强入口仅在单文档内复用相同图片字节及相同语义上下文的请求，重复位置仍逐一回填。默认 key 只忽略生成的页位置标记，自定义 prompt/严格 OCR 保留位置；不同标题/上下文不得合并。缺资产或缺视觉结果必须失败；合并保持原位；清理视觉输出中的 Page/ChunkType 标记和固定说明前缀。
 

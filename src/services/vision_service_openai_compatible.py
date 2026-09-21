@@ -3,6 +3,7 @@ import mimetypes
 from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence
 
+import httpx
 from openai import OpenAI
 
 from src.services.vision_prompts import build_vision_messages
@@ -22,7 +23,7 @@ class OpenAICompatibleClientPool:
         api_key: str,
         base_urls: Optional[Sequence[str]] = None,
         fallback_api_key: Optional[str] = None,
-        timeout: float = 600,
+        timeout: float | httpx.Timeout = 600,
         max_retries: int = 2,
     ):
         resolved_urls = list(
@@ -42,7 +43,7 @@ class OpenAICompatibleClientPool:
 
     @staticmethod
     def _build_clients(
-        api_key: str, base_urls: List[str], timeout: float, max_retries: int
+        api_key: str, base_urls: List[str], timeout: float | httpx.Timeout, max_retries: int
     ) -> List[OpenAI]:
         clients: List[OpenAI] = []
         if base_urls:

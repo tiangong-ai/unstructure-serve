@@ -1,3 +1,21 @@
+---
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When measuring or tuning parser and vision performance or capacity."
+whenToUpdate: "When performance controls, measurements or acceptance limits change."
+checkPaths:
+  - src/services/**
+  - src/scripts/benchmark_*.py
+  - deploy/**
+  - .env.example
+---
+
 # MinerU 服务调优指南（仓库开发文档）
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
@@ -336,7 +354,7 @@ Gunicorn 使用 uvloop/httptools 的 UvicornWorker；配置集中 `deploy/gunico
 
 使用两个已配置 Qwen3.5-397B-A17B-GPTQ-Int4 端点，以相同关键数字/单位、流程节点与禁止估值检查对照。八张英文论文图的旧输出 16 次中 9 次通过；新提示词及 temperature=0.2、presence_penalty=0 的扩展回归包含八张英文图和六张中文流程图，每图固定分配到一个端点、重复三轮共 42 次通过（并发 3，86.5 秒），该对照未覆盖每图在两个端点的表现。同一八张英文图的平均输出从约 311 token/次降到约 191 token/次（约减少 39%）；不同轮数按每请求归一化，不与中文密集图混算。正则只能覆盖已定义问题，不能证明所有数字归属或图中关系正确，更换模型/版本后须重新逐图检查。没有采用更激进的输出截断或全句删除；清理仍限于明确的 thinking/内部标记/固定套话。
 
-vLLM 视觉客户端默认 `VLLM_VISION_TIMEOUT_SECONDS=180`、`VLLM_VISION_MAX_RETRIES=0`，故障后尝试下一端点，避免 SDK 默认多次长等待；这些是网络阶段预算，不是整份任务的墙钟上限。`VISION_LOG_PROMPTS=false` 默认不构造或记录完整上下文，排查私有数据问题时才显式打开。
+vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISION_TIMEOUT_SECONDS=180`、`VLLM_VISION_MAX_RETRIES=0`。连接/TLS 使用独立的短预算，读写和连接池等待仍使用后者；若后者小于 5 秒，连接预算也随之缩短。连接失败、超时及临时服务错误后尝试其他端点，故障端点共享冷却 30 秒后重新参与轮换；无需重启应用或删除该地址。全部端点失败仍使任务失败，400 等请求错误直接报告。这些是网络阶段预算，不是整份任务的墙钟上限；不能为加快连接故障切换而压缩正常推理时间。`VISION_LOG_PROMPTS=false` 默认不构造或记录完整上下文，排查私有数据问题时才显式打开。
 
 在同一份 1000 页实际解析结果（18452 个块）上，带 cProfile 的业务合并及 TXT 拼接耗时约 0.26 秒，生成约 253 万字符；构造图片任务约 0.31 秒。当前这部分远小于模型推理耗时，因此保持顺序遍历和列表 join，没有为了微小 CPU 收益引入额外进程或改变阅读顺序。该测量不包含磁盘读取、网络传输或视觉请求。
 

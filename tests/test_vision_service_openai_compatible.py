@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 import src.services.vision_service_openai_compatible as openai_compatible
@@ -58,12 +59,14 @@ def test_vllm_client_timeout_and_sdk_retry_budget_reach_each_endpoint(monkeypatc
         openai_compatible, "OpenAI", lambda **kwargs: kwargs_seen.append(kwargs) or object()
     )
     monkeypatch.setenv("VLLM_VISION_TIMEOUT_SECONDS", "125")
+    monkeypatch.setenv("VLLM_VISION_CONNECT_TIMEOUT_SECONDS", "3")
     monkeypatch.setenv("VLLM_VISION_MAX_RETRIES", "0")
     pool = openai_compatible.OpenAICompatibleClientPool(
         "test-key", ["http://one/v1", "http://two/v1"], **vision_vllm._client_budgets()
     )
     assert len(pool.get_clients_in_priority_order()) == 2
-    assert all(k["timeout"] == 125 and k["max_retries"] == 0 for k in kwargs_seen)
+    assert all(k["timeout"] == httpx.Timeout(125, connect=3) for k in kwargs_seen)
+    assert all(k["max_retries"] == 0 for k in kwargs_seen)
 
 
 def test_duplicate_endpoint_spellings_do_not_create_extra_clients(monkeypatch):
@@ -77,9 +80,12 @@ def test_duplicate_endpoint_spellings_do_not_create_extra_clients(monkeypatch):
     assert len(kwargs_seen) == len(pool.get_endpoint_clients()) == 1
 
 
+@pytest.mark.parametrize(
+    "name", ["VLLM_VISION_TIMEOUT_SECONDS", "VLLM_VISION_CONNECT_TIMEOUT_SECONDS"]
+)
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
-def test_vision_timeout_must_be_finite_and_positive(monkeypatch, value):
-    monkeypatch.setenv("VLLM_VISION_TIMEOUT_SECONDS", value)
+def test_vision_timeout_must_be_finite_and_positive(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
     with pytest.raises(ValueError):
         vision_vllm._client_budgets()
 
@@ -251,3 +257,13 @@ def test_vllm_vision_raises_when_all_clients_fail(monkeypatch):
 
     with pytest.raises(RuntimeError, match="All configured vLLM vision endpoints failed"):
         vision_vllm.vision_completion_vllm("fake.jpg")
+
+
+@pytest.mark.parametrize("network_timeout,expected_connect", [(180, 5), (0.5, 0.5)])
+def test_connect_default_does_not_extend_a_short_network_budget(
+    monkeypatch, network_timeout, expected_connect
+):
+    monkeypatch.delenv("VLLM_VISION_CONNECT_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("VLLM_VISION_TIMEOUT_SECONDS", str(network_timeout))
+    budget = vision_vllm._client_budgets()["timeout"]
+    assert budget == httpx.Timeout(network_timeout, connect=expected_connect)
