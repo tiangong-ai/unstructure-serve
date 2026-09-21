@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 7c4df1562e6a96f9d3d4408db578635cd306c611
+lastReviewedCommit: 46e09a0f73d21bd4228d0809fea1c771bd48ba1e
 ---
 
 # 开发验证与验收范围
