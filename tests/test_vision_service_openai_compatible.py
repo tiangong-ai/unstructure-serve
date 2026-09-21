@@ -8,7 +8,11 @@ import src.services.vision_service_vllm as vision_vllm
 @pytest.fixture(autouse=True)
 def isolate_shared_vision_state(tmp_path, monkeypatch):
     monkeypatch.setenv("VLLM_VISION_SLOT_DIR", str(tmp_path / "slots"))
-    monkeypatch.setattr(vision_vllm, "prepare_vision_request", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        vision_vllm,
+        "prepare_vision_request",
+        lambda *args, **kwargs: {"model": kwargs.get("model") or kwargs["default_model"]},
+    )
 
 
 class _DummyMessage:

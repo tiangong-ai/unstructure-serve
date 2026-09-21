@@ -100,9 +100,11 @@ def main():
                 call_started = time.perf_counter()
                 response = client.chat.completions.create(**request)
                 row["inference_seconds"] = time.perf_counter() - call_started
-            if not response.choices or response.choices[0].finish_reason != "stop":
-                raise RuntimeError("Incomplete vision response")
-            raw = response.choices[0].message.content
+                if not response.choices or response.choices[0].finish_reason != "stop":
+                    raise RuntimeError("Incomplete vision response")
+                raw = response.choices[0].message.content
+                if not isinstance(raw, str) or not raw.strip():
+                    raise RuntimeError("Empty vision response")
             text = sanitize_vision_text(raw)
             row.update(
                 raw=raw, text=text, usage=response.usage.model_dump() if response.usage else {}

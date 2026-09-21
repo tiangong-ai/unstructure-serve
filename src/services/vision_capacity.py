@@ -60,18 +60,33 @@ def endpoint_key(url: str) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def model_key(model: str) -> str:
+    return hashlib.sha256(model.encode()).hexdigest()
+
+
 class EndpointScheduler:
-    def __init__(self, directory, *, slots=16, wait_seconds=180, cooldown_seconds=30):
+    def __init__(
+        self,
+        directory,
+        *,
+        slots=16,
+        wait_seconds=180,
+        cooldown_seconds=30,
+        health_ttl_seconds=30,
+    ):
         if isinstance(slots, bool) or not isinstance(slots, int) or slots < 1:
             raise ValueError("Vision endpoint slots must be a positive integer")
         if not math.isfinite(wait_seconds) or wait_seconds <= 0:
             raise ValueError("Vision capacity wait must be finite and positive")
         if not math.isfinite(cooldown_seconds) or cooldown_seconds < 0:
             raise ValueError("Vision cooldown must be finite and nonnegative")
+        if not math.isfinite(health_ttl_seconds) or health_ttl_seconds <= 0:
+            raise ValueError("Vision health TTL must be finite and positive")
         self.directory = Path(directory)
         self.slots = slots
         self.wait_seconds = wait_seconds
         self.cooldown_seconds = cooldown_seconds
+        self.health_ttl_seconds = health_ttl_seconds
 
     @classmethod
     def from_env(cls):
@@ -81,6 +96,7 @@ class EndpointScheduler:
             slots=int(os.getenv("VLLM_VISION_ENDPOINT_SLOTS", "16")),
             wait_seconds=float(os.getenv("VLLM_VISION_SLOT_WAIT_SECONDS", "180")),
             cooldown_seconds=float(os.getenv("VLLM_VISION_COOLDOWN_SECONDS", "30")),
+            health_ttl_seconds=float(os.getenv("VLLM_VISION_HEALTH_TTL_SECONDS", "30")),
         )
 
     @contextmanager
@@ -162,12 +178,83 @@ class EndpointScheduler:
             raise
 
     @contextmanager
-    def acquire(self, keys):
+    def monitor_lease(self):
+        """One active monitor per host directory; process death releases ownership."""
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = self._try_lock("monitor.lock")
+        try:
+            yield fd is not None
+        finally:
+            if fd is not None:
+                _close(fd)
+
+    def record_health(self, key, *, healthy, models, reason=""):
+        self._validate_key(key)
+        with self._state() as state:
+            endpoint = state["endpoints"].setdefault(key, {"slots": self.slots})
+            old = endpoint.get("health", {})
+            catalog = sorted({model_key(model) for model in models})
+            endpoint["health"] = {
+                "checked_at": time.time(),
+                "healthy": healthy,
+                "models": catalog,
+                "reason": reason,
+            }
+            if not healthy:
+                self._fail(endpoint)
+            elif old.get("healthy") and old.get("models") != catalog:
+                # A changed catalog may indicate reloaded weights/model servers.
+                # Require an inference trial, without adding a network cooldown.
+                endpoint.setdefault("until", 0)
+                endpoint["generation"] = endpoint.get("generation", 0) + 1
+            return old.get("healthy") != healthy or old.get("reason") != reason
+
+    def _fresh_health(self, endpoint):
+        health = endpoint.get("health")
+        if health and 0 <= time.time() - health["checked_at"] < self.health_ttl_seconds:
+            return health
+        return None
+
+    def _health_blocks(self, endpoint, model):
+        health = self._fresh_health(endpoint)
+        return bool(
+            health
+            and (not health["healthy"] or (model is not None and model not in health["models"]))
+        )
+
+    def health_snapshot(self, keys):
+        """Local operator view; no URLs, credentials or model names."""
+        with self._state() as state:
+            rows = []
+            for key in keys:
+                self._validate_key(key)
+                endpoint = state["endpoints"].get(key, {})
+                health = endpoint.get("health", {})
+                rows.append(
+                    {
+                        "endpoint_id": key,
+                        "fresh": self._fresh_health(endpoint) is not None,
+                        "healthy": health.get("healthy"),
+                        "checked_at": health.get("checked_at"),
+                        "reason": health.get("reason"),
+                        "model_count": len(health.get("models", [])),
+                        "circuit": (
+                            "open"
+                            if endpoint.get("until", 0) > time.time()
+                            else "recovery" if "until" in endpoint else "closed"
+                        ),
+                    }
+                )
+            return rows
+
+    @contextmanager
+    def acquire(self, keys, *, model=None):
         keys = sorted(set(keys))
         if not keys:
             raise ValueError("No eligible vision endpoints")
         for key in keys:
             self._validate_key(key)
+        model = model_key(model) if model is not None else None
         group = hashlib.sha256("".join(keys).encode()).hexdigest()
         deadline = time.monotonic() + self.wait_seconds
         held = None
@@ -186,10 +273,14 @@ class EndpointScheduler:
                                 "fresh shared directory to change capacity"
                             )
                     start = state["next"].get(group, 0) % len(keys)
+                    if all(self._health_blocks(state["endpoints"][key], model) for key in keys):
+                        raise RuntimeError("No vision endpoint passes fresh health/model checks")
                     for offset in range(len(keys)):
                         index = (start + offset) % len(keys)
                         key = keys[index]
                         endpoint = state["endpoints"][key]
+                        if self._health_blocks(endpoint, model):
+                            continue
                         if endpoint.get("until", 0) > time.time():
                             continue
                         trial = None

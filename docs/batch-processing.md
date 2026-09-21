@@ -1,3 +1,18 @@
+---
+docType: guide
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When submitting or resuming document batches."
+whenToUpdate: "When the documented entrypoints or operational contracts change."
+checkPaths:
+  - src/scripts/**
+lastReviewedAt: 2026-09-21
+lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+---
+
 # 统一批量解析客户端
 
 入口：`uv run python -m src.scripts.batch_parse`。三个异步 API 共用一个滚动提交、轮询和结果保存实现；质量缺省 `advanced`，可选 `flash/basic/standard`。客户端只需要能访问 API，不需要连接服务端 Redis 或 GPU。

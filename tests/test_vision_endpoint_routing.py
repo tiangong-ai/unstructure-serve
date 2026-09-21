@@ -136,3 +136,27 @@ def test_connection_failure_cools_endpoint_for_next_call(monkeypatch, failure):
     assert vllm.vision_completion_vllm("fake.jpg") == "52%"
     assert vllm.vision_completion_vllm("fake.jpg") == "52%"
     assert calls == ["flaky", "healthy", "healthy"]
+
+
+@pytest.mark.parametrize("fault", ["empty", "truncated"])
+def test_unusable_half_open_response_does_not_restore_parallel_traffic(monkeypatch, fault):
+    from src.services.vision_capacity import EndpointScheduler
+
+    monkeypatch.setattr(compatible, "encode_image", lambda _: "abc")
+    monkeypatch.setenv("VLLM_VISION_COOLDOWN_SECONDS", "0")
+
+    def unusable(**payload):
+        response = _response()
+        if fault == "empty":
+            response.choices[0].message.content = ""
+        else:
+            response.choices[0].finish_reason = "length"
+        return response
+
+    pool = _pool(monkeypatch, [unusable])
+    key = pool.get_endpoint_clients()[0][0]
+    scheduler = EndpointScheduler.from_env()
+    scheduler.mark_failed(key)
+    with pytest.raises(RuntimeError, match="All configured"):
+        vllm.vision_completion_vllm("fixture.jpg")
+    assert scheduler.health_snapshot([key])[0]["circuit"] == "recovery"

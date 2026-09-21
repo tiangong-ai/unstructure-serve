@@ -192,7 +192,7 @@ def vision_completion_vllm(
     )
     total = len(clients)
     while clients:
-        with scheduler.acquire(clients) as key:
+        with scheduler.acquire(clients, model=prepared["model"]) as key:
             client = clients.pop(key)
             attempt = total - len(clients)
             try:

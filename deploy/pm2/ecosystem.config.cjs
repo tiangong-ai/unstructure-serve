@@ -6,6 +6,7 @@ const files = [
   'ecosystem.config.json', 'ecosystem.two_stage.celery.json',
   'ecosystem.celery.json', 'ecosystem.vllm.parallele.config.json',
   'ecosystem.two_stage.flower.json', 'ecosystem.celery.flower.json',
+  'ecosystem.vision_health.json',
 ];
 module.exports = { apps: files.flatMap(file => {
   const apps = JSON.parse(fs.readFileSync(path.join(__dirname, file), 'utf8')).apps;

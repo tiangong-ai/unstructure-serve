@@ -201,6 +201,37 @@ def test_pm2_config_has_absolute_paths_from_any_directory(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node required by PM2 launcher")
+@pytest.mark.parametrize("group", ["app", "vision-health"])
+def test_manage_starts_shared_vision_monitor(tmp_path, group):
+    fake = tmp_path / "pm2"
+    fake.write_text("""#!/usr/bin/python3
+import json,os,sys
+if sys.argv[1]=='jlist': print('[]')
+else:
+ with open(os.environ['TEST_PM2_CAPTURE'],'w') as f: json.dump(sys.argv[1:],f)
+""")
+    fake.chmod(0o755)
+    capture = tmp_path / "calls.json"
+    subprocess.run(
+        ["bash", str(ROOT / "deploy/manage.sh"), "start", group],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f'{tmp_path}:{os.environ["PATH"]}',
+            "TEST_PM2_CAPTURE": str(capture),
+        },
+        check=True,
+        capture_output=True,
+    )
+    names = json.loads(capture.read_text())[-1].split(",")
+    assert "vision-health-monitor" in names
+    assert "mineru-vlm-docker-parallel" not in names
+    app = json.loads((ROOT / "deploy/pm2/ecosystem.vision_health.json").read_text())["apps"][0]
+    assert app["args"] == "-m src.services.vision_health"
+    assert "VLLM_BASE_URLS" not in app.get("env", {})
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node required by PM2 launcher")
 @pytest.mark.parametrize("state", ["online", "launching", "stopped"])
 def test_manage_start_does_not_restart_healthy_api(tmp_path, state):
     fake = tmp_path / "pm2"

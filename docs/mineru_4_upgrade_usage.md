@@ -14,7 +14,7 @@ checkPaths:
   - pyproject.toml
   - uv.lock
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
+lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 ---
 
 # 部署、维护与恢复
@@ -119,7 +119,8 @@ recover 不会重新提交已标记 published 的任务；需要显式恢复时�
 | api | Gunicorn，PM2 名 unstructured-gunicorn |
 | workers | 三个 parse，加 vision/dispatch/merge，共六个 two-stage worker |
 | ordinary | 普通 Celery worker，PM2 名 celery-worker |
-| app | api 加 workers，不含 model 或 ordinary |
+| vision-health | 独立图片端点探测，PM2 名 vision-health-monitor |
+| app | api 加 workers、vision-health，不含 model 或 ordinary |
 
 启动顺序：
 
@@ -127,12 +128,15 @@ recover 不会重新提交已标记 published 的任务；需要显式恢复时�
 ./deploy/manage.sh start model
 # 首次权重下载与编译可能较久，等待此检查成功后继续
 curl --fail http://127.0.0.1:30000/health
+./deploy/manage.sh start vision-health
 ./deploy/manage.sh start workers
 ./deploy/manage.sh start ordinary
 ./deploy/manage.sh start api
 ./deploy/manage.sh status
 pm2 save
 ```
+
+图片端点探测使用与调用方相同的私有地址、鉴权和共享槽目录。配置更新时同时重启 vision-health 与受影响 API/worker；仅部署同步或 ordinary 时也可单独启动 vision-health。未配置图片端点时探测进程空闲。用 `uv run python -m src.services.vision_health --status` 查看本地状态的新鲜度、可用性与熔断阶段；健康探测不执行图片推理，故障恢复仍须真实 PDF 验收。探测间隔、过期与半开规则见[调优指南](performance-tuning.md#82-主动健康探测与恢复)。
 
 model 的 PM2 online 不代表模型已就绪。脚本的 status 显示该用户的全部 PM2 进程；logs 仅跟踪所选组的第一个进程，检查其他 worker 时用其完整 PM2 名称。
 
@@ -167,6 +171,7 @@ health 只检查 API 存活；ready 并行检查配置的 MinerU VLM 端点健�
 ./deploy/manage.sh stop api
 ./deploy/manage.sh stop ordinary
 ./deploy/manage.sh stop workers
+./deploy/manage.sh stop vision-health
 ./deploy/manage.sh stop model
 pm2 save
 ```

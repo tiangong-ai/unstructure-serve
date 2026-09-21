@@ -1,0 +1,13 @@
+{
+  "apps": [
+    {
+      "name": "vision-health-monitor",
+      "cwd": ".",
+      "script": ".venv/bin/python",
+      "interpreter": "none",
+      "args": "-m src.services.vision_health",
+      "kill_timeout": 10000,
+      "restart_delay": 3000
+    }
+  ]
+}

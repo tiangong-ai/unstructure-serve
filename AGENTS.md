@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 331ea07304ff93ead623659dfe57de2742239b0d
+lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -55,6 +55,7 @@ lastReviewedCommit: 331ea07304ff93ead623659dfe57de2742239b0d
 | `src/services/job_submission.py` / `src/routers/job_router.py` | 幂等提交、轻量状态、结果下载和显式恢复 |
 | `src/scripts/manage_jobs.py` | 本地清单、发布恢复、阶段恢复和保留期清理（默认预览） |
 | `src/services/vision_service.py` / `vision_service_openai_compatible.py` | provider/model 兜底与 OpenAI-compatible 客户端池 |
+| `src/services/vision_capacity.py` / `vision_health.py` | 本机共享容量、半开恢复、定时健康探测与本地状态查询 |
 | `src/services/vision_prompts.py` | 视觉提示词；原生 DOCX 图片使用严格 OCR |
 | `src/services/pdf_text_layer_reconcile.py` | 按同页 PDF 文本层修正 checkbox 状态 |
 | `src/utils/file_conversion.py` / `mineru_support.py` | Office 转 PDF 及本服务扩展名边界 |
@@ -79,6 +80,7 @@ lastReviewedCommit: 331ea07304ff93ead623659dfe57de2742239b0d
 - OpenAI/Gemini 实现仍可显式配置。未知 provider/model 在同步图片接口及普通图片任务中宽松接收，由服务兜底；two-stage 则在路由层校验枚举并可返回 422。
 - vLLM 必须有 `VLLM_BASE_URL(S)` 才可用，API key 可选。此地址是独立图片描述模型，与 `MINERU_MODEL_VLM_SERVER_URL` 不同。
 - OpenAI/vLLM 复用客户端池。vLLM 通过 vision_capacity.py 在本机共享端点轮换和槽位，缺省每端点 16、等待 180 秒、临时故障冷却 30 秒。所有调用方共用 VLLM_VISION_SLOT_DIR；槽数变更须排空并统一新目录，不能删除在用锁。等价 URL 去重，不同 DNS 别名指向同一服务需配置方确认。连接/超时/408/429/5xx 及空/截断响应可冷却切换，400 等请求错误直接失败；请求只编码一次。不要把视觉故障切换能力误写成 MinerU 解析端点的能力；MinerU 多 URL 池只有进程内轮换；三卡部署的单 URL 由容器内 vLLM 做请求负载均衡。
+- 独立 PM2 `vision-health-monitor` 属于 app 组，也可通过 `deploy/manage.sh ... vision-health` 单独管理；同目录文件锁确保只有一个探测进程。缺省每 10 秒并发检查健康接口与模型列表，每端点两次 GET 共用 2 秒总期限、同轮最多 8 个端点；404/405 的健康接口回退模型列表，认证/服务错误不能当作健康。请求使用相同鉴权和路径前缀，不跟随重定向。探测状态保留端点/模型摘要，30 秒过期后回退被动熔断与单请求恢复；健康成功不能解除推理熔断，全部端点被新鲜健康/模型状态排除时明确失败。无配置则探测进程空闲，探测只覆盖独立 vLLM 图片端点，不改变 API /ready。
 - 视觉请求默认 `enable_thinking=false`，采样参数由 `VLLM_VISION_*` 覆盖。同步图片采用单线程池滚动补位，由 `VISION_BATCH_SIZE` 控制每请求在途上限（代码/模板 3），不是所有 API 进程共享限额，也不控制 Celery vision threads/32；上下文在请求前固定，不将生成描述回灌为后续上下文。视觉异常使请求/任务失败，不使用 base_text 降级。OpenAI-compatible 空响应或非 stop 结束必须失败，不能接受被截断内容。Qwen3.8 Flash Next 部署采样模板为 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0，通用代码默认仍为 1/1/40/2。
 - 默认 OpenAI-compatible 提示词放在 system，文档上下文作为 user 数据；自定义 prompt 保持优先。图表只提取印出的值，不根据柱高/坐标估算；流程图保留中间步骤。增强时以独立视觉结果替换 SDK 生成的图示正文，仍保留印刷标题/脚注；纯解析和被筛除图片保持 SDK 内容。
 - vLLM 视觉客户端默认连接/TLS 预算 5 秒（VLLM_VISION_CONNECT_TIMEOUT_SECONDS），单次读写阶段预算 180 秒（VLLM_VISION_TIMEOUT_SECONDS），SDK 重试 0 次（VLLM_VISION_MAX_RETRIES）；若读写预算更短，连接也采用该较短值。连接失败、超时或临时服务错误切换其他端点，故障端点共享冷却后只放行一个半开推理请求，完整非空响应成功后才恢复并发；失败继续冷却，进程退出释放探测租约，旧在途成功不能覆盖新故障；这些不是整份任务的墙钟截止时间，不用缩短推理预算代替连接故障切换。
@@ -147,7 +149,7 @@ uv run --group dev pytest
 - 持久流水线已完成真实构造 400 页 advanced 纯解析、全部页码/表格/摘要及 CLI 原 ID 续取验收，并与九页含图论文并行完成；这不能替代带图 400 页的质量验收，实测条件与失败边界统一见调优指南。
 - `src/scripts/build_pdf_case.py` 构造私有扩页 PDF，保存逐页来源与摘要，禁止覆盖；合成重复页与原生长文档分别记录，不把缓存命中收益外推到新内容。
 - 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。按测试中的固定 PDF_NAMES 清单读取 input，新增文件不自动进入回归；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。图片资产须实际解码成功且尺寸非零，不能只检查文件存在。没有样本应明确失败，不用替身冒充实测。
-- 视觉真实回归：`MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.py -v` 从 input 论文第五页真实解析图像并请求已配置多模态模型，检查图中关键数值及单位；需同时具备 MinerU 与图片模型服务，不用替身。
+- 视觉真实回归：`MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.py -v` 从 input 论文第五页真实解析图像，先探测已配置多模态端点，再用独立测试状态验证单请求半开推理及关键数值/单位；需同时具备 MinerU 与图片模型服务，不用替身。
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。验收须说明模型拓扑、样本范围和证据位置。
 - `src/scripts/benchmark_mineru.py` 对真实 PDF 做已预热 SDK 进程压测，记录批量完成、单任务服务和排队耗时；不含 Celery/独立视觉阶段。升级对照固定样本、并发和线程，分别记录应用与模型镜像版本，单轮差异不作提速结论。输出目录必须新建，校验整本页号、图片及 p2 关键表格/checkbox；样本与结果保持私有。脚本退出前显式收尾各进程的 DocVortex 渲染池，避免嵌套 multiprocessing 等待退出。
 - `src/scripts/two_stage_enqueue.py` 的生产调用须显式 `TWO_STAGE_BASE=http://127.0.0.1:7770`，脚本缺省仍是开发端口 8770，且不传 tier（使用 advanced）。优先级演示 `enqueue_input.py` 会重复提交；不要作为生产批处理入口。

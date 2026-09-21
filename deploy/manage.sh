@@ -11,7 +11,8 @@ case "$group" in
   workers) names=celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge ;;
   ordinary) names=celery-worker ;;
   model) names=mineru-vlm-docker-parallel ;;
-  app) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge ;;
+  vision-health) names=vision-health-monitor ;;
+  app) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge,vision-health-monitor ;;
   *) echo "Unknown group: $group" >&2; exit 2 ;;
 esac
 case "$action" in
@@ -33,5 +34,5 @@ case "$action" in
   stop) IFS=, read -ra targets <<< "$names"; for target in "${targets[@]}"; do pm2 stop "$target"; done ;;
   status) pm2 status ;;
   logs) pm2 logs "${names%%,*}" --lines 100 ;;
-  *) echo "Usage: $0 {start|restart|stop|status|logs} {app|api|workers|ordinary|model}" >&2; exit 2 ;;
+  *) echo "Usage: $0 {start|restart|stop|status|logs} {app|api|workers|ordinary|model|vision-health}" >&2; exit 2 ;;
 esac
