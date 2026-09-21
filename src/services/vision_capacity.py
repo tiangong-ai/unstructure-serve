@@ -1,4 +1,4 @@
-"""Host-wide vision endpoint leases, rotation and cooldown (Linux flock).
+"""Host-wide vision endpoint leases, rotation and circuit recovery (Linux flock).
 
 Only endpoint SHA-256 identifiers are persisted. All callers on one host must
 share the directory and slot count. Lock files must never be removed while a
@@ -133,7 +133,33 @@ class EndpointScheduler:
         self._validate_key(key)
         with self._state() as state:
             endpoint = state["endpoints"].setdefault(key, {"slots": self.slots})
-            endpoint["until"] = max(endpoint.get("until", 0), time.time() + self.cooldown_seconds)
+            self._fail(endpoint)
+
+    def _fail(self, endpoint):
+        endpoint["until"] = max(endpoint.get("until", 0), time.time() + self.cooldown_seconds)
+        endpoint["generation"] = endpoint.get("generation", 0) + 1
+
+    def _finish_recovery(self, key, generation, succeeded):
+        with self._state() as state:
+            endpoint = state["endpoints"][key]
+            # An older in-flight result must not undo a newer failure/probe.
+            if endpoint.get("generation", 0) == generation:
+                if succeeded:
+                    endpoint.pop("until", None)
+                else:
+                    self._fail(endpoint)
+
+    def _try_lock(self, name):
+        fd = _open(self.directory / name)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            _close(fd)
+            return None
+        except BaseException:
+            _close(fd)
+            raise
 
     @contextmanager
     def acquire(self, keys):
@@ -146,6 +172,9 @@ class EndpointScheduler:
         deadline = time.monotonic() + self.wait_seconds
         held = None
         chosen = None
+        recovery = None
+        generation = None
+        succeeded = False
         try:
             while held is None:
                 with self._state() as state:
@@ -160,21 +189,26 @@ class EndpointScheduler:
                     for offset in range(len(keys)):
                         index = (start + offset) % len(keys)
                         key = keys[index]
-                        if state["endpoints"][key].get("until", 0) > time.time():
+                        endpoint = state["endpoints"][key]
+                        if endpoint.get("until", 0) > time.time():
                             continue
-                        for slot in range(self.slots):
-                            fd = _open(self.directory / f"{key}.{slot}.lock")
-                            try:
-                                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                            except BlockingIOError:
-                                _close(fd)
+                        trial = None
+                        if "until" in endpoint:
+                            trial = self._try_lock(f"{key}.recovery.lock")
+                            if trial is None:
                                 continue
-                            except BaseException:
-                                _close(fd)
-                                raise
-                            held, chosen = fd, key
-                            state["next"][group] = (index + 1) % len(keys)
-                            break
+                        try:
+                            for slot in range(self.slots):
+                                fd = self._try_lock(f"{key}.{slot}.lock")
+                                if fd is None:
+                                    continue
+                                held, chosen = fd, key
+                                recovery, generation = trial, endpoint.get("generation", 0)
+                                state["next"][group] = (index + 1) % len(keys)
+                                break
+                        finally:
+                            if held is None and trial is not None:
+                                _close(trial)
                         if held is not None:
                             break
                 if held is None:
@@ -183,6 +217,13 @@ class EndpointScheduler:
                         raise TimeoutError("Timed out waiting for shared vision endpoint capacity")
                     time.sleep(min(0.05, remaining))
             yield chosen
+            succeeded = True
         finally:
-            if held is not None:
-                _close(held)
+            try:
+                if recovery is not None:
+                    self._finish_recovery(chosen, generation, succeeded)
+            finally:
+                if recovery is not None:
+                    _close(recovery)
+                if held is not None:
+                    _close(held)

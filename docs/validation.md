@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
+lastReviewedCommit: 331ea07304ff93ead623659dfe57de2742239b0d
 ---
 
 # 开发验证与验收范围
@@ -33,7 +33,7 @@ uv run --group dev pytest
 
 `test_vision_capacity_http.py` 使用本地真实 TCP/HTTP 连接模拟 TLS 握手不响应和 HTTP 503，验证快速切换、跨调用冷却及恢复后重新分配；正常响应刻意晚于连接预算，确保不会误用短预算截断推理。该测试的响应是固定样本，模型质量仍须使用下面的真实 PDF 验收。
 
-持久任务的针对性测试包括 `test_durable_jobs.py`、`test_durable_pipeline.py`、`test_job_api.py` 和 `test_manage_jobs.py`：覆盖发布结果不明、元数据落盘失败、旧代消息、逐阶段复用、文件校验、下载租约与保留期清理。共享视觉容量包含真实 fork/spawn/进程死亡，以及本地 HTTP fixture；只有显式模型回归才算实际推理。
+持久任务的针对性测试包括 `test_durable_jobs.py`、`test_durable_pipeline.py`、`test_job_api.py` 和 `test_manage_jobs.py`：覆盖发布结果不明、元数据落盘失败、旧代消息、逐阶段复用、文件校验、下载租约与保留期清理。共享视觉容量包含真实 fork/spawn/进程死亡、跨进程半开独占、失败后继续熔断及旧在途成功不能覆盖新故障，以及本地 HTTP fixture；只有显式模型回归才算实际推理。
 
 故障回归须保留故障前后的输入摘要、任务 ID/generation、parse manifest 和已完成图片的 SHA256/mtime。实测九页论文在指定单图请求前注入一次失败，恢复后原解析及三张已完成图片未改变，六张最终图片各实际调用模型一次。另对真实 SDK 子进程定点 SIGKILL，检查快速失败、同 ID 恢复及任务进程组收尾。注入故障与上游实际超时分开报告，不全局停止共享模型或清空队列。
 

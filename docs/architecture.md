@@ -1,6 +1,6 @@
 ---
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 8493ef1e5d24bb5c1076fbf860f8b0661ef22f3f
+lastReviewedCommit: 331ea07304ff93ead623659dfe57de2742239b0d
 docType: architecture
 scope: repo
 status: current
@@ -46,7 +46,7 @@ flowchart LR
 - two-stage 的 parse/dispatch/vision/merge 是独立阶段，队列仅传任务与图片引用，全文和检查点保存在持久目录；默认每波 32 张缺失图片，用 chord 触发下一波，最后合并。任务内不阻塞等待其他 task。独立图片模型的并发与解析槽位分开。
 - `job_store.py` 管理输入身份、文件锁、原子完成标记及过期墓碑；`durable_pipeline.py` 管理整本解析/逐图检查点和执行配置摘要。`job_submission.py` 负责保存后发布，HTTP 发布结果不明也保留已知 ID；`job_router.py` 提供轻量状态、流式结果和显式恢复。新代次拒绝旧消息写入，恢复不删除已完成阶段。
 - vLLM 图片调用通过 `vision_capacity.py` 共用本机端点容量、轮换与故障冷却；不同 API/worker 的线程窗口不能绕过相同端点的共享上限。配置及锁目录必须一致；跨主机仍需独立协调设计。
-- 图片客户端将连接/TLS 与模型读写预算分开，连接异常或临时服务错误自动尝试其他端点；故障端点冷却后重新参与分配。全部端点失败仍向任务传播错误，不以原文或空描述伪装成功；400 等请求错误不切换。超时配置见[调优指南](performance-tuning.md)。
+- 图片客户端将连接/TLS 与模型读写预算分开，连接异常或临时服务错误自动尝试其他端点；故障端点冷却后通过跨进程独占的半开推理租约恢复，完整非空响应成功才重新开放并发；新故障会使旧成功失效，探测进程退出自动释放租约。全部端点失败仍向任务传播错误，不以原文或空描述伪装成功；400 等请求错误不切换。超时配置见[调优指南](performance-tuning.md)。
 
 ## 目录
 

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from loguru import logger
-from openai import APIConnectionError, APIStatusError
+from openai import APIStatusError
 
 from src.config.config import VLLM_API_KEY, VLLM_BASE_URL, VLLM_BASE_URLS
 from src.services.vision_service_openai_compatible import (
@@ -215,11 +215,9 @@ def vision_completion_vllm(
                     and exc.status_code < 500
                 ):
                     raise
-                if isinstance(exc, APIConnectionError) or (
-                    isinstance(exc, APIStatusError)
-                    and (exc.status_code in (408, 429) or exc.status_code >= 500)
-                ):
-                    scheduler.mark_failed(key)
+                # Includes unusable empty/truncated responses: a half-open trial
+                # only restores traffic after a complete, validated response.
+                scheduler.mark_failed(key)
                 last_error = exc
                 errors.append(type(exc).__name__)
                 logger.warning(

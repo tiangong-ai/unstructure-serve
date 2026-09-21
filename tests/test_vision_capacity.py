@@ -165,3 +165,63 @@ def test_capacity_wait_does_not_rewrite_shared_state(tmp_path):
 def test_invalid_budgets_rejected(tmp_path, name, value):
     with pytest.raises(ValueError):
         EndpointScheduler(tmp_path, **{name: value})
+
+
+def test_only_one_recovery_request_across_processes(tmp_path):
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    scheduler = EndpointScheduler(tmp_path, slots=4, wait_seconds=0.08, cooldown_seconds=0)
+    scheduler.mark_failed(ENDPOINTS[0])
+    proc = ctx.Process(target=_hold_recovery, args=(str(tmp_path), queue))
+    proc.start()
+    try:
+        assert queue.get(timeout=10) == "held"
+        with pytest.raises(TimeoutError):
+            with scheduler.acquire(ENDPOINTS[:1]):
+                pytest.fail("Only one real recovery request may enter")
+        with scheduler.acquire(ENDPOINTS) as other:
+            assert other == ENDPOINTS[1]
+        proc.kill()
+        proc.join(10)
+        # A dead probing process releases the recovery lease automatically.
+        with scheduler.acquire(ENDPOINTS[:1]):
+            pass
+        # A successful recovery restores normal parallel capacity.
+        with scheduler.acquire(ENDPOINTS[:1]):
+            with scheduler.acquire(ENDPOINTS[:1]):
+                pass
+    finally:
+        if proc.is_alive():
+            proc.kill()
+            proc.join(10)
+        queue.close()
+        queue.join_thread()
+
+
+def _hold_recovery(directory, queue):
+    scheduler = EndpointScheduler(directory, slots=4, wait_seconds=2, cooldown_seconds=0)
+    with scheduler.acquire(ENDPOINTS[:1]):
+        queue.put("held")
+        time.sleep(20)
+
+
+def test_late_success_cannot_undo_a_new_failure(tmp_path):
+    scheduler = EndpointScheduler(tmp_path, slots=4, wait_seconds=0.06, cooldown_seconds=0)
+    with scheduler.acquire(ENDPOINTS[:1]):
+        scheduler.mark_failed(ENDPOINTS[0])
+    with scheduler.acquire(ENDPOINTS[:1]):
+        with pytest.raises(TimeoutError):
+            with scheduler.acquire(ENDPOINTS[:1]):
+                pytest.fail("A pre-failure request cannot restore the endpoint")
+
+
+def test_failed_recovery_keeps_circuit_open(tmp_path):
+    scheduler = EndpointScheduler(tmp_path, slots=4, wait_seconds=0.06, cooldown_seconds=0)
+    scheduler.mark_failed(ENDPOINTS[0])
+    with pytest.raises(RuntimeError, match="inference failed"):
+        with scheduler.acquire(ENDPOINTS[:1]):
+            raise RuntimeError("inference failed")
+    with scheduler.acquire(ENDPOINTS[:1]):
+        with pytest.raises(TimeoutError):
+            with scheduler.acquire(ENDPOINTS[:1]):
+                pytest.fail("Failed recovery must not reopen parallel admission")
