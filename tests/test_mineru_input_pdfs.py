@@ -36,11 +36,18 @@ pytestmark = [
 
 
 def _check_assets(items, output_dir):
+    from PIL import Image
+
     for item in items:
         if item.get("img_path"):
             image = Path(output_dir) / item["img_path"]
             assert image.is_file(), f"Missing {item['type']} asset: {image}"
             assert image.stat().st_size > 0
+            # SDK image naming/resolution changes must still yield usable pixels,
+            # not merely nonempty files that fail later in the vision stage.
+            with Image.open(image) as decoded:
+                decoded.load()
+                assert min(decoded.size) > 0
 
 
 @pytest.mark.parametrize(

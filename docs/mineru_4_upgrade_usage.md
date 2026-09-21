@@ -1,6 +1,6 @@
 # 部署、维护与恢复
 
-应用使用 Python 3.13.15、MinerU 4.0.3 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
+应用使用 Python 3.13.15、MinerU 4.0.5 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
 
 所有 shell 命令在仓库根目录执行，文件示例使用相对路径。跨进程或容器的共享目录由部署配置决定，必须指向同一位置；本文不预设机器目录。
 
@@ -161,7 +161,7 @@ pm2 save
 | 项目 | 配置位置与模板值 |
 | --- | --- |
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，vllm/vllm-openai:v0.21.0 |
-| 应用模型镜像 | tiangong/mineru-vlm:4.0.3-vllm0.21.0 |
+| 应用模型镜像 | tiangong/mineru-vlm:4.0.5-vllm0.21.0 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存比例 | 三卡 PM2 env 的 MINERU_DOCKER_PORT=30000、MINERU_DOCKER_GPU_MEMORY=0.10；按实际硬件重新验收 |
 | GPU 绑定 / DP / TP | compose.mineru.parallel.yaml 中显式设置，扩卡时一起修改 |

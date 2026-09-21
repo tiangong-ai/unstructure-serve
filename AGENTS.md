@@ -16,7 +16,7 @@ lastReviewedCommit: 80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f
 
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。当前运行基线是 MinerU 4.0.3 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。验证范围与命令见 [验证指南](docs/validation.md)。
+仓库为 `tiangong-ai/unstructure-serve`。当前运行基线是 MinerU 4.0.5 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。验证范围与命令见 [验证指南](docs/validation.md)。
 
 
 ## 文档治理
@@ -115,7 +115,7 @@ lastReviewedCommit: 80c8c24ed5087b0f8052d6ddb3fd5fe10a8da90f
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
 - 三卡部署入口为 `deploy/pm2/ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `deploy/mineru-vllm/compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - Docker 基线为 vLLM 0.21.0 配套 Torch/CUDA，模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
-- MinerU 4.0.3 配套 DocVortex 至少 0.4.15；兼容升级保留上游 OpenAI、Redis、Pydantic 等版本约束，具体来源见依赖指南。vLLM 0.21.0 是已验收基线而非最新版，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围。
+- MinerU 4.0.5 配套 DocVortex 至少 0.4.20；应用和镜像固定 DocVortex 0.4.21、mineru-vl-utils 2.0.5。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是已验收基线而非最新版，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围。
 - 当前解析权重为稠密 Qwen2-VL 1.2B（14 attention heads、2 KV heads），三卡 DP=3/TP=1；不适用 TP4、EP 或原生 MTP。Compose/PM2 显存比例为 0.10，保留每副本 16 序列/8192 上下文；此比例仅为当前 96 GiB 共享 GPU 的实测起点。调优需区分独立图片模型，保留 MinerU logits processor、BF16 和共享 GPU 显存预算；架构约束与测量方法见调优指南第 6 节。
 - 手动启动压测容器时覆盖镜像继承的 `com.docker.compose.project/service` 标签为独立测试项目，并核对实际容器标签；仅修改名字和端口不足以隔离生产 Compose 的退出联动。共享 GPU 上错开模型启动，最终配置在测试容器退出后验收；显存须在真实推理预热后再次测量，不把刚就绪时的占用当峰值。
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `nvidia-uvm` 和 `nvidia-uvm-tools` 设备节点，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
@@ -144,7 +144,7 @@ uv run --group dev pytest
 - 图片验收须包含低清密集图表；已有真实气象图暴露双端点超时及 stop 结束后的虚构数列，不得以技术 SUCCESS、仅缩短输出或删去错误数字宣称质量通过。失败证据、单图检查点及候选对照保持私有；通用数列拒收规则须有合法表格负例和图像依据，不能盲目上线。
 - 持久流水线已完成真实构造 400 页 advanced 纯解析、全部页码/表格/摘要及 CLI 原 ID 续取验收，并与九页含图论文并行完成；这不能替代带图 400 页的质量验收，实测条件与失败边界统一见调优指南。
 - `src/scripts/build_pdf_case.py` 构造私有扩页 PDF，保存逐页来源与摘要，禁止覆盖；合成重复页与原生长文档分别记录，不把缓存命中收益外推到新内容。
-- 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。按测试中的固定 PDF_NAMES 清单读取 input，新增文件不自动进入回归；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。没有样本应明确失败，不用替身冒充实测。
+- 真实模型回归：`MINERU_RUN_INPUT_PDFS=1 uv run --group dev pytest tests/test_mineru_input_pdfs.py -v`。按测试中的固定 PDF_NAMES 清单读取 input，新增文件不自动进入回归；p2 缺省及四档整本，论文和 fese 整本，其余抽样首页/第 11 页/末页。图片资产须实际解码成功且尺寸非零，不能只检查文件存在。没有样本应明确失败，不用替身冒充实测。
 - 视觉真实回归：`MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.py -v` 从 input 论文第五页真实解析图像并请求已配置多模态模型，检查图中关键数值及单位；需同时具备 MinerU 与图片模型服务，不用替身。
 - 三卡部署测试验证 Compose 的 GPU/DP 参数与 PM2 前台生命周期；`MINERU_RUN_DP_PDFS=1 uv run --group dev pytest tests/test_mineru_data_parallel.py -v` 使用 input 的 p2 和九页论文，并检查三个 engine 的成功推理计数均增加。验收须说明模型拓扑、样本范围和证据位置。
 - `src/scripts/benchmark_mineru.py` 对真实 PDF 做已预热 SDK 进程压测，记录批量完成、单任务服务和排队耗时；不含 Celery/独立视觉阶段。输出目录必须新建，校验整本页号、图片及 p2 关键表格/checkbox；样本与结果保持私有。脚本退出前显式收尾各进程的 DocVortex 渲染池，避免嵌套 multiprocessing 等待退出。

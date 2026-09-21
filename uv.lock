@@ -406,7 +406,7 @@ wheels = [
 
 [[package]]
 name = "docvortex"
-version = "0.4.15"
+version = "0.4.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -436,9 +436,9 @@ dependencies = [
     { name = "resvg-py" },
     { name = "ziamath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/c4/b095198dadbb0fb03ac73ef65b096a9add3b18aa0e922851df8c123ecaec/docvortex-0.4.15.tar.gz", hash = "sha256:89ad5a307b9fca07b120277e2a7cc4529526d192f574244167f22e39f666d972", size = 44347051, upload-time = "2026-09-18T15:12:20.564Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/9e/8b83ba952f011f413f35e19cc1fae729f92e0151f094f894ef2661486242/docvortex-0.4.21.tar.gz", hash = "sha256:bc9bc1e5923d15586ef118bffa3fa0dc9a2ffe869833f82cacaf91ae2160a86a", size = 44519053, upload-time = "2026-09-20T18:39:29.187Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/18/ee/b16b686e4ad1d6452229c38b3aef95107c0ade188ede3779fb016bd366e4/docvortex-0.4.15-py3-none-any.whl", hash = "sha256:bbccc7e2fdf8aa4ec0799d9e55be0f0e28a6a7e291262aa05e65eec1fa90c52e", size = 3638198, upload-time = "2026-09-18T15:12:17.916Z" },
+    { url = "https://files.pythonhosted.org/packages/53/66/1564fa2a2368472008eb287df74e41439ee6b53cc1313fe6825561431228/docvortex-0.4.21-py3-none-any.whl", hash = "sha256:285b2604bda094f06136d0c7e0d74983349c8945b27f9af6a85f858e46ba3140", size = 3643724, upload-time = "2026-09-20T18:39:25.263Z" },
 ]
 
 [[package]]
@@ -1014,7 +1014,7 @@ wheels = [
 
 [[package]]
 name = "mineru"
-version = "4.0.3"
+version = "4.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
@@ -1060,7 +1060,7 @@ dependencies = [
     { name = "watchfiles" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/d9/c6f69f421b0fa2d585278883dffce6db00dac39c1cc100b334a3a2ce635a/mineru-4.0.3-py3-none-any.whl", hash = "sha256:24a36142531c64dfcb78b3f8e0c46c96ba8fb5b238f5dd58c4a064b3b0e80b7e", size = 3513001, upload-time = "2026-09-18T17:06:25.459Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/b4/6cc171b1b945711ae6dac84e971a1d45432263d52eeb30bcfa19403e8c7d/mineru-4.0.5-py3-none-any.whl", hash = "sha256:9c80e3e10ccf9e7d49415a3044196622328eac5bcb54fc557b3846ac9e1d784d", size = 3514145, upload-time = "2026-09-20T16:40:30.25Z" },
 ]
 
 [[package]]
@@ -1080,7 +1080,7 @@ wheels = [
 
 [[package]]
 name = "mineru-vl-utils"
-version = "2.0.4"
+version = "2.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1092,7 +1092,7 @@ dependencies = [
     { name = "tqdm" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/e3/43145e7b9e61043d399d0152f7549149bf2c7df98da4d8535e1ead0bd7cd/mineru_vl_utils-2.0.4-py3-none-any.whl", hash = "sha256:241df869bd8a82904e87bcad7b5b26f776ddd0b3c945b4e8d9afbf04981ef00f", size = 108367, upload-time = "2026-09-13T18:07:15.618Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/08/f9200f90472537614c53be916b4f1fc2695a19434114f0a144304b6f6dcd/mineru_vl_utils-2.0.5-py3-none-any.whl", hash = "sha256:d2dc6234066af8ca8c7cf91a0d13c1677ce61d64da0f7215a75f37261c11491c", size = 108642, upload-time = "2026-09-19T07:11:54.638Z" },
 ]
 
 [[package]]
@@ -2015,7 +2015,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "celery", extras = ["redis"], specifier = ">=5.6.3" },
-    { name = "docvortex", specifier = ">=0.4.15,<0.5" },
+    { name = "docvortex", specifier = ">=0.4.20,<0.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "flower", specifier = ">=2.1.0" },
     { name = "google-genai", specifier = ">=2.24.0" },
@@ -2023,7 +2023,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "kombu", extras = ["redis"], specifier = ">=5.6" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mineru", specifier = ">=4.0.3,<4.1" },
+    { name = "mineru", specifier = ">=4.0.5,<4.1" },
     { name = "openai", specifier = ">=2,<3" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "protobuf", specifier = ">=7.36.2" },
