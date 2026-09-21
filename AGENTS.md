@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
+lastReviewedCommit: 7c4df1562e6a96f9d3d4408db578635cd306c611
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -22,6 +22,8 @@ lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
 ## 文档治理
 
 本仓库使用本地 `.docpact/config.yaml`（`layout: repo`），独立 clone 也必须执行；workspace 配置负责跨仓集成，不能代替本仓库检查。使用 docpact 0.1.9（`cargo install docpact --version 0.1.9 --locked`），先按修改路径执行 `docpact route --root . --paths <路径列表> --format json`，阅读命中的说明；修改后执行严格配置检查和显式 diff lint，见 [验证指南](docs/validation.md#文档治理检查)。GitHub PR 使用同一版本强制检查。新文件须显式暂存或传 `--files`，不要用仅检查 tracked diff 的方式遗漏。
+
+`route --paths` 的多个路径以逗号分隔。首次为受管 Markdown 添加复核记录时，补齐文档类型、用途和 checkPaths 等元数据；`review mark` 只填写复核日期与提交。提交前检查 staged，提交后以 PR 基准与最终 HEAD 再检查完整变更范围。
 
 ## 文档与修改约定
 

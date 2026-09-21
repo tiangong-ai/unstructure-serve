@@ -1,6 +1,20 @@
 ---
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When initializing, starting, stopping, upgrading or recovering the deployment."
+whenToUpdate: "When runtime versions, configuration, process groups or recovery behavior change."
+checkPaths:
+  - deploy/**
+  - src/config/**
+  - .env.example
+  - pyproject.toml
+  - uv.lock
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
+lastReviewedCommit: 7c4df1562e6a96f9d3d4408db578635cd306c611
 ---
 
 # 部署、维护与恢复

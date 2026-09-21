@@ -1,6 +1,19 @@
 ---
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When installing, upgrading or checking application and model dependencies."
+whenToUpdate: "When Python, package constraints, lockfile or model image dependencies change."
+checkPaths:
+  - pyproject.toml
+  - uv.lock
+  - .python-version
+  - deploy/mineru-vllm/Dockerfile
 lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3937071350071e11f3b6c297919567e927710fce
+lastReviewedCommit: 7c4df1562e6a96f9d3d4408db578635cd306c611
 ---
 
 # 依赖与 Python 维护
