@@ -32,6 +32,8 @@ services:
       - "30000"
       - --served-model-name
       - mineru4
+      - --hf-overrides
+      - '{"tie_word_embeddings": ${MINERU_DOCKER_TIE_WORD_EMBEDDINGS:-true}}'
       - --gpu-memory-utilization
       - "${MINERU_DOCKER_GPU_MEMORY:-0.10}"
       - --max-model-len

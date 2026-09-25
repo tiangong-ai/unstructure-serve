@@ -9,6 +9,8 @@ services:
       - "30000"
       - --served-model-name
       - mineru4
+      - --hf-overrides
+      - '{"tie_word_embeddings": ${MINERU_DOCKER_TIE_WORD_EMBEDDINGS:-true}}'
       - --data-parallel-size
       - "3"
       - --tensor-parallel-size

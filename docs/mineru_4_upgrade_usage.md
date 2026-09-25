@@ -14,7 +14,7 @@ checkPaths:
   - pyproject.toml
   - uv.lock
 lastReviewedAt: 2026-09-25
-lastReviewedCommit: d6a3642
+lastReviewedCommit: fe36df4
 ---
 
 # 部署、维护与恢复
@@ -187,7 +187,7 @@ pm2 save
 
 三卡由一份基础 Compose 加一份 parallel 覆盖文件定义，project 为 mineru-vlm-parallel。一个容器绑定 GPU 0/1/2，DP=3、TP=1，每卡完整模型副本，通过单地址分配请求。应用无需设置三个 URL；单次模型生成不会自动分成三卡计算。
 
-四卡使用 `compose.mineru.parallel4.yaml` 和独立 project `mineru-vlm-parallel4`，绑定 GPU 0/1/2/3，DP=4、TP=1，仍向应用提供单个 30000 端点。四卡 PM2 模板的显存比例为 0.45，需按目标显卡和真实推理峰值验收；不要同时运行三卡与四卡 project。
+四卡使用 `compose.mineru.parallel4.yaml` 和独立 project `mineru-vlm-parallel4`，绑定 GPU 0/1/2/3，DP=4、TP=1，仍向应用提供单个 30000 端点。所有拓扑都默认把 MinerU2.5 Pro 的 `tie_word_embeddings` 显式传给 vLLM；更换模型时按权重结构核对 `MINERU_DOCKER_TIE_WORD_EMBEDDINGS`。四卡 PM2 模板的显存比例为 0.45，需按目标显卡和真实推理峰值验收；不要同时运行三卡与四卡 project。
 
 | 项目 | 配置位置与模板值 |
 | --- | --- |
@@ -197,6 +197,7 @@ pm2 save
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存比例 | 三卡 PM2 env 的 MINERU_DOCKER_PORT=30000、MINERU_DOCKER_GPU_MEMORY=0.10；按实际硬件重新验收 |
 | GPU 绑定 / DP / TP | 三卡由 compose.mineru.parallel.yaml 设置，四卡由 compose.mineru.parallel4.yaml 设置 |
+| 输出层权重绑定 | Compose 通过 --hf-overrides 设置顶层 tie_word_embeddings=true；当前 MinerU2.5 Pro 权重不含独立 lm_head.weight |
 | 模型卷 / 下载缓存卷 | 默认 mineru-vlm-models / mineru-vlm-cache，可用 MINERU_DOCKER_MODEL_VOLUME / MINERU_DOCKER_CACHE_VOLUME 覆盖 |
 
 复用已有命名卷时确认两卷存在，再设置 MINERU_DOCKER_VOLUMES_EXTERNAL=true。不要删除缓存卷以解决普通启动问题。端口默认仅绑定 loopback；跨机器访问需另外配置可达地址与认证。
@@ -207,7 +208,7 @@ curl --fail http://127.0.0.1:30000/metrics
 docker compose --env-file .env -p mineru-vlm-parallel -f deploy/mineru-vllm/compose.mineru.yaml -f deploy/mineru-vllm/compose.mineru.parallel.yaml exec -T mineru-vlm python3 -c 'import torch; assert torch.cuda.device_count() == 3; print([torch.ones(1, device=f"cuda:{i}").item() for i in range(3)])'
 ```
 
-向解析服务提交 PDF 后，检查 metrics 的 vllm:request_success_total 中 engine 0/1/2 的增量；短文档或 flash/basic 任务不一定产生足够请求，不能要求每份文档均分。性能规划见[调优指南](performance-tuning.md)。
+向解析服务提交 PDF 后，除检查非空正文和页码外，再检查 metrics 的 vllm:request_success_total 中 engine 0/1/2（三卡）或 0/1/2/3（四卡）的增量；短文档或 flash/basic 任务不一定产生足够请求，不能要求每份文档均分。性能规划见[调优指南](performance-tuning.md)。
 
 ### GPU 重启故障排查
 
