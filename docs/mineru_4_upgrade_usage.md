@@ -14,7 +14,7 @@ checkPaths:
   - pyproject.toml
   - uv.lock
 lastReviewedAt: 2026-09-25
-lastReviewedCommit: 629f5b5
+lastReviewedCommit: d6a3642
 ---
 
 # 部署、维护与恢复
@@ -192,6 +192,7 @@ pm2 save
 | 项目 | 配置位置与模板值 |
 | --- | --- |
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，vllm/vllm-openai:v0.21.0 |
+| 镜像内 Web 依赖 | 默认 FastAPI 0.141.1 / Starlette 1.7.0；vLLM 0.28.0 镜像需通过 MINERU_DOCKER_FASTAPI_VERSION=0.136.3、MINERU_DOCKER_STARLETTE_VERSION=1.6.0 覆盖并通过 pip check |
 | 应用模型镜像 | 默认 tiangong/mineru-vlm:4.0.7-vllm0.21.0；可用 MINERU_DOCKER_IMAGE_TAG 按环境覆盖 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存比例 | 三卡 PM2 env 的 MINERU_DOCKER_PORT=30000、MINERU_DOCKER_GPU_MEMORY=0.10；按实际硬件重新验收 |

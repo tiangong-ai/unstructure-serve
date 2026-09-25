@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-25
-lastReviewedCommit: 629f5b5
+lastReviewedCommit: d6a3642
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -119,7 +119,7 @@ lastReviewedCommit: 629f5b5
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
 - 三卡部署入口为 `deploy/pm2/ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `deploy/mineru-vllm/compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - 四卡可选入口为 `deploy/manage.sh start model4` 与 `deploy/manage.sh start app4`，对应 `serve.sh parallel4`、四 GPU Compose 覆盖和第四个 parse worker。三卡入口及默认参数继续独立可用；同一主机只启动一种模型拓扑。
-- Docker 默认基线为 vLLM 0.21.0 配套 Torch/CUDA；可用 `MINERU_DOCKER_BASE_IMAGE` 和 `MINERU_DOCKER_VLLM_VERSION` 为目标环境选择上游允许的版本。模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
+- Docker 默认基线为 vLLM 0.21.0 配套 Torch/CUDA；可用 `MINERU_DOCKER_BASE_IMAGE` 和 `MINERU_DOCKER_VLLM_VERSION` 为目标环境选择上游允许的版本。vLLM 0.28.0 对 FastAPI 要求 `>=0.133,<0.137`，镜像内的 FastAPI/Starlette 用独立构建参数选择并经 `pip check` 验证，不跟随应用锁文件。模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
 - MinerU 4.0.7 配套 DocVortex 至少 0.4.24；应用锁文件和镜像固定 DocVortex 0.4.25、mineru-vl-utils 2.0.5。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是已验收基线而非最新版，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围。
 - 当前解析权重为稠密 Qwen2-VL 1.2B（14 attention heads、2 KV heads）；三卡 DP=3/TP=1，四卡 DP=4/TP=1，不适用 TP4、EP 或原生 MTP。Compose/PM2 显存比例为 0.10，保留每副本 16 序列/8192 上下文；此比例仅为 96 GiB 共享 GPU 的实测起点；四卡模板的 0.45 需按目标显卡独立验收。调优需区分独立图片模型，保留 MinerU logits processor、BF16 和共享 GPU 显存预算；架构约束与测量方法见调优指南第 6 节。
 - 手动启动压测容器时覆盖镜像继承的 `com.docker.compose.project/service` 标签为独立测试项目，并核对实际容器标签；仅修改名字和端口不足以隔离生产 Compose 的退出联动。共享 GPU 上错开模型启动，最终配置在测试容器退出后验收；显存须在真实推理预热后再次测量，不把刚就绪时的占用当峰值。
