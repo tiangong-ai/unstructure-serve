@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 docType: runbook
 scope: repo
 status: current
@@ -148,7 +148,7 @@ uv run python -m src.scripts.benchmark_mineru \
 
 ### 6.1 先选拓扑，再调容量
 
-- 模型能单卡容纳，目标是并发吞吐：优先比较独立副本/DP；本机为 DP=3、TP=1。
+- 模型能单卡容纳，目标是并发吞吐：优先比较独立副本/DP；96 GiB 三卡部署为 DP=3、TP=1；32 GiB 四卡模板为 DP=4、TP=1。
 - 模型单卡放不下：评估 TP 或兼容的量化，同时考虑通信开销、互联和质量。TP 可以改变单请求延迟，但不保证加速。
 - 卡数足够且模型需多卡：可评估 DP×TP 组合，每副本使用 TP 张卡；不要把这个规划公式当成本项目所有模型都已验证支持。
 - GPU 型号/显存不一致：优先隔离服务并单独测容量，不直接套用相同显存比例或同步 TP。当前客户端没有按异构端点容量加权的调度。
@@ -157,13 +157,13 @@ DP/TP 原理参考 [vLLM 官方部署说明](https://docs.vllm.ai/en/v0.21.0/ser
 
 ### 6.2 本仓库具体修改位置
 
-三卡模板 `deploy/mineru-vllm/compose.mineru.parallel.yaml` 中的 `device_ids`、`--data-parallel-size` 和 `--tensor-parallel-size` 是显式值。卡数变化须一起修改，并检查测试/PM2/文档；不存在只改 `GPU_IDS` 就自动扩卡的能力。基础 `deploy/mineru-vllm/compose.mineru.yaml` 的 `MINERU_DOCKER_GPU_ID` 只用于单卡拓扑。
+三卡模板 `deploy/mineru-vllm/compose.mineru.parallel.yaml` 与四卡模板 `deploy/mineru-vllm/compose.mineru.parallel4.yaml` 的 `device_ids`、`--data-parallel-size` 和 `--tensor-parallel-size` 是显式值。卡数变化须一起修改，并核对 PM2 显存比例、parse worker 数、`MINERU_PARSE_SLOTS`、测试与文档；2 卡或 5 卡需新增对应覆盖模板，不存在只改 `GPU_IDS` 就自动扩卡的能力。基础 `deploy/mineru-vllm/compose.mineru.yaml` 的 `MINERU_DOCKER_GPU_ID` 只用于单卡拓扑。
 
 `MINERU_DOCKER_GPU_MEMORY` 在 Compose/PM2 中设置，当前 0.10 是在共享 GPU 上验证后的本机配置，不是所有机器建议。max-model-len=8192、max-num-seqs=16 在 Compose command 中固定；修改镜像、模型、长度或序列数要重新测峰值和启动所需显存。扩大最大上下文不是免费提速，并发序列数也不是每秒吞吐。
 
 MinerU VLM 依赖匹配的解析模型和输出协议，不能把它直接替换成任意聊天模型。独立图片描述模型才通过 `VISION_MODEL` 等选择通用多模态模型。模型镜像升级仍在 Docker 内完成，不给应用 `.venv` 安装 vLLM。
 
-扩卡验收必须做实际推理，并验证每个预期 engine 的成功请求计数增长；只看 GPU 显存占用或 `/health` 不够。重启后检查 UVM 映射和容器内 CUDA 运算，避免 `nvidia-smi` 正常但推理失败。
+扩卡验收必须做实际推理、检查文本 PDF 的非空解析结果和页码，并验证每个预期 engine 的成功请求计数增长；只看 GPU 显存占用或 `/health` 不够。重启后检查 UVM 映射和容器内 CUDA 运算，避免 `nvidia-smi` 正常但推理失败。
 
 ### 6.3 当前 MinerU 模型的适用边界
 

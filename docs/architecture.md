@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 docType: architecture
 scope: repo
 status: current
@@ -41,7 +41,7 @@ flowchart LR
 - `upload_io.py` 以 1 MiB 缓冲复制 Starlette 已接收的 UploadFile，避免第二份整文件内存副本。它不是在 multipart 接收前限流，也不构成文件体积上限。
 - `gpu_scheduler.py` 为同步/普通任务提供独立解析子进程、hard timeout 和进程组收尾。Future 用异步包装等待；HTTP 超时后先保留源文件，任务结束再删除。
 - `parse_capacity.py` 在所有本机解析入口共享 Linux 文件锁容量。API worker 数量只改变 HTTP 容量；缺省解析上限仍为 3。不同机器/不共享锁目录的容器不受同一上限约束。
-- `mineru_service_full.py` 是上游 SDK 适配层，保存资产后归一化业务字段、页码、阅读顺序与 checkbox。新 MinerU 输出变化优先在此吸收。
+- `mineru_service_full.py` 是上游 SDK 适配层，保存资产后归一化业务字段、页码、阅读顺序与 checkbox；若解析为零块，仅在所选 PDF 页文本层明显非空时拒绝该结果，防止失败检查点被当成成功。新 MinerU 输出变化优先在此吸收。
 - Office 转换的执行位置不同：同步在解析前转换，三个持久异步入口均在隔离的 parse 阶段转换；图中为逻辑阶段，不能据此推定提交耗时。
 - two-stage 的 parse/dispatch/vision/merge 是独立阶段，队列仅传任务与图片引用，全文和检查点保存在持久目录；默认每波 32 张缺失图片，用 chord 触发下一波，最后合并。任务内不阻塞等待其他 task。独立图片模型的并发与解析槽位分开。
 - `job_store.py` 管理输入身份、文件锁、原子完成标记及过期墓碑；`durable_pipeline.py` 管理整本解析/逐图检查点和执行配置摘要。`job_submission.py` 负责保存后发布，HTTP 发布结果不明也保留已知 ID；`job_router.py` 提供轻量状态、流式结果和显式恢复。新代次拒绝旧消息写入，恢复不删除已完成阶段。

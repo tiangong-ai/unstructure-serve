@@ -173,6 +173,7 @@ def test_model_diagnostics_require_explicit_debug(monkeypatch, tmp_path, debug):
         }
     )
     monkeypatch.setattr(service, "mineru_parse", lambda *args, **kwargs: result)
+    monkeypatch.setattr(service, "_pdf_has_substantial_text", lambda *_args: False)
     items, output, _ = service.parse_doc(
         [source], tmp_path / "out", tier="flash", dump_debug_intermediate=debug
     )
@@ -181,3 +182,38 @@ def test_model_diagnostics_require_explicit_debug(monkeypatch, tmp_path, debug):
     assert (Path(output) / "report_content_list.json").is_file()
     assert (Path(output) / "model_output.json").exists() is debug
     assert result._model_output is not None, "Export must not mutate the SDK result"
+
+
+def _write_text_layer_pdf(path: Path, page_texts: list[str]) -> None:
+    from reportlab.pdfgen import canvas
+
+    document = canvas.Canvas(str(path))
+    for page_text in page_texts:
+        if page_text:
+            document.drawString(72, 720, page_text)
+        document.showPage()
+    document.save()
+
+
+def test_empty_parse_fails_for_pdf_with_substantial_text(monkeypatch, tmp_path, sdk):
+    source = tmp_path / "text.pdf"
+    _write_text_layer_pdf(
+        source, ["This source page clearly contains more than thirty two text characters."]
+    )
+    monkeypatch.setattr(service, "render", lambda *args: [], raising=False)
+
+    with pytest.raises(RuntimeError, match="nonempty text layer"):
+        service.parse_doc([source], tmp_path / "out", tier="advanced")
+
+
+def test_empty_parse_allows_blank_selected_pdf_page(monkeypatch, tmp_path, sdk):
+    source = tmp_path / "blank-selected.pdf"
+    _write_text_layer_pdf(
+        source, ["This first page has plenty of text that is outside the selected range.", ""]
+    )
+    monkeypatch.setattr(service, "render", lambda *args: [], raising=False)
+
+    items, _, _ = service.parse_doc(
+        [source], tmp_path / "out", tier="advanced", start_page_id=1, end_page_id=1
+    )
+    assert items == []

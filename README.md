@@ -11,7 +11,7 @@ checkPaths:
   - deploy/**
   - src/services/vision_health.py
 lastReviewedAt: 2026-09-25
-lastReviewedCommit: 629f5b5
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 ---
 
 # TianGong AI Unstructure Serve
@@ -26,7 +26,7 @@ lastReviewedCommit: 629f5b5
 请初始化并启动当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先阅读仓库 AGENTS.md、README.md 和 docs/mineru_4_upgrade_usage.md，核对现有进程、端口、GPU、模型缓存和私有配置。已有配置和缓存应复用，缺失配置按示例初始化；不要覆盖凭证或修改系统 Python。缺少必须由我提供的凭证/地址时，明确列出缺项。
 按 uv.lock 使用 Python 3.13.15，应用安装 CPU ONNX 依赖，MinerU 大模型只运行在 Docker。按文档准备和验证小模型，检查 Redis、独立图片模型；若依赖由其他项目管理，按其已有方式使用，不重复创建。
-三卡使用 deploy/manage.sh start model 和 start app；四卡使用 start model4 和 start app4。等待模型实际健康后再启动所选 app 组及 start ordinary，启动 API、对应的 two-stage worker、视觉端点探测进程与普通 worker。已有在线进程不要重复重启。
+三卡使用 deploy/manage.sh start model 和 start app；四卡使用 start model4 和 start app4。等待模型实际健康后再启动所选 app 组及 start ordinary，启动 API、对应的 two-stage worker、视觉端点探测进程与普通 worker。已有在线进程不要重复重启；同一主机只选一种模型拓扑，不直接对整份 PM2 cjs 执行不带 --only 的 start。
 验证 API /health、/ready、普通及 two-stage 队列消费者、图片模型可用性，并用 input/p2.pdf 和含图论文做小规模真实验收。完成后 pm2 save；检查开机恢复是否已配置，缺失则按 pm2 startup 的提示配置。
 最后列出本项目进程、端口、检查结果、尚缺的配置和可用的调用方式。不要输出密钥，不操作无关服务，不用全局 PM2 删除或 Redis 清空命令。
 ```
@@ -54,6 +54,8 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 ```
 
 把 PDF、扫描图片和 Office 文档拆成带页码的结构化文本，可额外识别图表。支持单文件同步调用，以及带提交幂等、阶段恢复和结果下载的异步任务。
+
+文本层明显非空的 PDF 若解析为零块会报错，不能把空结果当成功；空白页仍可能没有业务块。
 
 默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
 

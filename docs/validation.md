@@ -10,8 +10,8 @@ whenToUpdate: "When governance commands, entrypoints or validation requirements 
 checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 ---
 
 # 开发验证与验收范围
@@ -29,7 +29,7 @@ uv run --group dev pytest
 
 `uv sync --check` 可能仅因 README/项目元数据变化而提示重建本项目的 editable 安装；先检查具体变更项，不把它直接当作第三方库漂移。只检查代码、且现有依赖已满足时，可用 `uv run --no-sync --group dev ...` 运行检查，避免同步运行环境；依赖变更仍须在隔离环境验证。
 
-常规测试用替身隔离外部依赖，覆盖路由参数、SDK 适配、资产完整性、阅读顺序、视觉失败、上传清理、共享解析槽和批量恢复；不代表模型解析质量或生产容量已验证。
+常规测试用替身隔离外部依赖，覆盖路由参数、SDK 适配、资产完整性、阅读顺序、视觉失败、上传清理、共享解析槽和批量恢复；`test_mineru4_adapter.py` 还用真实小 PDF 文本层验证“明显有字却零块”必须失败、仅选中空白页可保持空结果；不代表模型解析质量或生产容量已验证。
 
 `test_vision_capacity_http.py` 使用本地真实 TCP/HTTP 连接模拟 TLS 握手不响应和 HTTP 503，验证快速切换、跨调用冷却及恢复后重新分配；正常响应刻意晚于连接预算，确保不会误用短预算截断推理。该测试的响应是固定样本，模型质量仍须使用下面的真实 PDF 验收。`test_vision_health.py` 覆盖探测鉴权/前缀、有限兼容回退、模型匹配、总超时、禁止重定向、跨实例 leader 租约、状态过期和关闭时取消；健康成功不得直接恢复并发。
 
@@ -37,7 +37,7 @@ uv run --group dev pytest
 
 故障回归须保留故障前后的输入摘要、任务 ID/generation、parse manifest 和已完成图片的 SHA256/mtime。实测九页论文在指定单图请求前注入一次失败，恢复后原解析及三张已完成图片未改变，六张最终图片各实际调用模型一次。另对真实 SDK 子进程定点 SIGKILL，检查快速失败、同 ID 恢复及任务进程组收尾。注入故障与上游实际超时分开报告，不全局停止共享模型或清空队列。
 
-部署更新后，确认独立视觉探测进程在线、私有端点的状态持续更新；用实际 API 与七个 worker 验证 p2 的三类幂等任务、轻量下载和旧响应合同，以及同步解析、含图论文和 Office 转换。随后确认队列及 active/reserved/scheduled 收敛，核对本项目进程、共享服务状态并保存 PM2。该验收不代表低清图片语义或长期满载测试通过，具体质量与长文档边界见调优指南。
+部署更新后，确认独立视觉探测进程在线、私有端点的状态持续更新；按三卡或四卡拓扑核对相应 worker，并用实际 API 验证 p2 的三类幂等任务、轻量下载和旧响应合同，以及同步解析、含图论文和 Office 转换。随后确认队列及 active/reserved/scheduled 收敛，核对本项目进程、共享服务状态并保存 PM2。该验收不代表低清图片语义或长期满载测试通过，具体质量与长文档边界见调优指南。
 
 Black 排除任意层级的 `.venv` 和根目录的 input/output/pdfs/pickle，避免格式化模型环境或结果。Ruff 规则以 `pyproject.toml` 为准。
 
@@ -65,7 +65,7 @@ MINERU_RUN_API_PDFS=1 MINERU_RUN_BATCH_PDFS=1 \
 
 `--basetemp` 会清理指定目录，每轮使用新目录。按测试代码配置 `MINERU_TEST_API_URL`、`MINERU_TEST_INPUT_DIR` 或 `MINERU_TEST_VLM_URL`；不同测试支持的覆盖变量不同，不把其中一个变量当作所有测试的全局设置。输入回归的文件清单由测试中的 `PDF_NAMES` 固定，往 input 添加文件不会自动扩大回归范围。
 
-任务成功后检查源页号、首尾有效内容、关键表格/数字、checkbox、阅读顺序与图片文件。真实 PDF 回归须按 SDK 保存后的图片引用加载完整像素，验证可解码且尺寸非零；图片命名和分辨率变更还需检查视觉筛选及图中数字，不能只检查非空文件。空白页可能没有业务块，不能只看最大 page_number 判断整本完整性。
+任务成功后检查源页号、首尾有效内容、关键表格/数字、checkbox、阅读顺序与图片文件。真实 PDF 回归须按 SDK 保存后的图片引用加载完整像素，验证可解码且尺寸非零；图片命名和分辨率变更还需检查视觉筛选及图中数字，不能只检查非空文件。空白页可能没有业务块，不能只看最大 page_number 判断整本完整性；对有明显文本层的 PDF 还要检查结果非空，`/ready` 成功不足以证明推理正常。
 
 ## 运行设施验收
 

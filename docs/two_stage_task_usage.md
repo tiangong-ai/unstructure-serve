@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 docType: runbook
 scope: repo
 status: current
@@ -139,7 +139,7 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
 }
 ```
 
-成功结果中的未设置字段可为 null，普通正文/表格不保证有非空 type。任务 FAILURE/REVOKED 查询使用 HTTP 200 返回带 error 的状态体；入队或查询基础设施错误仍可返回 4xx/5xx，调用方需同时检查 HTTP 状态与任务 state。
+成功结果中的未设置字段可为 null，普通正文/表格不保证有非空 type。解析结果为空且所选 PDF 页文本层明显非空时，parse 阶段转为 FAILURE，修复模型后按原任务 ID 的恢复流程处理；无文本层的扫描件和空白页不按该文本阈值判错。任务 FAILURE/REVOKED 查询使用 HTTP 200 返回带 error 的状态体；入队或查询基础设施错误仍可返回 4xx/5xx，调用方需同时检查 HTTP 状态与任务 state。
 
 ## 批量解析
 

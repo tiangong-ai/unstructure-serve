@@ -18,6 +18,26 @@ case "$group" in
   app) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge,vision-health-monitor ;;
   *) echo "Unknown group: $group" >&2; exit 2 ;;
 esac
+case "$group:$action" in
+  model:start|model:restart|model4:start|model4:restart)
+    if [[ "$group" == model ]]; then
+      other=mineru-vlm-docker-parallel4
+    else
+      other=mineru-vlm-docker-parallel
+    fi
+    conflict=$(pm2 jlist | node -e '
+      let data="";
+      process.stdin.on("data", chunk => data += chunk);
+      process.stdin.on("end", () => {
+        const app = JSON.parse(data).find(p => p.name === process.argv[1]);
+        console.log(app && ["online", "launching"].includes(app.pm2_env.status) ? "yes" : "no");
+      });' "$other")
+    if [[ "$conflict" == yes ]]; then
+      echo "Refusing to start $names while $other is running; select one model topology." >&2
+      exit 1
+    fi
+    ;;
+esac
 case "$action" in
   start)
     pending=$(pm2 jlist | node -e '

@@ -14,7 +14,7 @@ checkPaths:
   - pyproject.toml
   - uv.lock
 lastReviewedAt: 2026-09-25
-lastReviewedCommit: fe36df4
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 ---
 
 # 部署、维护与恢复
@@ -139,7 +139,7 @@ curl --fail http://127.0.0.1:30000/health
 pm2 save
 ```
 
-四卡主机改用 `start model4`，等待 30000 端口健康后使用 `start app4` 与 `start ordinary`。配置 `MINERU_PARSE_SLOTS=4`，让 API 与四个解析 worker 使用同一槽目录；三卡主机仍使用上述默认组。
+四卡主机改用 `start model4`，等待 30000 端口健康后使用 `start app4` 与 `start ordinary`。同一主机只选一种模型拓扑；管理脚本会拒绝另一种模型组已在线时的启动/重启，不要直接对整份 PM2 cjs 执行不带 `--only` 的 start。配置 `MINERU_PARSE_SLOTS=4`，让 API 与四个解析 worker 使用同一槽目录；三卡主机仍使用上述默认组。
 
 图片端点探测使用与调用方相同的私有地址、鉴权和共享槽目录。配置更新时同时重启 vision-health 与受影响 API/worker；仅部署同步或 ordinary 时也可单独启动 vision-health。未配置图片端点时探测进程空闲。用 `uv run python -m src.services.vision_health --status` 查看本地状态的新鲜度、可用性与熔断阶段；健康探测不执行图片推理，故障恢复仍须真实 PDF 验收。探测间隔、过期与半开规则见[调优指南](performance-tuning.md#82-主动健康探测与恢复)。
 
@@ -186,6 +186,8 @@ pm2 save
 ## Docker 与多卡
 
 三卡由一份基础 Compose 加一份 parallel 覆盖文件定义，project 为 mineru-vlm-parallel。一个容器绑定 GPU 0/1/2，DP=3、TP=1，每卡完整模型副本，通过单地址分配请求。应用无需设置三个 URL；单次模型生成不会自动分成三卡计算。
+
+现有模板覆盖单卡、三卡与四卡；其他卡数须新增 Compose 覆盖并同步 GPU ID、DP 数、PM2 显存预算、解析 worker 与共享槽数。
 
 四卡使用 `compose.mineru.parallel4.yaml` 和独立 project `mineru-vlm-parallel4`，绑定 GPU 0/1/2/3，DP=4、TP=1，仍向应用提供单个 30000 端点。所有拓扑都默认把 MinerU2.5 Pro 的 `tie_word_embeddings` 显式传给 vLLM；更换模型时按权重结构核对 `MINERU_DOCKER_TIE_WORD_EMBEDDINGS`。四卡 PM2 模板的显存比例为 0.45，需按目标显卡和真实推理峰值验收；不要同时运行三卡与四卡 project。
 

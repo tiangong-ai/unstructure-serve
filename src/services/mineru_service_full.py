@@ -237,6 +237,40 @@ def _normalize_content_list(items: list[dict], output_dir: Path, middle_json) ->
     return normalized
 
 
+_PDF_TEXT_LAYER_MIN_CHARS = 32
+
+
+def _pdf_has_substantial_text(source: Path, start_page_id: int, end_page_id: Optional[int]) -> bool:
+    """Check selected PDF pages only when MinerU returned no content."""
+    import pypdfium2 as pdfium
+
+    try:
+        document = pdfium.PdfDocument(str(source))
+    except pdfium.PdfiumError as exc:
+        raise RuntimeError("Cannot validate empty MinerU PDF result") from exc
+
+    try:
+        last_page = len(document) - 1
+        if end_page_id is not None:
+            last_page = min(last_page, end_page_id)
+        text_chars = 0
+        for page_index in range(start_page_id, last_page + 1):
+            page = document[page_index]
+            try:
+                text_page = page.get_textpage()
+                try:
+                    text_chars += sum(not char.isspace() for char in text_page.get_text_bounded())
+                finally:
+                    text_page.close()
+            finally:
+                page.close()
+            if text_chars >= _PDF_TEXT_LAYER_MIN_CHARS:
+                return True
+        return False
+    finally:
+        document.close()
+
+
 def parse_doc(
     path_list: list[Path],
     output_dir,
@@ -318,6 +352,14 @@ def parse_doc(
             last_content_list = _normalize_content_list(
                 render(saved.middle_json), artifact_dir, saved.middle_json
             )
+            if (
+                is_pdf
+                and not last_content_list
+                and _pdf_has_substantial_text(source, start_page_id, end_page_id)
+            ):
+                raise RuntimeError(
+                    "MinerU returned no content for a PDF with a nonempty text layer"
+                )
             if is_pdf:
                 reconcile_content_list_checkboxes(last_content_list, source)
             (artifact_dir / f"{source.stem}_content_list.json").write_text(

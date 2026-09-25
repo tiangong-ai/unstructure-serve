@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-09-25
-lastReviewedCommit: fe36df4
+lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -68,7 +68,7 @@ lastReviewedCommit: fe36df4
 - 直接服务调用未指定档位时读取 `MINERU_DEFAULT_TIER`，再兼容旧 backend；两者均未配置时使用 `advanced`。旧映射：pipeline→basic、hybrid→standard、vlm→advanced。旧名称只影响档位，大模型推理仍走 Docker；不要重新引入本机引擎。
 - PDF、受支持图片和 Office 转 PDF 清单才是服务输入边界；Markdown/TXT 拒绝。不要因上游新增格式而自动扩大接口范围。
 - `parse_doc()` 使用无状态 `mineru.parser.parse`，默认 PDF `page_range=all`。零基 start/end 转成一基范围，保留源页号；返回 `(content_list, artifact_dir, None)`。先保存 MiddleJson/图片，再渲染 V1 并补齐旧字段；图片引用缺失必须失败。默认通过公开 ParseResult 导出，不保存原始 model_output.json；仅 dump_debug_intermediate=True 导出该诊断，不能用丢弃 writer 输出的方式绕过前置深拷贝/序列化成本。
-- `img_caption/img_footnote`、chart/code/index/page_footnote 映射和 bbox 单位需保持下游兼容；同时写旧命名 `_content_list.json` 供诊断。异常继续冒泡，不返回空值伪装成功。
+- `img_caption/img_footnote`、chart/code/index/page_footnote 映射和 bbox 单位需保持下游兼容；同时写旧命名 `_content_list.json` 供诊断。异常继续冒泡，不返回空值伪装成功。解析结果为空时，仅对所选 PDF 页文本层累计至少 32 个非空白字符的情形抛错；空白页、无文本层扫描件和非 PDF 不按这个阈值误判。
 - Office 主结果始终先经 LibreOffice 转 PDF，再使用所选 tier；每次转换使用独立 profile 并在超时后收尾。
 - 仅同步 `/mineru_with_images` 的 `.docx + return_txt=true` 使用额外原生 DOCX flash 分支生成 txt，result/页码仍来自 PDF。该分支图片按原文顺序插入严格可见内容 OCR，不附加 caption/footnote 或根据上下文推断实体。普通任务和 two-stage 不启用该分支。
 - `chunk_type=true` 保留 title/header/footer 和原阅读顺序，视觉增强的图片块标 image，忽略 page_number 块；普通正文/表格可能没有 type。txt 按同序拼接，标题段后两个换行，普通段后一个换行。普通响应省略 null 字段、任务失败查询返回 500；two-stage 保留 null、任务失败查询返回 200 状态体，调用方仍须检查 state。
@@ -118,7 +118,7 @@ lastReviewedCommit: fe36df4
 - 进程环境优先于 `.env`，再回退到 `.secrets/secrets.toml`。PM2 `env` 属于进程环境，不会被 `load_dotenv()` 覆盖；Python 加载 `.env` 不会替调用方 shell 导出变量。
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
 - 三卡部署入口为 `deploy/pm2/ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `deploy/mineru-vllm/compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
-- 四卡可选入口为 `deploy/manage.sh start model4` 与 `deploy/manage.sh start app4`，对应 `serve.sh parallel4`、四 GPU Compose 覆盖和第四个 parse worker。三卡入口及默认参数继续独立可用；同一主机只启动一种模型拓扑。
+- 四卡可选入口为 `deploy/manage.sh start model4` 与 `deploy/manage.sh start app4`，对应 `serve.sh parallel4`、四 GPU Compose 覆盖和第四个 parse worker。三卡入口及默认参数继续独立可用；同一主机只启动一种模型拓扑。统一管理脚本在启动或重启 model/model4 前拒绝另一种拓扑仍在线的情况；不要直接无 `--only` 启动整份 PM2 cjs。
 - MinerU2.5 Pro 2605-1.2B 权重没有独立的 lm_head.weight，顶层配置也未显式设置 tie_word_embeddings；基础和多卡 Compose 均向 vLLM 传递顶层 hf-overrides tie_word_embeddings=true，可通过 MINERU_DOCKER_TIE_WORD_EMBEDDINGS 按模型配置覆盖。vLLM 0.28.0 若未显式绑定输出层，会出现整页输出 !、被截断、解析结果为空；/health 与 /ready 仍可能成功，必须用真实文本 PDF 检查非空内容。
 - Docker 默认基线为 vLLM 0.21.0 配套 Torch/CUDA；可用 `MINERU_DOCKER_BASE_IMAGE` 和 `MINERU_DOCKER_VLLM_VERSION` 为目标环境选择上游允许的版本。vLLM 0.28.0 对 FastAPI 要求 `>=0.133,<0.137`，镜像内的 FastAPI/Starlette 用独立构建参数选择并经 `pip check` 验证，不跟随应用锁文件。模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
 - MinerU 4.0.7 配套 DocVortex 至少 0.4.24；应用锁文件和镜像固定 DocVortex 0.4.25、mineru-vl-utils 2.0.5。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是已验收基线而非最新版，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围。
