@@ -1,10 +1,11 @@
 services:
   mineru-vlm:
-    image: tiangong/mineru-vlm:4.0.5-vllm0.21.0
+    image: tiangong/mineru-vlm:${MINERU_DOCKER_IMAGE_TAG:-4.0.7-vllm0.21.0}
     build:
       context: .
       args:
         VLLM_IMAGE: ${MINERU_DOCKER_BASE_IMAGE:-vllm/vllm-openai:v0.21.0}
+        VLLM_VERSION: ${MINERU_DOCKER_VLLM_VERSION:-0.21.0}
     restart: unless-stopped
     runtime: nvidia
     # Snap's boot-time CDI scan can run before UVM nodes are created.

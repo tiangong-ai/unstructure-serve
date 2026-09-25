@@ -4,8 +4,8 @@ set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 mode=${1:-parallel}
 case "$mode" in
-  parallel|single) ;;
-  *) echo "Usage: $0 [parallel|single]" >&2; exit 2 ;;
+  parallel|parallel4|single) ;;
+  *) echo "Usage: $0 [parallel|parallel4|single]" >&2; exit 2 ;;
 esac
 
 cd "$repo_root"
@@ -24,6 +24,8 @@ done
 compose=(docker compose --env-file "$repo_root/.env" --project-name "mineru-vlm-$mode" --file "$repo_root/deploy/mineru-vllm/compose.mineru.yaml")
 if [[ "$mode" == parallel ]]; then
   compose+=(--file "$repo_root/deploy/mineru-vllm/compose.mineru.parallel.yaml")
+elif [[ "$mode" == parallel4 ]]; then
+  compose+=(--file "$repo_root/deploy/mineru-vllm/compose.mineru.parallel4.yaml")
 fi
 
 # Stay attached so PM2 stop/restart also stops/restarts the container.

@@ -10,15 +10,15 @@ whenToUpdate: "When the documented entrypoints or operational contracts change."
 checkPaths:
   - deploy/**
   - src/services/vision_health.py
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 629f5b5
 ---
 
 # TianGong AI Unstructure Serve
 
 ## 直接复制给 AI：启动、恢复、停止整套设施
 
-在能访问部署机器的 AI 中打开本仓库作为工作区，再复制以下任一段。AI 会读取本地配置使用凭证，无需把密钥粘贴到对话中。整套设施包括本项目的 API、普通 worker、六个 two-stage worker、视觉端点探测进程和三卡 MinerU 模型，以及配置中依赖的 Redis、图片模型；共享或其他项目管理的依赖须先识别归属。
+在能访问部署机器的 AI 中打开本仓库作为工作区，再复制以下任一段。AI 会读取本地配置使用凭证，无需把密钥粘贴到对话中。整套设施包括本项目的 API、普通 worker、two-stage worker、视觉端点探测进程和按硬件选择的三卡或四卡 MinerU 模型，以及配置中依赖的 Redis、图片模型；共享或其他项目管理的依赖须先识别归属。
 
 **首次初始化并启动：**
 
@@ -26,7 +26,7 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 请初始化并启动当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先阅读仓库 AGENTS.md、README.md 和 docs/mineru_4_upgrade_usage.md，核对现有进程、端口、GPU、模型缓存和私有配置。已有配置和缓存应复用，缺失配置按示例初始化；不要覆盖凭证或修改系统 Python。缺少必须由我提供的凭证/地址时，明确列出缺项。
 按 uv.lock 使用 Python 3.13.15，应用安装 CPU ONNX 依赖，MinerU 大模型只运行在 Docker。按文档准备和验证小模型，检查 Redis、独立图片模型；若依赖由其他项目管理，按其已有方式使用，不重复创建。
-通过 deploy/manage.sh start model 启动模型，等待实际健康；再执行 start app 和 start ordinary，启动 API、六个 two-stage worker、视觉端点探测进程与普通 worker。已有在线进程不要重复重启。
+三卡使用 deploy/manage.sh start model 和 start app；四卡使用 start model4 和 start app4。等待模型实际健康后再启动所选 app 组及 start ordinary，启动 API、对应的 two-stage worker、视觉端点探测进程与普通 worker。已有在线进程不要重复重启。
 验证 API /health、/ready、普通及 two-stage 队列消费者、图片模型可用性，并用 input/p2.pdf 和含图论文做小规模真实验收。完成后 pm2 save；检查开机恢复是否已配置，缺失则按 pm2 startup 的提示配置。
 最后列出本项目进程、端口、检查结果、尚缺的配置和可用的调用方式。不要输出密钥，不操作无关服务，不用全局 PM2 删除或 Redis 清空命令。
 ```
@@ -36,9 +36,9 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 ```text
 请恢复当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先读 AGENTS.md、README.md 和部署说明，检查本项目 PM2/容器状态、端口、日志、GPU/CUDA、Redis、独立图片模型，定位故障。先检查在途任务及队列，再决定哪些故障组件需要重启；健康组件保持运行。
-复用现有 .venv、uv.lock、私有配置和缓存。通过 deploy/manage.sh start model 补起模型并验证健康，再 start app、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
+复用现有 .venv、uv.lock、私有配置和缓存。按现有三卡或四卡拓扑使用 deploy/manage.sh start model 或 start model4 补起模型并验证健康，再 start app 或 start app4、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
 如驱动升级后 GPU 可见但推理失败，按部署说明检查 UVM/CDI 和容器内 CUDA，不以 nvidia-smi 正常作为修复完成的依据。
-核对 API、三个解析 worker、视觉/调度/合并 worker、普通 worker、视觉端点探测进程和三卡模型，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录及持久任务清单（uv run python -m src.scripts.manage_jobs list），发布不明确的任务按部署说明 recover；失败任务修复原因并确认没有活跃阶段后才按原 ID resume。恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
+核对 API、所选拓扑的三个或四个解析 worker、视觉/调度/合并 worker、普通 worker、视觉端点探测进程和全部模型 GPU，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录及持久任务清单（uv run python -m src.scripts.manage_jobs list），发布不明确的任务按部署说明 recover；失败任务修复原因并确认没有活跃阶段后才按原 ID resume。恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
 完成后 pm2 save，说明原因、修复内容、验证结果和仍未恢复的依赖，不输出密钥。
 ```
 
@@ -48,7 +48,7 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 请安全停止当前工作区中 TianGong AI Unstructure Serve 的文档解析设施。
 先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止新增提交，保留各批量客户端的输入、输出目录和任务记录；统一客户端可停止后用原命令加 --resume-only 重新运行，只查询并保存已提交任务，不补交或重试文件。其他提交来源也停止新增请求，保持 API/worker/模型可用直到已有任务结果已收取。
 检查普通和 two-stage 的 ready、active、reserved、scheduled/unacked 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
-任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、stop workers、stop vision-health、stop model，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
+任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、按所选拓扑 stop workers 或 stop workers4、stop vision-health、按所选拓扑 stop model 或 stop model4，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
 Redis 和独立图片模型如为共享或其他项目管理的服务，保持运行；仅在确认专用于本项目且停止不会影响其他服务时，按其已有启动方式停止。不删除容器卷、模型缓存、结果、任务记录或私有配置，不使用 pm2 delete all、Redis flush 或全局进程清理。
 最后报告已停止的组件、保留的共享依赖，以及下次恢复应执行的步骤。
 ```
@@ -57,17 +57,17 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
 
-当前技术栈：**Python 3.13.15 · MinerU 4.0.5 · CPU ONNX · Docker vLLM 0.21.0 · FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
+当前技术栈：**Python 3.13.15 · MinerU 4.0.7 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
 ## 先理解需要运行什么
 
 | 程序 | 用途 | 何时需要 |
 | --- | --- | --- |
-| Docker MinerU VLM | 解析模型；默认 GPU 0/1/2，DP=3、单地址 30000 | standard/advanced |
+| Docker MinerU VLM | 解析模型；三卡 DP=3 或四卡 DP=4，单地址 30000 | standard/advanced |
 | Gunicorn API | 上传、提交、查询，默认 7770 | 所有服务调用 |
 | Redis | Celery 队列与结果状态 | 异步任务 |
 | 普通 Celery worker | 纯解析或完整图片增强任务 | 两个普通 `/task` 接口 |
-| two-stage 六个 worker | 三个解析 worker，加图片调度、识别、合并 | 图片增强批处理 |
+| two-stage worker | 三卡组六个（其中解析三个），四卡组七个（其中解析四个） | 图片增强批处理 |
 | 视觉端点探测进程 | 主动探测独立图片端点，向 API/worker 共享状态 | 图片增强；start app 自动包含 |
 | 独立图片模型服务 | 为提取出来的图片生成描述 | 图片增强；与 MinerU VLM 是两个服务 |
 
@@ -92,7 +92,7 @@ cp -n .env.example .env
 - MinerU 模型地址，默认 `http://127.0.0.1:30000`；小模型使用 ONNX。
 - Redis broker/backend 与任务目录，API 和 worker 保持一致。
 - 图片增强另填 `VLLM_BASE_URLS`、模型名和凭证。
-- 三卡模板要求 GPU 0/1/2 可用；CPU/显存不足时按[调优指南](docs/performance-tuning.md)降低容量。
+- 三卡模板要求 GPU 0/1/2 可用，四卡模板要求 GPU 0/1/2/3 可用；按[部署说明](docs/mineru_4_upgrade_usage.md#docker-与多卡)选择对应组，并按目标显卡调整显存预算。
 
 准备 CPU 模型：
 

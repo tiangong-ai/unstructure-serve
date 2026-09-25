@@ -5,6 +5,7 @@ const root = path.resolve(__dirname, '../..');
 const files = [
   'ecosystem.config.json', 'ecosystem.two_stage.celery.json',
   'ecosystem.celery.json', 'ecosystem.vllm.parallele.config.json',
+  'ecosystem.vllm.parallel4.config.json', 'ecosystem.two_stage.parse4.json',
   'ecosystem.two_stage.flower.json', 'ecosystem.celery.flower.json',
   'ecosystem.vision_health.json',
 ];

@@ -1,0 +1,20 @@
+{
+  "apps": [
+    {
+      "name": "mineru-vlm-docker-parallel4",
+      "cwd": ".",
+      "script": "deploy/mineru-vllm/serve.sh",
+      "args": "parallel4",
+      "interpreter": "none",
+      "autorestart": true,
+      "max_restarts": 5,
+      "min_uptime": "60s",
+      "exp_backoff_restart_delay": 10000,
+      "kill_timeout": 70000,
+      "env": {
+        "MINERU_DOCKER_PORT": "30000",
+        "MINERU_DOCKER_GPU_MEMORY": "0.45"
+      }
+    }
+  ]
+}

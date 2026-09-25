@@ -13,19 +13,19 @@ checkPaths:
   - .env.example
   - pyproject.toml
   - uv.lock
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 629f5b5
 ---
 
 # 部署、维护与恢复
 
-应用使用 Python 3.13.15、MinerU 4.0.5 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
+应用使用 Python 3.13.15、MinerU 4.0.7 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
 
 所有 shell 命令在仓库根目录执行，文件示例使用相对路径。跨进程或容器的共享目录由部署配置决定，必须指向同一位置；本文不预设机器目录。
 
 ## 首次安装
 
-准备 Linux、NVIDIA 驱动及 Container Toolkit、Docker Compose 2.24.4+、PM2 和 uv。Compose 需要已注册的 nvidia runtime，三卡模板要求 GPU 0/1/2 可用。Python 由 uv 管理，不替换操作系统 Python。
+准备 Linux、NVIDIA 驱动及 Container Toolkit、Docker Compose 2.24.4+、PM2 和 uv。Compose 需要已注册的 nvidia runtime，三卡模板要求 GPU 0/1/2 可用，四卡模板要求 GPU 0/1/2/3 可用。Python 由 uv 管理，不替换操作系统 Python。
 
 ```bash
 sudo apt install -y libmagic-dev poppler-utils libreoffice pandoc graphicsmagick
@@ -116,11 +116,14 @@ recover 不会重新提交已标记 published 的任务；需要显式恢复时�
 | 组名 | 包含组件 |
 | --- | --- |
 | model | 三卡 MinerU 模型，PM2 名 mineru-vlm-docker-parallel |
+| model4 | 四卡 MinerU 模型，PM2 名 mineru-vlm-docker-parallel4 |
 | api | Gunicorn，PM2 名 unstructured-gunicorn |
 | workers | 三个 parse，加 vision/dispatch/merge，共六个 two-stage worker |
+| workers4 | 四个 parse，加 vision/dispatch/merge，共七个 two-stage worker |
 | ordinary | 普通 Celery worker，PM2 名 celery-worker |
 | vision-health | 独立图片端点探测，PM2 名 vision-health-monitor |
 | app | api 加 workers、vision-health，不含 model 或 ordinary |
+| app4 | api 加 workers4、vision-health，不含 model4 或 ordinary |
 
 启动顺序：
 
@@ -136,6 +139,8 @@ curl --fail http://127.0.0.1:30000/health
 pm2 save
 ```
 
+四卡主机改用 `start model4`，等待 30000 端口健康后使用 `start app4` 与 `start ordinary`。配置 `MINERU_PARSE_SLOTS=4`，让 API 与四个解析 worker 使用同一槽目录；三卡主机仍使用上述默认组。
+
 图片端点探测使用与调用方相同的私有地址、鉴权和共享槽目录。配置更新时同时重启 vision-health 与受影响 API/worker；仅部署同步或 ordinary 时也可单独启动 vision-health。未配置图片端点时探测进程空闲。用 `uv run python -m src.services.vision_health --status` 查看本地状态的新鲜度、可用性与熔断阶段；健康探测不执行图片推理，故障恢复仍须真实 PDF 验收。探测间隔、过期与半开规则见[调优指南](performance-tuning.md#82-主动健康探测与恢复)。
 
 model 的 PM2 online 不代表模型已就绪。脚本的 status 显示该用户的全部 PM2 进程；logs 仅跟踪所选组的第一个进程，检查其他 worker 时用其完整 PM2 名称。
@@ -147,7 +152,7 @@ uv run celery -A src.services.celery_app inspect active_queues --timeout=5
 uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout=5
 ```
 
-普通 worker 为 threads/16；two-stage parse 为三个 solo/1，vision 为 threads/32，dispatch/merge 各 threads/4，均 prefetch=1。普通和 two-stage 使用不同任务注册表，队列必须按[普通任务](mineru_with_images_task_usage.md)及[two-stage](two_stage_task_usage.md#队列与配置)对应。不要让普通 worker 消费 two-stage merge 的 default 队列。
+普通 worker 为 threads/16；two-stage parse 默认三个 solo/1，四卡组增加第四个 solo/1，vision 为 threads/32，dispatch/merge 各 threads/4，均 prefetch=1。普通和 two-stage 使用不同任务注册表，队列必须按[普通任务](mineru_with_images_task_usage.md)及[two-stage](two_stage_task_usage.md#队列与配置)对应。不要让普通 worker 消费 two-stage merge 的 default 队列。
 
 ### 检查就绪
 
@@ -182,13 +187,15 @@ pm2 save
 
 三卡由一份基础 Compose 加一份 parallel 覆盖文件定义，project 为 mineru-vlm-parallel。一个容器绑定 GPU 0/1/2，DP=3、TP=1，每卡完整模型副本，通过单地址分配请求。应用无需设置三个 URL；单次模型生成不会自动分成三卡计算。
 
+四卡使用 `compose.mineru.parallel4.yaml` 和独立 project `mineru-vlm-parallel4`，绑定 GPU 0/1/2/3，DP=4、TP=1，仍向应用提供单个 30000 端点。四卡 PM2 模板的显存比例为 0.45，需按目标显卡和真实推理峰值验收；不要同时运行三卡与四卡 project。
+
 | 项目 | 配置位置与模板值 |
 | --- | --- |
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，vllm/vllm-openai:v0.21.0 |
-| 应用模型镜像 | tiangong/mineru-vlm:4.0.5-vllm0.21.0 |
+| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.0.7-vllm0.21.0；可用 MINERU_DOCKER_IMAGE_TAG 按环境覆盖 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存比例 | 三卡 PM2 env 的 MINERU_DOCKER_PORT=30000、MINERU_DOCKER_GPU_MEMORY=0.10；按实际硬件重新验收 |
-| GPU 绑定 / DP / TP | compose.mineru.parallel.yaml 中显式设置，扩卡时一起修改 |
+| GPU 绑定 / DP / TP | 三卡由 compose.mineru.parallel.yaml 设置，四卡由 compose.mineru.parallel4.yaml 设置 |
 | 模型卷 / 下载缓存卷 | 默认 mineru-vlm-models / mineru-vlm-cache，可用 MINERU_DOCKER_MODEL_VOLUME / MINERU_DOCKER_CACHE_VOLUME 覆盖 |
 
 复用已有命名卷时确认两卷存在，再设置 MINERU_DOCKER_VOLUMES_EXTERNAL=true。不要删除缓存卷以解决普通启动问题。端口默认仅绑定 loopback；跨机器访问需另外配置可达地址与认证。
@@ -209,7 +216,7 @@ nvidia-smi 正常不保证容器内 CUDA 可用。检查宿主 UVM 设备节点�
 
 ### 可选拓扑与监控
 
-单卡使用 deploy/pm2/ecosystem.vllm.config.json；该模板不在 manage.sh 的 model 组中，需要在仓库根目录直接管理，并同步应用模型地址。三卡与单卡二选一，不能让两套启动器争用同一端口或 GPU。
+单卡使用 deploy/pm2/ecosystem.vllm.config.json；该模板不在 manage.sh 的 model 组中，需要在仓库根目录直接管理，并同步应用模型地址。单卡、三卡与四卡择一运行，不能让多套启动器争用同一端口或 GPU。
 
 独立端点模板和多 API 模板是可选示例，不自动扩展模型容量。MINERU_VLLM_SERVER_URLS 只在解析进程内轮换，缺少跨进程调度和故障切换保证，不等同于三卡内部 DP。
 

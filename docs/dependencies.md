@@ -12,8 +12,8 @@ checkPaths:
   - uv.lock
   - .python-version
   - deploy/mineru-vllm/Dockerfile
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-09-25
+lastReviewedCommit: 629f5b5
 ---
 
 # 依赖与 Python 维护
@@ -24,8 +24,8 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 
 | 环境 | 当前约定 | 验证方式 |
 | --- | --- | --- |
-| 应用 | Python 3.13.15、MinerU 4.0.5 基础包、CPU ONNX；不安装 Torch/vLLM | `uv sync --locked --group dev --check`、`uv pip check` |
-| Docker 模型 | vLLM 0.21.0 配套的 Torch/CUDA，镜像内安装 MinerU 4.0.5 | 构建中的 `pip check`、容器 CUDA 计算及真实 PDF |
+| 应用 | Python 3.13.15、MinerU 4.0.7 基础包、CPU ONNX；不安装 Torch/vLLM | `uv sync --locked --group dev --check`、`uv pip check` |
+| Docker 模型 | vLLM 0.21.0 配套的 Torch/CUDA，镜像内安装 MinerU 4.0.7 与 DocVortex 0.4.25 | 构建中的 `pip check`、容器 CUDA 计算及真实 PDF |
 | 系统工具 | LibreOffice、Poppler、Pandoc 等 | [部署检查](mineru_4_upgrade_usage.md)与 Office 回归 |
 
 四档质量是解析选项，不是安装 extras。CPU ONNX 加 Docker VLM 的应用使用基础 `mineru`；不要为了 `flash/basic/standard/advanced` 安装包含本地模型引擎的 extra。`uv.lock` 可能含其他操作系统的条件依赖，不能只搜索锁文件中的包名来判断本机是否安装。
@@ -54,15 +54,15 @@ uv run --group dev pytest
 
 | 包 | 约束来源 | 当前选择 |
 | --- | --- | --- |
-| OpenAI SDK | MinerU 4.0.5 要求 `openai<3` | 2.54.0，不能直接换成 3.x |
+| OpenAI SDK | MinerU 4.0.7 要求 `openai<3` | 2.54.0，不能直接换成 3.x |
 | Redis Python 客户端 | Kombu 的 Redis extra 要求 `<6.5` | 6.4.0；与 Redis 服务端版本是两回事 |
 | pydantic-core | Pydantic 2.13.5 精确依赖 `==2.46.5` | 随 Pydantic 一起升级 |
 | tomlkit | Gradio 要求 `<0.15` | 0.14.0 |
 | websockets | google-genai 要求 `<17` | 16.1.1 |
 
-MinerU 4.0.5 的 `full` extra 声明 `vllm>=0.19.1,<0.29.0`。本项目模型镜像使用 `torch` extra，显式保留经验证的 vLLM 0.21.0；这不表示它是最新版。0.28.0 在上述范围内，但更换它还会更换 Torch/CUDA 及推理实现，必须单独构建、验证 MinerU logits processor、三副本调度和真实 PDF。不要绕过上游范围直接使用 0.29.0，也不要把模型环境版本写入应用锁文件。版本依据为 [MinerU 4.0.5 包元数据](https://pypi.org/pypi/mineru/4.0.5/json)和 [vLLM 0.28.0 发行说明](https://github.com/vllm-project/vllm/releases/tag/v0.28.0)。
+MinerU 4.0.7 的 `full` extra 声明 `vllm>=0.19.1,<0.29.0`。模型镜像默认使用已验收的 vLLM 0.21.0；0.28.0 是这一范围内的最新稳定版，可通过私有环境配置覆盖镜像及版本校验参数。更换 vLLM 同时更换 Torch/CUDA 与推理实现，需检查 CUDA、MinerU logits processor、全部 DP 副本和真实 PDF。不要把模型环境版本写入应用锁文件。版本依据为 [MinerU 4.0.7 包元数据](https://pypi.org/pypi/mineru/4.0.7/json)和 [vLLM 0.28.0 发行说明](https://github.com/vllm-project/vllm/releases/tag/v0.28.0)。
 
-MinerU 4.0.5 要求 DocVortex 至少 0.4.20、mineru-vl-utils 至少 2.0.5；应用锁文件和模型镜像分别固定为 0.4.21、2.0.5。ONNX 会话在没有显式线程设置时读取 `MINERU_INTRA_OP_NUM_THREADS` / `MINERU_INTER_OP_NUM_THREADS`，上游最终回退为 4/1；本项目部署模板显式使用 16/1。资产文件名由 SDK 保存后的引用决定，不能依赖旧哈希命名；升级须验证真实图片可解码、分辨率和下游视觉筛选。变更依据见 [4.0.5 发行说明](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.0.5-released)。
+MinerU 4.0.7 要求 DocVortex 至少 0.4.24、mineru-vl-utils 至少 2.0.5；应用锁文件和模型镜像分别固定为 0.4.25、2.0.5。ONNX 会话在没有显式线程设置时读取 `MINERU_INTRA_OP_NUM_THREADS` / `MINERU_INTER_OP_NUM_THREADS`，上游最终回退为 4/1；本项目部署模板显式使用 16/1。资产文件名由 SDK 保存后的引用决定，不能依赖旧哈希命名；升级须验证真实图片可解码、分辨率和下游视觉筛选。变更依据见 [4.0.7 发行说明](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.0.7-released)。
 
 ## Python 版本选择
 

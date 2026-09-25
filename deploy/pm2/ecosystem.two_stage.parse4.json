@@ -1,0 +1,19 @@
+{
+  "apps": [
+    {
+      "name": "celery-two-stage-parse-4",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n parse-4@%h -l info -Q queue_parse_urgent,queue_parse_gpu -P solo -c 1 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu",
+        "MINERU_PROCESSING_WINDOW_SIZE": "64",
+        "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
+      },
+      "kill_timeout": 1900000
+    }
+  ]
+}
