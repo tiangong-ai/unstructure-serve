@@ -14,7 +14,7 @@ checkPaths:
   - pyproject.toml
   - uv.lock
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
+lastReviewedCommit: 0f51dbd
 ---
 
 # 部署、维护与恢复
@@ -87,6 +87,8 @@ HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 ba
 - 持久 two-stage 的转换/parse 通过隔离子进程执行，MINERU_TWO_STAGE_HARD_TIMEOUT_SECONDS 缺省回退任务预算 1800 秒；普通/图片任务分别读取对应 hard timeout。该预算包含排队槽位和结果传输，不含所有后续图片请求；客户端等待和 PM2 停止窗口均不能替代执行期限。千页任务还需检查消息确认和结果保存期限，见[长任务准入](performance-tuning.md#12-4001000-页整本批量的专项准入)。
 
 ## 启动与维护
+
+如果模型由 GPUStack 托管，应用配置参考 `deploy/gpustack/application.env.example`，启动使用 app4 与 ordinary，模型生命周期交给 GPUStack。本文 model/model4、原生 Compose 和按本机 GPU 数选组的步骤只用于独立部署；共享模型部署按 [GPUStack 手册](gpustack-workers.md)操作。所有节点使用相同应用提交和锁文件，主机差异留在私有配置。
 
 ### 持久任务恢复与磁盘保留
 

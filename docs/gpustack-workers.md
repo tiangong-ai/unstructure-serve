@@ -11,7 +11,7 @@ checkPaths:
   - deploy/gpustack/mineru-backend.example.json
   - deploy/mineru-vllm/model-entrypoint.sh
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: daabfca
+lastReviewedCommit: 0f51dbd
 ---
 
 # GPUStack 原生模型托管
@@ -27,6 +27,10 @@ GPUStack worker 管理模型容器的创建、停止与恢复，应用 API、Cel
 同一原生模型对应一个 deployment，多个 deployment 可以加入同一 GPUStack model route。HTTP 负载均衡负责选择模型实例，各实例内部保留 DP；不能把路由目标数量当作一个请求的 TP 数量。
 
 ## 调用方切换
+
+多个应用节点使用同一个仓库、同一份 main 与锁文件。共享参数骨架为 `deploy/gpustack/application.env.example`，逐项合并到现有私有 `.env`；不要整份覆盖，更不要跨节点复制 key、Redis、任务存储或锁目录。模板显式设置各类任务超时，避免 API 的 PM2 env 与普通 worker 的代码缺省不同。应用的实际解析并发与本机 GPU 数量独立；三卡和四卡模型都由各自 GPUStack deployment 管理。
+
+启动应用使用 `deploy/manage.sh start app4`、`deploy/manage.sh start ordinary`，更新后使用相应 restart，并在排空后 `pm2 save`。不按本机三张卡误选 app，也不调用 model/model4。PM2 模板中的每 parser VLM 并发、窗口和 ONNX 线程会优先于 `.env`；调整这些参数时须同步审查模板和所有进程的生效环境，不把单独编辑 `.env` 当作已调优。
 
 应用使用网关通用代理路径 `http://gateway/model/proxy/ROUTE_ID`，保留 `mineru4` 模型别名。私有配置设置 `MINERU_MODEL_VLM_SERVER_URL` 和 `MINERU_MODEL_VLM_API_KEY`；API key 仅具有 inference 权限且限制到对应模型路由。健康检查和 SDK 请求均携带该 key，禁止在命令行、日志或公共配置中打印。
 

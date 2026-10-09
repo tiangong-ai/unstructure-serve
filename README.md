@@ -11,10 +11,12 @@ checkPaths:
   - deploy/**
   - src/services/vision_health.py
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
+lastReviewedCommit: 0f51dbd
 ---
 
 # TianGong AI Unstructure Serve
+
+GPUStack 托管部署先读 [共享模型与应用配置](docs/gpustack-workers.md)：各应用节点使用同一份 main，模型由 GPUStack 管理，应用采用 `app4` + `ordinary`。下方 AI 指令中的原生 model/model4 操作只适用于本项目自己管理模型容器的部署，不能用于接管 GPUStack 中的模型。
 
 ## 直接复制给 AI：启动、恢复、停止整套设施
 
@@ -27,6 +29,7 @@ lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
 先阅读仓库 AGENTS.md、README.md 和 docs/mineru_4_upgrade_usage.md，核对现有进程、端口、GPU、模型缓存和私有配置。已有配置和缓存应复用，缺失配置按示例初始化；不要覆盖凭证或修改系统 Python。缺少必须由我提供的凭证/地址时，明确列出缺项。
 按 uv.lock 使用 Python 3.13.15，应用安装 CPU ONNX 依赖，MinerU 大模型只运行在 Docker。按文档准备和验证小模型，检查 Redis、独立图片模型；若依赖由其他项目管理，按其已有方式使用，不重复创建。
 三卡使用 deploy/manage.sh start model 和 start app；四卡使用 start model4 和 start app4。等待模型实际健康后再启动所选 app 组及 start ordinary，启动 API、对应的 two-stage worker、视觉端点探测进程与普通 worker。已有在线进程不要重复重启；同一主机只选一种模型拓扑，不直接对整份 PM2 cjs 执行不带 --only 的 start。
+若私有配置使用 GPUStack，改按 docs/gpustack-workers.md 验证网关和模型，只启动 app4 + ordinary；不执行上述 model/model4 操作，不能从本机 GPU 数量推导应用 worker 数。
 验证 API /health、/ready、普通及 two-stage 队列消费者、图片模型可用性，并用 input/p2.pdf 和含图论文做小规模真实验收。完成后 pm2 save；检查开机恢复是否已配置，缺失则按 pm2 startup 的提示配置。
 最后列出本项目进程、端口、检查结果、尚缺的配置和可用的调用方式。不要输出密钥，不操作无关服务，不用全局 PM2 删除或 Redis 清空命令。
 ```
@@ -37,6 +40,7 @@ lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
 请恢复当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先读 AGENTS.md、README.md 和部署说明，检查本项目 PM2/容器状态、端口、日志、GPU/CUDA、Redis、独立图片模型，定位故障。先检查在途任务及队列，再决定哪些故障组件需要重启；健康组件保持运行。
 复用现有 .venv、uv.lock、私有配置和缓存。按现有三卡或四卡拓扑使用 deploy/manage.sh start model 或 start model4 补起模型并验证健康，再 start app 或 start app4、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
+GPUStack 托管部署保留其模型生命周期，仅核对统一网关，按 docs/gpustack-workers.md 补起 app4 + ordinary；不要恢复原生模型组。
 如驱动升级后 GPU 可见但推理失败，按部署说明检查 UVM/CDI 和容器内 CUDA，不以 nvidia-smi 正常作为修复完成的依据。
 核对 API、所选拓扑的三个或四个解析 worker、视觉/调度/合并 worker、普通 worker、视觉端点探测进程和全部模型 GPU，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录及持久任务清单（uv run python -m src.scripts.manage_jobs list），发布不明确的任务按部署说明 recover；失败任务修复原因并确认没有活跃阶段后才按原 ID resume。恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
 完成后 pm2 save，说明原因、修复内容、验证结果和仍未恢复的依赖，不输出密钥。
@@ -49,6 +53,7 @@ lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
 先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止新增提交，保留各批量客户端的输入、输出目录和任务记录；统一客户端可停止后用原命令加 --resume-only 重新运行，只查询并保存已提交任务，不补交或重试文件。其他提交来源也停止新增请求，保持 API/worker/模型可用直到已有任务结果已收取。
 检查普通和 two-stage 的 ready、active、reserved、scheduled/unacked 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
 任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、按所选拓扑 stop workers 或 stop workers4、stop vision-health、按所选拓扑 stop model 或 stop model4，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
+GPUStack 托管部署只停止应用组，跳过上述 model/model4 操作；共享模型由 GPUStack 管理，不因停止某一解析应用而停止其他调用方使用的模型。
 Redis 和独立图片模型如为共享或其他项目管理的服务，保持运行；仅在确认专用于本项目且停止不会影响其他服务时，按其已有启动方式停止。不删除容器卷、模型缓存、结果、任务记录或私有配置，不使用 pm2 delete all、Redis flush 或全局进程清理。
 最后报告已停止的组件、保留的共享依赖，以及下次恢复应执行的步骤。
 ```
@@ -176,6 +181,7 @@ uv run python -m src.scripts.batch_parse \
 | 文档 | 内容 |
 | --- | --- |
 | [部署与恢复](docs/mineru_4_upgrade_usage.md) | 配置、模型、队列、恢复与回滚 |
+| [GPUStack 共享模型](docs/gpustack-workers.md) | 多节点同一应用代码、私有配置与模型生命周期 |
 | [AI 接入指南](docs/ai-integration.md) | 端点选择、上传字段、轮询、失败处理、大文档批量 |
 | [普通任务](docs/mineru_with_images_task_usage.md) / [two-stage](docs/two_stage_task_usage.md) | 各自队列、字段及批量示例 |
 | [统一批量客户端](docs/batch-processing.md) | 三种异步模式、文件筛选、JSON 结果、超时及续跑 |

@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: daabfca
+lastReviewedCommit: 0f51dbd
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -26,6 +26,8 @@ lastReviewedCommit: daabfca
 `route --paths` 的多个路径以逗号分隔。首次为受管 Markdown 添加复核记录时，补齐文档类型、用途和 checkPaths 等元数据；`review mark` 只填写复核日期与提交。提交前检查 staged，提交后以 PR 基准与最终 HEAD 再检查完整变更范围。
 
 ## 文档与修改约定
+
+- GPUStack 多应用部署使用同一份 main 与锁文件；共享应用参数骨架在 `deploy/gpustack/application.env.example`，主机端点、key、Redis、存储和锁目录仍由私有配置维护。启动/恢复/停止指令必须区分 app4/ordinary 与 GPUStack 模型生命周期，不按本机卡数启动原生 model/model4。历史实验工作区先逐项比较祖先提交并保全差异，不把旧接口方案覆盖到当前 main。
 
 - **每次修改代码、配置或说明，都同步更新本文件涉及的规则或入口。**
 - 当前文档入口：[README](README.md)、[部署与恢复](docs/mineru_4_upgrade_usage.md)、[AI 接入](docs/ai-integration.md)、[批量客户端](docs/batch-processing.md)、[普通任务](docs/mineru_with_images_task_usage.md)、[two-stage](docs/two_stage_task_usage.md)。
