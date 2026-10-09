@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-09-25
-lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
+lastReviewedAt: 2026-10-09
+lastReviewedCommit: 33b10c0
 docType: runbook
 scope: repo
 status: current
@@ -25,6 +25,8 @@ checkPaths:
 处理顺序：保存文件 → MinerU parse → dispatch 分发图片 → vision 并行识别 → merge 按原阅读顺序回填并原子保存结果；工作区按保留策略清理。模型和环境准备见[部署说明](mineru_4_upgrade_usage.md)。
 
 POST 支持 `Idempotency-Key`；统一状态、下载及恢复入口见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。新任务在磁盘保存全文和逐图检查点，队列消息仅带 ID；`MINERU_VISION_WAVE_SIZE` 缺省 32，完成一波后再派发下一波缺失图片。进度中的图片数是去重后的请求数，不是页数或所有图片位置数。任一阶段失败保留已完成内容，修复原因后显式 resume；解析中途失败仍重做整本解析。
+
+`Configured vision providers failed` 后的异常类型用于区别超时、连接等推理故障；只有没有可调用 provider 时才提示检查配置与 key。超时不代表 key 失效，也不意味着已完成解析和图片检查点丢失。确认没有活跃阶段、端点恢复后按原 ID 显式 resume，再让客户端沿原输出目录续取；不重新上传整本文件，不把恢复后成功计为首次成功。
 
 ## 队列与配置
 

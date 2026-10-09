@@ -276,6 +276,19 @@ def _normalize_request_overrides(
     return explicit_provider or model_provider, explicit_model
 
 
+def _failure_types(error: BaseException) -> str:
+    """Keep actionable failure kinds without upstream bodies, URLs or credentials."""
+    kinds = []
+    seen = set()
+    while error is not None and id(error) not in seen and len(seen) < 8:
+        seen.add(id(error))
+        kind = type(error).__name__
+        if kind not in kinds:
+            kinds.append(kind)
+        error = error.__cause__ or error.__context__
+    return " -> ".join(kinds)
+
+
 def vision_completion(
     image_path: str,
     context: str = "",
@@ -303,7 +316,7 @@ def vision_completion(
                 )
         except Exception as exc:  # noqa: BLE001 - provider call may raise
             failures.append(exc)
-            logger.info(f"Vision provider '{chosen.value}' failed: {exc}")
+            logger.info("Vision provider '{}' failed: {}", chosen.value, _failure_types(exc))
     else:
         logger.info(
             f"Vision provider '{chosen.value}' skipped because credentials are not configured."
@@ -331,10 +344,13 @@ def vision_completion(
                 return fallback_result
         except Exception as exc:  # noqa: BLE001 - provider call may raise
             failures.append(exc)
-            logger.info(f"Vision provider '{backup.value}' failed: {exc}")
+            logger.info("Vision provider '{}' failed: {}", backup.value, _failure_types(exc))
 
     if failures and all(isinstance(exc, UnusableVisionOutput) for exc in failures):
         raise failures[-1]
+    if failures:
+        detail = "; ".join(dict.fromkeys(_failure_types(exc) for exc in failures))
+        raise RuntimeError(f"Configured vision providers failed: {detail}") from None
     raise RuntimeError(
         "No working vision provider found. Ensure provider configuration and API keys are set."
     )

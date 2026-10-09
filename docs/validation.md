@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0f51dbd
+lastReviewedCommit: 33b10c0
 ---
 
 # 开发验证与验收范围
@@ -19,6 +19,10 @@ lastReviewedCommit: 0f51dbd
 所有命令在仓库根目录执行。本文件供开发运维使用，不经服务文档路由提供。原始 PDF、凭证、任务记录和测试输出保存在私有目录；公共文档只保留验证方法、适用条件和结论边界。
 
 ## 常规检查
+
+`test_vision_service.py` 另外验证缺少 provider 配置与真实上游超时有不同错误，异常类型可用于诊断，日志和任务错误不泄露上游正文；内容不可识别标记和其他错误失败规则保持。
+
+常规测试的 autouse fixture 同时隔离任务存储、解析槽和视觉槽目录，不竞争运行服务的 flock。借用既有虚拟环境检查独立 worktree 时，使用该 worktree 为工作目录并运行 `python -m pytest`，避免控制台脚本加载虚拟环境原项目的 editable 路径；真实模型验收仍显式启用。
 
 ```bash
 uv sync --locked --group dev --check

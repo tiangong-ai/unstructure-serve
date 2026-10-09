@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-09-25
-lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
+lastReviewedAt: 2026-10-09
+lastReviewedCommit: 33b10c0
 docType: architecture
 scope: repo
 status: current
@@ -49,6 +49,8 @@ flowchart LR
 - 图片客户端将连接/TLS 与模型读写预算分开，连接异常、临时服务错误或普通图片清理后无可用事实会尝试其他端点；故障端点冷却后通过跨进程独占的半开推理租约恢复，普通图片只有清理后仍有内容才重新开放并发。原生 DOCX 严格 OCR 保留逐字内容，不用普通图片清理预检；新故障会使旧成功失效，探测进程退出自动释放租约。最终失败仅为无可用图片内容时，业务层在该图位置输出 `[图片内容无法识别]` 并继续处理；备选耗尽后的连接、超时、截断、请求及资产错误仍向任务传播，不以原文伪装视觉结果；400 等请求错误不切换。超时配置见[调优指南](performance-tuning.md)。
 
 主动健康检查由独立 `vision-health-monitor` 进程执行，使用同目录 leader 文件锁，避免每个 API/worker 重复轮询。健康状态与容量状态共享；新鲜离线/缺少目标模型记录阻止分配，过期记录回退业务熔断和半开恢复。健康 GET 成功不能解除推理熔断。状态只经本地维护命令查看，不新增 HTTP 接口；API `/ready` 的 MinerU 检查范围不变。
+
+provider 选择层区分“无可调用配置”和“已配置但推理失败”。后一种向任务传播异常类型链，例如 RuntimeError → APITimeoutError，不附带上游正文或凭据，也不误导为必须更换 key。此诊断不改变重试、失败状态、图片标记和阶段恢复规则。
 
 ## 目录
 

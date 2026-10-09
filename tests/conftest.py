@@ -27,9 +27,11 @@ _ensure_stub_modules()
 
 
 @pytest.fixture(autouse=True)
-def isolated_durable_job_store(monkeypatch, tmp_path):
-    """Route tests must never write to the running service's job store."""
+def isolated_runtime_storage(monkeypatch, tmp_path):
+    """Tests must not share the running service's jobs or capacity locks."""
     monkeypatch.setenv("MINERU_JOB_STORE_DIR", str(tmp_path / "durable-jobs"))
+    monkeypatch.setenv("MINERU_PARSE_SLOT_DIR", str(tmp_path / "parse-slots"))
+    monkeypatch.setenv("VLLM_VISION_SLOT_DIR", str(tmp_path / "vision-slots"))
 
 
 @pytest.fixture(scope="session")

@@ -110,3 +110,44 @@ def test_only_content_failures_can_become_unrecognized_marker(monkeypatch, mixed
     with pytest.raises(error):
         vision.vision_completion("image.jpg", provider=primary)
     assert calls == [provider.value for provider in providers]
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_upstream_failure_is_distinct_from_missing_configuration(monkeypatch, configured):
+    providers = list(vision.VisionProvider)
+    messages = []
+    private = "private-token-and-document-body"
+    monkeypatch.setattr(
+        vision.logger, "info", lambda text, *args: messages.append(text.format(*args))
+    )
+
+    def failed_call(*args):
+        try:
+            raise TimeoutError(private)
+        except TimeoutError as exc:
+            raise RuntimeError(private) from exc
+
+    for provider in providers:
+        monkeypatch.setitem(
+            vision.PROVIDER_SPECS,
+            provider.value,
+            vision.ProviderSpec(
+                key=provider.value,
+                models=["fixture-model"],
+                default_model="fixture-model",
+                call=failed_call,
+                has_credentials=lambda: configured,
+            ),
+        )
+    with pytest.raises(RuntimeError) as raised:
+        vision.vision_completion("image.jpg", provider=providers[0])
+    message = str(raised.value)
+    if configured:
+        assert "TimeoutError" in message
+        assert "configuration and API keys" not in message
+        assert raised.value.__suppress_context__ is True
+    else:
+        assert "configuration and API keys" in message
+        assert "TimeoutError" not in message
+    assert private not in message
+    assert private not in "\n".join(messages)
