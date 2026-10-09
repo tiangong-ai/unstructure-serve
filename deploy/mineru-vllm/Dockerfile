@@ -11,10 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libcairo
 # Reuse the image's vLLM/Torch pair. The application SDK has a separate lockfile.
 # Instrumentator 8 supports the current Starlette router representation.
 RUN --mount=type=cache,target=/root/.cache/pip python3 -m pip install \
-    'mineru[torch]==4.0.7' 'docvortex==0.4.25' 'mineru-vl-utils==2.0.5' "fastapi==${FASTAPI_VERSION}" "starlette==${STARLETTE_VERSION}" \
-    'prometheus-fastapi-instrumentator==8.1.0' 'openai==2.54.0' 'pycairo==1.29.1' \
+    'mineru[torch]==4.0.11' 'docvortex==0.5.13' 'mineru-vl-utils==2.0.5' "fastapi==${FASTAPI_VERSION}" "starlette==${STARLETTE_VERSION}" \
+    'prometheus-fastapi-instrumentator==8.1.0' 'openai==2.54.0' 'pycairo==1.29.2' \
     && python3 -m pip check \
-    && python3 -c "from importlib.metadata import version; assert version('mineru') == '4.0.7'; assert version('docvortex') == '0.4.25'; assert version('mineru-vl-utils') == '2.0.5'; assert version('vllm') == '${VLLM_VERSION}'"
+    && python3 -c "from importlib.metadata import version; assert version('mineru') == '4.0.11'; assert version('docvortex') == '0.5.13'; assert version('mineru-vl-utils') == '2.0.5'; assert version('vllm') == '${VLLM_VERSION}'"
 
 ENV MINERU_HOME=/opt/mineru \
     MINERU_MODEL_SOURCE=modelscope \

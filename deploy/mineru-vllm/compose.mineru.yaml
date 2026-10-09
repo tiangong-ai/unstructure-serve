@@ -1,6 +1,6 @@
 services:
   mineru-vlm:
-    image: tiangong/mineru-vlm:${MINERU_DOCKER_IMAGE_TAG:-4.0.7-vllm0.21.0}
+    image: tiangong/mineru-vlm:${MINERU_DOCKER_IMAGE_TAG:-4.0.11-dv0.5.13-vllm0.21.0}
     build:
       context: .
       args:

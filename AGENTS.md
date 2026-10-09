@@ -10,13 +10,13 @@ whenToUpdate: "When governance commands, entrypoints or validation requirements 
 checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
-lastReviewedAt: 2026-09-25
-lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
+lastReviewedAt: 2026-10-09
+lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
 ---
 
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。仓库依赖基线是 MinerU 4.0.7 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。验证范围与命令见 [验证指南](docs/validation.md)。
+仓库为 `tiangong-ai/unstructure-serve`。仓库依赖基线是 MinerU 4.0.11 + DocVortex 0.5.13 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。验证范围与命令见 [验证指南](docs/validation.md)。
 
 
 ## 文档治理
@@ -119,9 +119,9 @@ lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
 - 三卡部署入口为 `deploy/pm2/ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `deploy/mineru-vllm/compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。启动器仅解析 Compose 配置的镜像名；本地已有该最终镜像时使用 `up --no-build --pull never`，缺失时按原流程 `up --build`，PM2 恢复亦如此。更新 Dockerfile 后须更新镜像标签并显式验收，不能用旧标签暗示代码已重建。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - 四卡可选入口为 `deploy/manage.sh start model4` 与 `deploy/manage.sh start app4`，对应 `serve.sh parallel4`、四 GPU Compose 覆盖和第四个 parse worker。三卡入口及默认参数继续独立可用；同一主机只启动一种模型拓扑。统一管理脚本在启动或重启 model/model4 前拒绝另一种拓扑仍在线的情况；不要直接无 `--only` 启动整份 PM2 cjs。
-- MinerU2.5 Pro 2605-1.2B 权重没有独立的 lm_head.weight，顶层配置也未显式设置 tie_word_embeddings；基础和多卡 Compose 均向 vLLM 传递顶层 hf-overrides tie_word_embeddings=true，可通过 MINERU_DOCKER_TIE_WORD_EMBEDDINGS 按模型配置覆盖。vLLM 0.28.0 若未显式绑定输出层，会出现整页输出 !、被截断、解析结果为空；/health 与 /ready 仍可能成功，必须用真实文本 PDF 检查非空内容。
+- MinerU2.5 Pro 2605-1.2B 权重没有独立的 lm_head.weight；上游 2026-10-08 才在顶层配置声明 tie_word_embeddings=true，旧本地缓存可能缺少此字段。基础和多卡 Compose 均向 vLLM 传递顶层 hf-overrides tie_word_embeddings=true，可通过 MINERU_DOCKER_TIE_WORD_EMBEDDINGS 按模型配置覆盖。vLLM 0.28.0 若未显式绑定输出层，会出现整页输出 !、被截断、解析结果为空；/health 与 /ready 仍可能成功，必须用真实文本 PDF 检查非空内容。此次模型仓库只更新配置，权重未变，不以刷新权重代替覆盖参数或验收。
 - Docker 默认基线为 vLLM 0.21.0 配套 Torch/CUDA；可用 `MINERU_DOCKER_BASE_IMAGE` 和 `MINERU_DOCKER_VLLM_VERSION` 为目标环境选择上游允许的版本。vLLM 0.28.0 对 FastAPI 要求 `>=0.133,<0.137`，镜像内的 FastAPI/Starlette 用独立构建参数选择并经 `pip check` 验证，不跟随应用锁文件。模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
-- MinerU 4.0.7 配套 DocVortex 至少 0.4.24；应用锁文件和镜像固定 DocVortex 0.4.25、mineru-vl-utils 2.0.5。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是已验收基线而非最新版，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围。
+- MinerU 4.0.11 配套 DocVortex 至少 0.5.12；应用锁文件和镜像固定 DocVortex 0.5.13、mineru-vl-utils 2.0.5。两环境升级后检查原生 PDF 词间空格、图片资产与渲染子进程清理；上游移除 OpenCV 直接依赖，当前应用锁文件不含 OpenCV。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是模板缺省，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围。
 - 当前解析权重为稠密 Qwen2-VL 1.2B（14 attention heads、2 KV heads）；三卡 DP=3/TP=1，四卡 DP=4/TP=1，不适用 TP4、EP 或原生 MTP。模型显存参数由私有 `.env` 控制，PM2 模板不覆盖；启动器清除旧 PM2 环境中残留的端口/显存键。单卡/三卡比例缺省 0.10，四卡专属比例缺省 0.45，四卡不会继承通用 0.10；这些只是拓扑缺省，须按目标显卡和共驻留服务独立验收。三卡和四卡默认固定每卡 3 GiB KV 缓存，单卡默认不固定；`MINERU_DOCKER_KV_CACHE_MEMORY_BYTES`（四卡为 `_MODEL4`）可覆盖正整数字节数，显式空值恢复比例定容。固定 KV 时比例仍用于启动空闲显存检查，但不计算 KV 容量。保留每副本 16 序列/8192 上下文；调优需区分独立图片模型，保留 MinerU logits processor、BF16 和共享 GPU 显存预算；架构约束与测量方法见调优指南第 6 节。
 - 手动启动压测容器时覆盖镜像继承的 `com.docker.compose.project/service` 标签为独立测试项目，并核对实际容器标签；仅修改名字和端口不足以隔离生产 Compose 的退出联动。共享 GPU 上错开模型启动，最终配置在测试容器退出后验收；显存须在真实推理预热后再次测量，不把刚就绪时的占用当峰值。
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `nvidia-uvm` 和 `nvidia-uvm-tools` 设备节点，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。

@@ -13,13 +13,13 @@ checkPaths:
   - .env.example
   - pyproject.toml
   - uv.lock
-lastReviewedAt: 2026-09-25
-lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
+lastReviewedAt: 2026-10-09
+lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
 ---
 
 # 部署、维护与恢复
 
-应用使用 Python 3.13.15、MinerU 4.0.7 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
+应用使用 Python 3.13.15、MinerU 4.0.11、DocVortex 0.5.13 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
 
 所有 shell 命令在仓库根目录执行，文件示例使用相对路径。跨进程或容器的共享目录由部署配置决定，必须指向同一位置；本文不预设机器目录。
 
@@ -191,7 +191,7 @@ pm2 save
 
 现有模板覆盖单卡、三卡与四卡；其他卡数须新增 Compose 覆盖并同步 GPU ID、DP 数、每机显存预算、解析 worker 与共享槽数。
 
-四卡使用 `compose.mineru.parallel4.yaml` 和独立 project `mineru-vlm-parallel4`，绑定 GPU 0/1/2/3，DP=4、TP=1，仍向应用提供单个 30000 端点。所有拓扑都默认把 MinerU2.5 Pro 的 `tie_word_embeddings` 显式传给 vLLM；更换模型时按权重结构核对 `MINERU_DOCKER_TIE_WORD_EMBEDDINGS`。不要同时运行三卡与四卡 project。
+四卡使用 `compose.mineru.parallel4.yaml` 和独立 project `mineru-vlm-parallel4`，绑定 GPU 0/1/2/3，DP=4、TP=1，仍向应用提供单个 30000 端点。所有拓扑都默认把 MinerU2.5 Pro 的 `tie_word_embeddings` 显式传给 vLLM；2026-10-08 前缓存的解析模型配置可能没有该字段，覆盖参数仍须保留。上游此轮只更新 config.json，权重未变，无需重新下载权重。更换模型时按权重结构核对 `MINERU_DOCKER_TIE_WORD_EMBEDDINGS`。不要同时运行三卡与四卡 project。
 
 `serve.sh` 从 Compose 解析当前配置的最终镜像标签：本机已有该标签时直接以 `--no-build --pull never` 启动，未找到时按原流程构建。PM2 开机恢复走同一入口，不会因已导入的最终镜像而重新拉取基础镜像。跨机导入前须核对最终镜像内容和标签；修改 Dockerfile、依赖或上游版本后，使用新标签构建并重新验收，旧标签存在不代表代码已更新。启动器不打印展开的 Compose 配置或私有 `.env`。
 
@@ -203,7 +203,7 @@ pm2 save
 | --- | --- |
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，vllm/vllm-openai:v0.21.0 |
 | 镜像内 Web 依赖 | 默认 FastAPI 0.141.1 / Starlette 1.7.0；vLLM 0.28.0 镜像需通过 MINERU_DOCKER_FASTAPI_VERSION=0.136.3、MINERU_DOCKER_STARLETTE_VERSION=1.6.0 覆盖并通过 pip check |
-| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.0.7-vllm0.21.0；可用 MINERU_DOCKER_IMAGE_TAG 按环境覆盖 |
+| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.0.11-dv0.5.13-vllm0.21.0；可用 MINERU_DOCKER_IMAGE_TAG 按环境覆盖，其他 vLLM 版本必须使用对应新标签重建 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存预算 | 私有 .env 的 MINERU_DOCKER_PORT；单卡/三卡比例缺省 0.10，四卡专属比例缺省 0.45，均用于启动检查；三卡/四卡 KV 默认每卡 3 GiB，单卡未固定，按实际硬件重新验收 |
 | GPU 绑定 / DP / TP | 三卡由 compose.mineru.parallel.yaml 设置，四卡由 compose.mineru.parallel4.yaml 设置 |

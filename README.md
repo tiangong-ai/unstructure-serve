@@ -10,8 +10,8 @@ whenToUpdate: "When the documented entrypoints or operational contracts change."
 checkPaths:
   - deploy/**
   - src/services/vision_health.py
-lastReviewedAt: 2026-09-25
-lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
+lastReviewedAt: 2026-10-09
+lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
 ---
 
 # TianGong AI Unstructure Serve
@@ -59,7 +59,7 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
 
-当前技术栈：**Python 3.13.15 · MinerU 4.0.7 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
+当前技术栈：**Python 3.13.15 · MinerU 4.0.11 · DocVortex 0.5.13 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
 ## 先理解需要运行什么
 
