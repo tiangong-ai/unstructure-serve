@@ -14,7 +14,7 @@ checkPaths:
   - pyproject.toml
   - uv.lock
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
+lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
 ---
 
 # 部署、维护与恢复

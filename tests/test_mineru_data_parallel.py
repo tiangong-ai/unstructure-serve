@@ -19,8 +19,13 @@ pytestmark = [
 ]
 
 
+def _headers():
+    key = os.getenv("MINERU_TEST_VLM_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
 def _successes(url):
-    response = httpx.get(url.rstrip("/") + "/metrics", timeout=10)
+    response = httpx.get(url.rstrip("/") + "/metrics", headers=_headers(), timeout=10)
     response.raise_for_status()
     counts = {}
     for labels, value in re.findall(
@@ -52,7 +57,9 @@ def test_input_pdfs_reach_all_data_parallel_replicas(tmp_path):
     expected = {str(rank) for rank in range(dp_size)}
     assert set(before) <= expected, f"Unexpected data-parallel engines: {set(before) - expected}"
     for path, pages in sources:
-        items, output, _ = parse_doc([path], tmp_path, tier="advanced", server_url=url)
+        items, output, _ = parse_doc(
+            [path], tmp_path, tier="advanced", server_url=url, server_headers=_headers() or None
+        )
         assert {item["page_idx"] for item in items} == set(range(pages))
         for item in items:
             if item.get("img_path"):

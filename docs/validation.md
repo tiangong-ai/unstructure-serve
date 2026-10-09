@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: bdf426f01a7714d12e5f8d3b0454053c67d105f0
+lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
 ---
 
 # 开发验证与验收范围
@@ -46,6 +46,8 @@ Compose 配置测试的临时 `--env-file` 写入 Git 忽略的 `output` 并在�
 Black 排除任意层级的 `.venv` 和根目录的 input/output/pdfs/pickle，避免格式化模型环境或结果。Ruff 规则以 `pyproject.toml` 为准。
 
 ## 真实 PDF 回归
+
+GPUStack 迁移按 [托管与回退](gpustack-workers.md) 验证。逐卡测试将 `MINERU_TEST_VLM_URL` 指向单 deployment 的通用代理路由，`MINERU_TEST_VLM_API_KEY` 在进程内从私有文件加载；测试对指标和解析使用同一 Bearer。不要对多目标路由做逐卡计数差分。多副本分流另外读取每个实例的计数，执行统一路由请求后检查两端增量。
 
 这些测试会调用已配置服务，先确认没有繁忙的生产任务，再按改动范围启用。缺少必需样本或模型时不能用替身冒充通过。
 

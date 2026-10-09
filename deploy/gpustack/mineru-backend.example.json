@@ -1,0 +1,26 @@
+{
+  "backend_name": "tiangong-mineru4-custom",
+  "description": "Existing MinerU 4.0.11 runtime and model volume; select DP and startup budget per worker",
+  "health_check_path": "/health",
+  "default_version": "4.0.11-vllm0.28.0-custom",
+  "version_configs": {
+    "4.0.11-vllm0.28.0-custom": {
+      "image_name": "tiangong/mineru-vlm:4.0.11-dv0.5.13-vllm0.28.0",
+      "custom_framework": "cuda",
+      "entrypoint": "/bin/bash /usr/local/bin/mineru-model-entrypoint",
+      "run_command": "--host {{worker_ip}} --port {{port}} --served-model-name {{model_name}} mineru4"
+    }
+  },
+  "default_env": {
+    "GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB": "8",
+    "MINERU_MODEL_SOURCE": "modelscope",
+    "MINERU_MODEL_VLM_ENGINE": "vllm",
+    "MINERU_DOCKER_KV_CACHE_MEMORY_BYTES": "3221225472"
+  },
+  "default_backend_param": [
+    "--hf-overrides={\"tie_word_embeddings\":true}",
+    "--tensor-parallel-size=1",
+    "--max-model-len=8192",
+    "--max-num-seqs=16"
+  ]
+}
