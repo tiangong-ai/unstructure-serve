@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 33b10c0
+lastReviewedCommit: 0d58a3e
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -30,6 +30,7 @@ lastReviewedCommit: 33b10c0
 - GPUStack 多应用部署使用同一份 main 与锁文件；共享应用参数骨架在 `deploy/gpustack/application.env.example`，主机端点、key、Redis、存储和锁目录仍由私有配置维护。启动/恢复/停止指令必须区分 app4/ordinary 与 GPUStack 模型生命周期，不按本机卡数启动原生 model/model4。历史实验工作区先逐项比较祖先提交并保全差异，不把旧接口方案覆盖到当前 main。
 - 图片 provider 已配置但调用失败时，任务错误保留脱敏的异常类型链（包括上游超时），不能统一报成缺少 key；日志与公开错误不附带上游异常正文。仅无可用图片内容仍按原规则处理，超时仍失败并保留检查点，不隐式重投整份文档。
 - 常规测试隔离任务目录与 parse/vision 容量锁；独立 worktree 借用虚拟环境时用 `python -m pytest` 确保测试当前源码，不能让测试竞争生产槽位。
+- GPUStack 专用部署在所有 API 与 worker 明确设置 `VISION_PROVIDER_CHOICES=vllm`；只设置首选 provider 不会禁用其他已配置 provider 的回退。变更允许列表会改变执行 profile，须先排空任务，不复用不同回退策略的图片检查点。
 
 - **每次修改代码、配置或说明，都同步更新本文件涉及的规则或入口。**
 - 当前文档入口：[README](README.md)、[部署与恢复](docs/mineru_4_upgrade_usage.md)、[AI 接入](docs/ai-integration.md)、[批量客户端](docs/batch-processing.md)、[普通任务](docs/mineru_with_images_task_usage.md)、[two-stage](docs/two_stage_task_usage.md)。

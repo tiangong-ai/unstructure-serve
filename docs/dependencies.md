@@ -13,7 +13,7 @@ checkPaths:
   - .python-version
   - deploy/mineru-vllm/Dockerfile
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0f51dbd
+lastReviewedCommit: 0d58a3e
 ---
 
 # 依赖与 Python 维护

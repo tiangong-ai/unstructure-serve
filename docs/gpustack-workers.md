@@ -11,7 +11,7 @@ checkPaths:
   - deploy/gpustack/mineru-backend.example.json
   - deploy/mineru-vllm/model-entrypoint.sh
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0f51dbd
+lastReviewedCommit: 0d58a3e
 ---
 
 # GPUStack 原生模型托管
@@ -29,6 +29,8 @@ GPUStack worker 管理模型容器的创建、停止与恢复，应用 API、Cel
 ## 调用方切换
 
 多个应用节点使用同一个仓库、同一份 main 与锁文件。共享参数骨架为 `deploy/gpustack/application.env.example`，逐项合并到现有私有 `.env`；不要整份覆盖，更不要跨节点复制 key、Redis、任务存储或锁目录。模板显式设置各类任务超时，避免 API 的 PM2 env 与普通 worker 的代码缺省不同。应用的实际解析并发与本机 GPU 数量独立；三卡和四卡模型都由各自 GPUStack deployment 管理。
+
+GPUStack 专用部署同时设置 `VISION_PROVIDER=vllm` 和 `VISION_PROVIDER_CHOICES=vllm`。前者只选首选项，不能阻止向其他已配置 provider 回退；API 模板中的允许列表也不会自动传给 Celery。逐个核对 API、ordinary、parse/dispatch/vision/merge 的有效配置及任务 manifest 中的 fallbacks。改变允许列表须先排空，因为执行 profile 也包含回退策略；保留旧结果的真实来源，不能把外部 provider 补做的成功当作纯 GPUStack 验收。
 
 启动应用使用 `deploy/manage.sh start app4`、`deploy/manage.sh start ordinary`，更新后使用相应 restart，并在排空后 `pm2 save`。不按本机三张卡误选 app，也不调用 model/model4。PM2 模板中的每 parser VLM 并发、窗口和 ONNX 线程会优先于 `.env`；调整这些参数时须同步审查模板和所有进程的生效环境，不把单独编辑 `.env` 当作已调优。
 

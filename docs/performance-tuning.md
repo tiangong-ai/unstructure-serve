@@ -1,6 +1,6 @@
 ---
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 33b10c0
+lastReviewedCommit: 0d58a3e
 docType: runbook
 scope: repo
 status: current
@@ -445,6 +445,8 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 ### 大文件批次的额外验收门槛
 
 使用原生长文件，记录每份源文件摘要、页数、字节数、task_id、首次结果与恢复结果。重复整份文件的第二轮明确标为预热重复轮；不能把同内容复制若干次称为若干独立样本。客户端窗口由 2 增至 3 的滚动过程只用于观察持续负载，不等同于固定样本的严格 A/B。
+
+确认所有消费者的 provider 允许列表与 manifest 的 `vision.fallbacks` 一致。只看主路由或首选模型不足以归因：其他已配置 provider 可能在超时后完成图片。此类输出必须标为混用，不能计入纯 GPUStack 成功；专用部署只允许 vllm，改变策略后使用新任务身份进行验收。
 
 持续记录逐卡利用率、功率、温度与软件/硬件温度降频标志，同时核对 DP engine 成功计数增量。整段平均、繁忙样本比例与阶段窗口分别报告；GPU 利用率 100% 时仍可能因温度而降频。主机可用内存和 CPU 有余量并不代表还应增加解析进程：若模型繁忙或已出现温度降频，先处理实际瓶颈。不同主机的日志时间须先测时钟偏差，端到端时长优先使用同一主机的时间差。
 
