@@ -11,7 +11,7 @@ checkPaths:
   - deploy/gpustack/mineru-backend.example.json
   - deploy/mineru-vllm/model-entrypoint.sh
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
+lastReviewedCommit: daabfca
 ---
 
 # GPUStack 原生模型托管
@@ -30,7 +30,11 @@ GPUStack worker 管理模型容器的创建、停止与恢复，应用 API、Cel
 
 应用使用网关通用代理路径 `http://gateway/model/proxy/ROUTE_ID`，保留 `mineru4` 模型别名。私有配置设置 `MINERU_MODEL_VLM_SERVER_URL` 和 `MINERU_MODEL_VLM_API_KEY`；API key 仅具有 inference 权限且限制到对应模型路由。健康检查和 SDK 请求均携带该 key，禁止在命令行、日志或公共配置中打印。
 
-切换前检查 ready/unacked 及 active/reserved/scheduled，等待已提交任务完成。先停止原模型 PM2 组并保存停止状态，防止 Compose 和 GPUStack 同时管理 GPU；再启动 deployment。新模型真实推理通过后更新应用私有连接配置，并按实际三卡/四卡应用组重载进程。独立 Qwen 图片模型的地址和 key 分开配置，不替换成 MinerU 路由。
+切换前检查 ready/unacked 及 active/reserved/scheduled，等待已提交任务完成。先停止原模型 PM2 组并保存停止状态，防止 Compose 和 GPUStack 同时管理 GPU；再启动 deployment。新模型真实推理通过后更新应用私有连接配置，并按应用解析进程数选择 app/app4 组重载。独立 Qwen 图片模型的地址和 key 分开配置，不替换成 MinerU 路由。
+
+共享网关下，app4 仅表示四个应用 parse worker，不要求本机有四张 GPU，也不会启动模型组。采用四个解析进程时，私有配置设 `MINERU_PARSE_SLOTS=4`、`MINERU_SCHEDULER_WORKERS=4`，API 与全部 Celery 使用同一本机槽目录；管理使用 `deploy/manage.sh ... app4`，普通任务另用 ordinary。不能只重载 app 的前三个 parse worker，留下第四个继续使用旧参数；GPUStack 托管时不执行 model/model4 启动。
+
+MinerU 与独立图片模型分别预算：每文档 VLM 并发、整机解析槽、每文档图片窗口及整机视觉槽不是同一个参数。调优先核对两端实际采样，测单份、合计在途和各阶段等待，再决定进程数。方法及边界见 [调优指南](performance-tuning.md)。
 
 按 `docs/validation.md` 执行真实 DP PDF、HTTP ready 和任务验收，检查每个目标实例及 DP engine 收到请求；单一网关健康响应不足以证明所有副本正确。通用代理路径保留前缀，验收包括带鉴权的 `/health`、`/v1/models` 和实际 PDF。与 Embedding 共卡时另做联合请求并记录显存。
 

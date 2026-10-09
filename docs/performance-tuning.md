@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-09-25
-lastReviewedCommit: 069778cf9c9a7fdf32bf706d46f3756e94ae2b4a
+lastReviewedAt: 2026-10-09
+lastReviewedCommit: daabfca
 docType: runbook
 scope: repo
 status: current
@@ -20,7 +20,7 @@ checkPaths:
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
 
-适用基线：MinerU 4.0.5、Python 3.13.15、CPU ONNX 小模型、Docker vLLM 0.21.0、FastAPI 与 Celery。本指南给出资源变化后的测量与选择方法；表中的本机值是已测起点，不是新机器的通用最优值。
+应用基线：MinerU 4.0.11、DocVortex 0.5.13、Python 3.13.15、CPU ONNX 小模型、FastAPI 与 Celery。模型镜像与部署方式单独记录；原生模板和 GPUStack 托管不共享生命周期。本指南给出资源变化后的测量与选择方法；历史表中的本机值是当时已测起点，不是新机器的通用最优值。
 
 安装与故障恢复见[部署与恢复](mineru_4_upgrade_usage.md)，接口调用见 [AI 接入指南](ai-integration.md)。先按部署文档获得能正确解析的系统，再调性能。
 
@@ -54,10 +54,12 @@ flowchart LR
 
 | 服务 | 配置入口 | 工作内容 | 当前分配方式 |
 | --- | --- | --- | --- |
-| MinerU VLM | `MINERU_MODEL_VLM_SERVER_URL` | 版面区域解析等 MinerU 推理 | 本机单容器、DP=3、TP=1，单 URL 内部分配请求 |
+| MinerU VLM | `MINERU_MODEL_VLM_SERVER_URL` | 版面区域解析等 MinerU 推理 | GPUStack 主路由分配到 deployment，各自内部 DP；原生三卡模板则为单容器 DP3 |
 | 独立图片描述 | `VLLM_BASE_URLS` / `VLLM_BASE_URL` | 对提取图片补充事实描述 | 数量取决于 VLLM_BASE_URLS；本机共享轮换和每端点并发槽位，临时故障冷却后切换；使用共同模型名 |
 
 图片模型的轮询不是按 GPU 利用率或队列深度加权；MinerU 多 URL 池也没有图片服务同样的故障切换语义。相同 URL 的多个别名不等于新增推理容量。
+
+当两个应用节点共用同一个 GPUStack 主路由时，需合计两台的请求预算。`MINERU_PARSE_SLOTS` 与 `VLLM_VISION_ENDPOINT_SLOTS` 都只是主机范围的锁，不是整个集群的配额。一个 MinerU deployment 的 DP3/DP4 表示三/四个独立模型副本；API worker、Celery worker 和 GPU 副本是三层不同的并发。
 
 DP 主要增加可同时处理的请求数。一个长文档如果产生很多独立区域请求，也可能因多个副本同时工作而提速，但单次自回归生成不会自动被三卡分成三段。不要先把 PDF 拆成单页任务以追求均分：整本后处理、跨页连续性和源页号是必须保留的合同。
 
@@ -413,3 +415,29 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 人工复核发现：weather-seq58/59 在两个端点的输出均存在漏识/误读、重复气压值或按等差序列外推图中不存在的数列；paper-3 在一个端点估算了未印出的标记坐标。paper-4 的一条输出用 `Y ≈` 表述图中已印出的 Avg 13.9/15.3，触发宽泛的坐标规则，不能把这一项等同于捏造数值。保留原规则结果与原响应，不为通过回归修改判定或删除异常数字。低清密集图仍未通过质量验收，需要独立的质量改进工作。
 
 真实论文第五页经 MinerU 提取图像后的数字/单位回归通过；真实 HTTP 的同步解析、普通解析任务、九页论文 two-stage，以及第五页的同步/普通任务图片增强均完成，核对图像块和可见数字通过。OpenAPI 已显示新模型枚举，持久图片任务的 profile 记录新模型、revision=2 和两个端点标识。私有证据位于 `output/vision-qwen38-switch-20260918`，其中 `vision-results` 保留完整的双端点原始响应与失败项。
+
+## 15. 多应用共享 GPUStack 主路由的并发起点
+
+两个应用共同调用 MinerU DP3+DP4、独立图片模型为两个 Qwen TP4 副本时，按以下预算起步，再用实际文件复测：
+
+| 控制项 | 每个应用节点的起点 | 约束范围 |
+| --- | --- | --- |
+| API_WORKERS | 4 | HTTP 进程，不等于 GPU 实例 |
+| two-stage parse | 4 个 solo/1，prefetch=1；使用 app4/workers4 组 | 每进程一份文档，合计两节点 8 份 |
+| MINERU_PARSE_SLOTS / MINERU_SCHEDULER_WORKERS | 4 / 4 | API、普通及 two-stage 共享本机解析槽 |
+| 每 parser VLM 并发 / processing window | 8 / 64 页 | 每文档区域请求与内部渲染窗口 |
+| ONNX intra/inter | 16 / 1 | 每模型会话，不是整机线程上限 |
+| ordinary / vision worker | threads/16、threads/32 | 独立任务队列；实际模型并发另受共享槽约束 |
+| dispatch / merge worker | threads/4、threads/4 | 调度与汇总 |
+| VISION_BATCH_SIZE | 3 | 同步/普通图片每文档窗口，不控制 two-stage |
+| VLLM_VISION_ENDPOINT_SLOTS | 8 | 本机所有调用方共享；两节点共 16，不是每文档 8 |
+
+上述是已测短文档负载的生产起点，不是由七个 GPU 推导的最优公式。保持 vLLM 非 thinking 与已验证采样 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0；如果另一应用仍用通用默认值 1/1/40/2，先修正采样，避免把长尾输出当成 parse worker 不够。
+
+同一份九页论文、两节点各四份的实际 HTTP/two-stage 对照中，将应用解析预算由 3+4 提升为 4+4 后，原三进程节点整批由约 61 秒降至 43 秒，两节点全批由约 61 秒降至 47 秒；页码与指定图表数字/单位通过。只修正采样时，另一节点四份任务由约 77 秒降至 46 秒。两类对照不混为一个优化因素。指标来自私有 `output/gpustack-capacity-20261009`，重复同一已预热文件可能受缓存影响，不能外推千页或不同内容的满载吞吐。
+
+提高客户端在途数不等于增加实际 parse 进程。此前 3+4 解析预算下提交 14 份产生两批排队，不能据此断言 14 个真实 worker 的性能。四进程配置批量建议从每节点 2 份在途开始，短文档经测量可到 4；长文档仍按既有 1→2→3 流程验收。不要仅为排队增加 API worker 或把每台 parse 数直接设为集群 GPU 数。
+
+改共享槽数必须排空所有入口并同时重载 API、ordinary、全部 parse/vision/dispatch/merge，使用一致的新槽目录，不删除在用锁。四 parse 进程即使运行在三 GPU 主机上也使用 app4；该组不启动模型，不可误用 model4 接管 GPUStack 的模型生命周期。
+
+本轮同步/普通图片模式对论文增强 12 个图片块，two-stage 按既有尺寸/版面筛选增强 6 个，主要图表保留；不要把两者速度差当成同一工作量的加速。三张低清气象图两轮共六次请求仍仅两次通过字段检查。正常 HTTP、stop 或 SUCCESS 不能替代图表内容质量验收。

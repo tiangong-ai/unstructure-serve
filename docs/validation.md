@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
+lastReviewedCommit: daabfca
 ---
 
 # 开发验证与验收范围
@@ -89,6 +89,8 @@ MINERU_RUN_API_PDFS=1 MINERU_RUN_BATCH_PDFS=1 \
 ## 性能证据与限制
 
 性能报告至少记录代码/依赖/镜像版本、文件摘要、页数与图片数、有效参数、预热方式、重复次数、错误率和资源峰值。保留报告到私有 output 子目录，在版本提交中说明报告位置；不要把执行过程中不断增长的测试数量写入每份说明。
+
+共享 GPUStack 主路由的多节点对照另记录每台 parse 进程数、共享解析/视觉槽、实际采样和在途文件数。用单 deployment 指标确认各 DP rank 增量；跨主机时钟偏差不能算作阶段耗时。同步/普通与 two-stage 的图片筛选不同，需记录实际增强图片数。字段检查先核对合法 Unicode/HTML/LaTeX 表达，格式误报与真实遗漏分别保留；完整方法见调优指南第 15 节。
 
 可复现的 API 派发对照保留在[调优指南](performance-tuning.md#13-api-与解析容量分离)。其短样本结果不能外推为 Python 升级收益，也不能作为单卡/三卡的完整吞吐对照。
 

@@ -11,7 +11,7 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
 lastReviewedAt: 2026-10-09
-lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
+lastReviewedCommit: daabfca
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -117,6 +117,7 @@ lastReviewedCommit: 9e6b15404b4f843d11eda74f9a29661c844e77c9
 
 - GPUStack 原生托管使用 `deploy/gpustack/mineru-backend.example.json`；worker 负责模型生命周期，内置网关负责动态实例路由与负载均衡，应用仍由本项目 PM2 管理。迁移、鉴权、共卡端口预算及回退见 [GPUStack 运维](docs/gpustack-workers.md)。同一模型不得同时由原 PM2/Compose 与 GPUStack 启动。
 - GPUStack 的逐卡 PDF 验收使用单 deployment 的通用代理路由；`MINERU_TEST_VLM_API_KEY` 从私有文件在进程内加载，同时用于指标与解析请求。多目标路由的指标可能来自不同副本，不能用于单实例 DP 计数差分。
+- 共享 GPUStack 主路由时，parse worker 数不与本机 GPU 一一绑定；先核对两台应用合计的解析槽和每文档 VLM 并发，再测客户端在途窗口。独立图片模型须在所有应用核对实际采样参数，不能只切换 URL/model；Qwen3.8 使用已验证的 0.2/0.8/20/0 模板。视觉槽位属于主机范围，变更时排空并统一新目录；具体预算与验证边界见调优指南。
 
 - 进程环境优先于 `.env`，再回退到 `.secrets/secrets.toml`。PM2 `env` 属于进程环境，不会被 `load_dotenv()` 覆盖；Python 加载 `.env` 不会替调用方 shell 导出变量。
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
