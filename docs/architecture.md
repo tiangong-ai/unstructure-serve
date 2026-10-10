@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-10-09
-lastReviewedCommit: 33b10c0
+lastReviewedAt: 2026-10-10
+lastReviewedCommit: d973447d2452339220478354efeb52c260c86a90
 docType: architecture
 scope: repo
 status: current

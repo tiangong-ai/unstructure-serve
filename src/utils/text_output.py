@@ -72,7 +72,9 @@ def sanitize_vision_text(text: str, *, strip_boilerplate: bool = True) -> str:
     if strip_boilerplate:
         cleaned = _THINK_PREFIX_RE.sub("", cleaned)
         if cleaned.lower().startswith("<think>"):
-            raise UnusableVisionOutput("Incomplete vision reasoning block")
+            # Incomplete generation may be retried; it is not a completed
+            # response with no recognizable image content.
+            raise RuntimeError("Incomplete vision reasoning block")
         cleaned = _BOILERPLATE_PREFIX_RE.sub("", cleaned)
         cleaned = _IMAGE_PREFIX_RE.sub("", cleaned)
         cleaned = _PAGE_MARKER_RE.sub("", cleaned)

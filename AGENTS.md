@@ -10,8 +10,8 @@ whenToUpdate: "When governance commands, entrypoints or validation requirements 
 checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
-lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0d58a3e
+lastReviewedAt: 2026-10-10
+lastReviewedCommit: d973447d2452339220478354efeb52c260c86a90
 ---
 
 # TianGong AI Unstructure Serve 代理说明
@@ -26,6 +26,9 @@ lastReviewedCommit: 0d58a3e
 `route --paths` 的多个路径以逗号分隔。首次为受管 Markdown 添加复核记录时，补齐文档类型、用途和 checkPaths 等元数据；`review mark` 只填写复核日期与提交。提交前检查 staged，提交后以 PR 基准与最终 HEAD 再检查完整变更范围。
 
 ## 文档与修改约定
+
+- 未闭合的 `<think>` 输出属于不完整推理，按端点故障冷却/尝试备选；备选耗尽后任务失败，不能写为“图片内容无法识别”的成功检查点。完整但清理后无内容的响应仍保留既有标记规则。
+- `.env.example` 默认继承 Compose 的当前模型镜像标签；按主机显式覆盖标签时，须与实际镜像版本及验收结果一致，避免复用旧模型环境。
 
 - GPUStack 多应用部署使用同一份 main 与锁文件；共享应用参数骨架在 `deploy/gpustack/application.env.example`，主机端点、key、Redis、存储和锁目录仍由私有配置维护。启动/恢复/停止指令必须区分 app4/ordinary 与 GPUStack 模型生命周期，不按本机卡数启动原生 model/model4。历史实验工作区先逐项比较祖先提交并保全差异，不把旧接口方案覆盖到当前 main。
 - 图片 provider 已配置但调用失败时，任务错误保留脱敏的异常类型链（包括上游超时），不能统一报成缺少 key；日志与公开错误不附带上游异常正文。仅无可用图片内容仍按原规则处理，超时仍失败并保留检查点，不隐式重投整份文档。

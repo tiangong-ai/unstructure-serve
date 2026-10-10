@@ -13,8 +13,8 @@ checkPaths:
   - .env.example
   - pyproject.toml
   - uv.lock
-lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0d58a3e
+lastReviewedAt: 2026-10-10
+lastReviewedCommit: d973447d2452339220478354efeb52c260c86a90
 ---
 
 # 部署、维护与恢复
@@ -188,6 +188,8 @@ pm2 save
 仅停止已启动的组。共享 Redis、独立模型及其他项目按各自归属管理。不要全局删除 PM2、清空 Redis、删除共享任务目录或模型卷。未知提交、长时间无进展任务应按 ID 定位，不能通过无差别清理恢复。
 
 ## Docker 与多卡
+
+`.env.example` 不主动覆盖模型镜像标签，初始化时继承 Compose 的当前默认值。已有私有 `.env` 若设置了 `MINERU_DOCKER_IMAGE_TAG`，升级时须核对该标签对应的实际依赖并显式选择已验收镜像；启动器会复用本地同名镜像，不会因仓库 Dockerfile 更新而自动重建。
 
 三卡由一份基础 Compose 加一份 parallel 覆盖文件定义，project 为 mineru-vlm-parallel。一个容器绑定 GPU 0/1/2，DP=3、TP=1，每卡完整模型副本，通过单地址分配请求。应用无需设置三个 URL；单次模型生成不会自动分成三卡计算。
 
