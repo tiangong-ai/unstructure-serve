@@ -10,8 +10,8 @@ whenToUpdate: "When governance commands, entrypoints or validation requirements 
 checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
-lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0d58a3e
+lastReviewedAt: 2026-10-10
+lastReviewedCommit: d973447d2452339220478354efeb52c260c86a90
 ---
 
 # 开发验证与验收范围
@@ -19,6 +19,8 @@ lastReviewedCommit: 0d58a3e
 所有命令在仓库根目录执行。本文件供开发运维使用，不经服务文档路由提供。原始 PDF、凭证、任务记录和测试输出保存在私有目录；公共文档只保留验证方法、适用条件和结论边界。
 
 ## 常规检查
+
+公开环境模板的单卡、三卡和四卡 Compose 配置须选择当前默认模型镜像，避免模板覆盖到旧标签；配置测试不要求启动 Docker daemon 或 GPU。视觉回归区分完整但无内容与未闭合推理：后者在端点间可切换，耗尽后不保存失败图片的成功检查点，恢复时复用已完成解析/图片并重试缺失图片。
 
 `test_vision_service.py` 另外验证缺少 provider 配置与真实上游超时有不同错误，异常类型可用于诊断，日志和任务错误不泄露上游正文；内容不可识别标记和其他错误失败规则保持。
 

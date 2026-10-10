@@ -23,6 +23,31 @@ def compose_env_file():
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Docker Compose CLI required")
+@pytest.mark.parametrize("mode", ["single", "parallel", "parallel4"])
+def test_public_env_selects_the_pinned_model_image(mode):
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("MINERU_", "COMPOSE_"))
+    }
+    files = ["-f", str(ROOT / "deploy/mineru-vllm/compose.mineru.yaml")]
+    if mode != "single":
+        files += ["-f", str(ROOT / f"deploy/mineru-vllm/compose.mineru.{mode}.yaml")]
+
+    images = []
+    for env_file in ("/dev/null", str(ROOT / ".env.example")):
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", env_file, *files, "config", "--format", "json"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        images.append(json.loads(result.stdout)["services"]["mineru-vlm"]["image"])
+    assert images[1] == images[0], "Public bootstrap must select the pinned Compose model image"
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Docker Compose CLI required")
 def test_parallel_compose_exposes_three_gpus_and_internal_load_balancing():
     env = {
         key: value

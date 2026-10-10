@@ -89,14 +89,17 @@ def test_failover_prepares_image_once_and_preserves_png_mime(tmp_path, monkeypat
     )
 
 
-def test_wrapper_only_response_switches_endpoints_without_reencoding(monkeypatch):
+@pytest.mark.parametrize(
+    "content", ["Image Description: [Page 300] [ChunkType=Image]", "<think>unfinished reasoning"]
+)
+def test_invalid_response_switches_endpoints_without_reencoding(monkeypatch, content):
     calls = []
     encoded = []
     monkeypatch.setattr(compatible, "encode_image", lambda path: encoded.append(path) or "abc")
 
     def wrapper_only(**payload):
         calls.append("wrapper")
-        return _response("Image Description: [Page 300] [ChunkType=Image]")
+        return _response(content)
 
     def useful(**payload):
         calls.append("useful")
@@ -125,6 +128,20 @@ def test_all_wrapper_only_endpoints_still_fail(monkeypatch):
 
     _pool(monkeypatch, [wrapper_only, wrapper_only])
     with pytest.raises(UnusableVisionOutput, match="no usable facts"):
+        vllm.vision_completion_vllm("fixture.jpg", output_validator=validate_vision_output)
+    assert len(calls) == 2
+
+
+def test_incomplete_reasoning_is_not_classified_as_unrecognized_content(monkeypatch):
+    calls = []
+    monkeypatch.setattr(compatible, "encode_image", lambda _: "abc")
+
+    def incomplete(**payload):
+        calls.append(payload)
+        return _response("<think>unfinished reasoning")
+
+    _pool(monkeypatch, [incomplete, incomplete])
+    with pytest.raises(RuntimeError, match="All configured vLLM vision endpoints failed"):
         vllm.vision_completion_vllm("fixture.jpg", output_validator=validate_vision_output)
     assert len(calls) == 2
 

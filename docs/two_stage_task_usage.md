@@ -1,6 +1,6 @@
 ---
-lastReviewedAt: 2026-10-09
-lastReviewedCommit: 33b10c0
+lastReviewedAt: 2026-10-10
+lastReviewedCommit: d973447d2452339220478354efeb52c260c86a90
 docType: runbook
 scope: repo
 status: current
@@ -73,7 +73,7 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 pm2 status
 ```
 
-图片任务默认提示词优先提取图中事实，避免重复 caption；固定前缀清理不代替内容校验。OpenAI-compatible 空响应在端点层判失败并尝试备选；各备选仍无内容时单图以 `[图片内容无法识别]` 完成，截断输出仍使任务失败。采样和实测见[图片服务调优](performance-tuning.md#8-独立多模态图片服务调优)。`VISION_BATCH_SIZE` 只影响同步/普通图片任务，two-stage 受 vision worker 的 `-c 32`、每波派发数及本机共享端点槽位共同约束。
+图片任务默认提示词优先提取图中事实，避免重复 caption；固定前缀清理不代替内容校验。OpenAI-compatible 空响应在端点层判失败并尝试备选；各备选仍无内容时单图以 `[图片内容无法识别]` 完成，截断输出仍使任务失败。未闭合的 `<think>` 属于不完整响应，即使端点返回 stop 或未提供结束原因也不能作为无内容成功保存；可用备选耗尽后按原 ID 显式恢复，重试该缺失图片。采样和实测见[图片服务调优](performance-tuning.md#8-独立多模态图片服务调优)。`VISION_BATCH_SIZE` 只影响同步/普通图片任务，two-stage 受 vision worker 的 `-c 32`、每波派发数及本机共享端点槽位共同约束。
 
 配置多个 vLLM 图片端点时，连接失败、超时或临时服务错误会自动尝试其他端点；普通图片响应若清理后只剩 thinking/位置标记等包装内容，也会在同一次调用中冷却并切换。故障端点冷却后仅允许一个真实推理请求，清理后有可用内容才自动恢复正常轮换，无需客户端重新提交任务。空/截断响应也会冷却并切换；最终仅内容不可识别时记录单图标记，备选耗尽后仍有其他故障则任务失败并保留检查点；400 等请求错误直接失败。该行为也适用于同步及普通图片任务，与 MinerU 文档解析端点分开管理。独立探测进程提前排除离线或缺少目标模型的端点，记录过期后回退业务探测；健康检查通过仍需半开推理成功才恢复并发。只启动 workers 或 ordinary 时另启动 vision-health；start app 已包含它。
 

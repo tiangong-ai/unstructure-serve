@@ -12,8 +12,8 @@ checkPaths:
   - uv.lock
   - .python-version
   - deploy/mineru-vllm/Dockerfile
-lastReviewedAt: 2026-10-09
-lastReviewedCommit: 0d58a3e
+lastReviewedAt: 2026-10-10
+lastReviewedCommit: d973447d2452339220478354efeb52c260c86a90
 ---
 
 # 依赖与 Python 维护

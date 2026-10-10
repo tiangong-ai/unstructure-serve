@@ -7,6 +7,7 @@ from src.utils.text_output import (
     UNRECOGNIZED_IMAGE_TEXT,
     UnusableVisionOutput,
     sanitize_vision_text,
+    validate_vision_output,
 )
 import src.services.mineru_with_images_service as images
 import src.services.vision_service_openai_compatible as compatible
@@ -38,7 +39,7 @@ def test_strict_ocr_preserves_literal_boilerplate():
 
 
 def test_unclosed_reasoning_is_not_returned():
-    with pytest.raises(ValueError, match="reasoning"):
+    with pytest.raises(RuntimeError, match="reasoning"):
         sanitize_vision_text("<think>unfinished reasoning")
 
 
@@ -55,6 +56,8 @@ def test_prompt_preserves_facts_and_custom_ocr():
         ("length", "partial 52", RuntimeError),
         ("stop", "", UnusableVisionOutput),
         ("stop", None, UnusableVisionOutput),
+        ("stop", "<think>unfinished reasoning", RuntimeError),
+        (None, "<think>unfinished reasoning", RuntimeError),
     ],
 )
 def test_compatible_rejects_incomplete_or_empty_output(monkeypatch, reason, content, error):
@@ -68,7 +71,10 @@ def test_compatible_rejects_incomplete_or_empty_output(monkeypatch, reason, cont
     pool = SimpleNamespace(get_client=lambda: client)
     with pytest.raises(error):
         compatible.vision_completion_openai_compatible(
-            "x.jpg", default_model="model", client_pool=pool
+            "x.jpg",
+            default_model="model",
+            client_pool=pool,
+            output_validator=validate_vision_output,
         )
 
 

@@ -145,6 +145,36 @@ def test_unrecognized_image_is_checkpointed_without_failing_document(prepared, m
     assert calls["parse"] == 1
 
 
+def test_incomplete_reasoning_fails_without_checkpoint_and_resumes(prepared, monkeypatch):
+    pipeline, ref, calls = prepared()
+    monkeypatch.setenv("VISION_BATCH_SIZE", "1")
+    initial_vision = pipeline.vision_completion
+    attempts = []
+
+    def incomplete_second(path, *args, **kwargs):
+        attempts.append(Path(path).name)
+        if Path(path).name == "2.png":
+            return "<think>unfinished reasoning"
+        return initial_vision(path, *args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "vision_completion", incomplete_second)
+    with pytest.raises(RuntimeError, match="reasoning"):
+        pipeline.run_durable_job(ref)
+    assert job_store.status(ref["job_id"])["state"] == "FAILURE"
+    vision_directory = job_store.job_dir(ref["job_id"]) / "vision"
+    completed = (vision_directory / "1.json").read_bytes()
+    assert not (vision_directory / "2.json").exists()
+
+    resumed = job_store.resume_job(ref["job_id"])
+    monkeypatch.setattr(pipeline, "vision_completion", initial_vision)
+    pipeline.run_durable_job({"job_id": ref["job_id"], "generation": resumed["generation"]})
+    assert job_store.status(ref["job_id"])["state"] == "SUCCESS"
+    assert (vision_directory / "1.json").read_bytes() == completed
+    assert UNRECOGNIZED_IMAGE_TEXT not in job_store.read_result(ref["job_id"])["txt"]
+    assert attempts == ["1.png", "2.png"]
+    assert calls == {"parse": 1, "vision": ["1.png", "2.png"]}
+
+
 def test_version_one_checkpoints_resume_with_unrecognized_marker(prepared, monkeypatch):
     pipeline, ref, calls = prepared()
     pipeline.ensure_parsed(ref)
