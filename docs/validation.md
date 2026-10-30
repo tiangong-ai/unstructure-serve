@@ -37,8 +37,12 @@ uv run --group dev pytest
 
 常规测试用替身隔离外部依赖，覆盖路由参数、SDK 适配、资产完整性、阅读顺序、视觉失败、上传清理、共享解析槽和批量恢复；`test_mineru4_adapter.py` 还用真实小 PDF 文本层验证“明显有字却零块”必须失败、仅选中空白页可保持空结果；不代表模型解析质量或生产容量已验证。
 
+`test_mineru_cpu_runtime.py` 在新进程读取真实 SDK 配置，验证四档在进入解析器前都缺省为 onnx/cpu，显式 gpu/auto/torch 和提前缓存的非 CPU 配置会被拒绝；它不加载真实模型。`test_health_router.py` 与持久流水线测试核对相同的配置入口和 profile，`test_mineru4_adapter.py` 保持旧诊断参数可调用，同时要求保存真实结构化产物、不再期待 `model_output.json`。这些合同检查不能替代运行时 CPU provider、源文档质量和真实模型请求验收。
+
 `test_mineru_deployment.py` 验证 Compose 的三卡/四卡默认每卡固定 3 GiB KV、拓扑专属覆盖与显式空值回退、PM2 不覆盖私有配置、旧进程环境在模型启动器中被清除、已有最终镜像免构建且禁止拉取、缺失镜像走构建路径，以及容器入口始终传启动检查比例、固定 KV 时再传 KV 字节数。它只验证参数组装；共享 GPU 的真实峰值和 PDF 正确性仍须运行下方验收。
-MinerU 4.0.12 / DocVortex 0.5.16 / mineru-vl-utils 2.0.7 定向升级时，先在独立虚拟环境检查锁文件和常规测试，再用 p2 四档、含图论文、长于处理窗口的 PDF 验证词间空格、页码、表格和可解码图片。模型镜像单独构建并检查 `pip check`、CUDA 张量运算、真实 PDF 及 DP 副本；切换运行服务后再验证同步、普通任务和 two-stage 的响应合同。未对照相同文件与负载前，不把上游 DocVortex 性能数据写成本项目提速结论。
+MinerU 4.1.2 / DocVortex 0.6.8 / mineru-vl-utils 2.0.8 定向升级时，先在独立虚拟环境检查锁文件和常规测试，再用 p2 四档、含图论文、长于处理窗口的 PDF 验证词间空格、页码、关键数字、科学下标、勾选项和可解码图片。实际小模型会话应使用 CPU provider，不能仅凭 `small_backend=onnx` 或没有安装 Torch 推定 CPU，也不能把可用 WebGPU provider 当成已使用 GPU。模型镜像单独构建并检查 `pip check`、CUDA 张量运算、真实 PDF 及 DP 副本；切换运行服务后再验证同步、普通任务和 two-stage 的响应合同。未对照相同文件与负载前，不把上游性能数据写成本项目提速结论。
+
+升级验收还须验证 profile 中的版本和 `onnx_device`：旧 SDK 或缺失设备字段的阶段检查点不能被手工补写后继续复用；恢复旧任务须使用其原代码、锁文件及配置。完成旧任务或明确保留可恢复环境之后，才能共同切换 API 和相关 worker。常规配置测试、隔离真实解析以及生产切换是不同证据，分别记录实际完成范围。
 Compose 配置测试的临时 `--env-file` 写入 Git 忽略的 `output` 并在测试后删除；Snap Docker 看不到宿主 pytest 默认的 `/tmp`，将文件放在该处会让配置检查直接失败。
 
 `test_vision_capacity_http.py` 使用本地真实 TCP/HTTP 连接模拟 TLS 握手不响应和 HTTP 503，验证快速切换、跨调用冷却及恢复后重新分配；正常响应刻意晚于连接预算，确保不会误用短预算截断推理。`test_vision_endpoint_routing.py` 另以固定响应验证普通图片清理后空内容在同一次调用中切换、只编码图片一次、全部端点无内容及半开不误恢复；图片流程测试验证仅无内容时写入 `[图片内容无法识别]` 并继续，连接故障仍失败，严格 OCR 不执行普通图片清理。固定响应不能证明小图或二维码的真实识别质量，仍须使用下面的真实 PDF 验收。`test_vision_health.py` 覆盖探测鉴权/前缀、有限兼容回退、模型匹配、总超时、禁止重定向、跨实例 leader 租约、状态过期和关闭时取消；健康成功不得直接恢复并发。

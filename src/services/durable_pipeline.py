@@ -72,10 +72,10 @@ def _value_digest(value):
 
 
 def _execution_profile(record):
-    from mineru.config import config
     from src.services import mineru_service_full, mineru_with_images_service, vision_prompts
     from src.services import vision_service, vision_service_vllm
 
+    config = mineru_service_full.get_mineru_config()
     options = record["options"]
     details = {
         # Vision version 2 adds an explicit per-image marker for unusable content.
@@ -85,6 +85,7 @@ def _execution_profile(record):
         "tier": resolve_tier(options.get("backend")),
         "parse_model": config.model.vlm.model,
         "small_backend": config.model.small_backend,
+        "onnx_device": config.model.onnx_device,
         "ocr_mode": mineru_service_full._env_default_method(),
         "parse_endpoints_sha256": _value_digest(
             mineru_service_full._server_urls_from_env()

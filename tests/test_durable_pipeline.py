@@ -203,6 +203,35 @@ def test_version_one_checkpoints_resume_with_unrecognized_marker(prepared, monke
     assert calls == {"parse": 1, "vision": ["1.png"]}
 
 
+@pytest.mark.parametrize("mode", ["parse", "images", "two-stage"])
+@pytest.mark.parametrize("legacy_field", ["mineru", "docvortex", "onnx_device"])
+def test_sdk_upgrade_rejects_old_stage_checkpoints(prepared, mode, legacy_field):
+    pipeline, ref, calls = prepared(mode)
+    pipeline.ensure_parsed(ref)
+    path = job_store.job_dir(ref["job_id"]) / "parse/manifest.json"
+    manifest = job_store.read_json(path)
+    settings = manifest["profile"]["settings"]
+    assert settings["onnx_device"] == "cpu"
+    # Include the legacy vision-version compatibility path: it must not allow
+    # checkpoints from another SDK or a profile without explicit CPU selection.
+    settings["version"] = 1
+    if legacy_field == "onnx_device":
+        del settings[legacy_field]
+    else:
+        settings[legacy_field] = {"mineru": "4.0.12", "docvortex": "0.5.16"}[legacy_field]
+    manifest["profile"]["sha256"] = pipeline._value_digest(settings)
+    job_store.atomic_json(path, manifest)
+
+    with pytest.raises(RuntimeError, match="profile"):
+        pipeline.ensure_parsed(ref)
+    with pytest.raises(RuntimeError, match="profile"):
+        pipeline.assemble(ref)
+    if mode != "parse":
+        with pytest.raises(RuntimeError, match="profile"):
+            pipeline.run_vision({**ref, "seq": 1})
+    assert calls == {"parse": 1, "vision": []}
+
+
 def test_obsolete_generation_cannot_parse_or_write_failure(prepared):
     pipeline, ref, calls = prepared()
     record = job_store.resume_job(ref["job_id"])

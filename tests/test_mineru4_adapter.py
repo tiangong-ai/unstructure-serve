@@ -129,7 +129,7 @@ def test_geometry_uses_matching_units_for_image_filters(tmp_path):
 
 
 def test_docker_endpoints_rotate_without_changing_global_config(monkeypatch):
-    from mineru.config import config
+    config = service.get_mineru_config()
 
     monkeypatch.delenv("MINERU_VLLM_AUTH_HEADER", raising=False)
     initial = config.model.vlm.model_dump()
@@ -148,9 +148,8 @@ def test_invalid_page_ranges_are_rejected(start, end):
 
 
 @pytest.mark.parametrize("debug", [False, True])
-def test_model_diagnostics_require_explicit_debug(monkeypatch, tmp_path, debug):
+def test_legacy_debug_option_preserves_supported_artifacts(monkeypatch, tmp_path, debug):
     from mineru.parser import ParseResult
-    from mineru.types import ModelJson
 
     source = tmp_path / "report.pdf"
     source.write_bytes(b"%PDF")
@@ -165,13 +164,8 @@ def test_model_diagnostics_require_explicit_debug(monkeypatch, tmp_path, debug):
             "is_full_document": True,
         }
     )
-    result._model_output = ModelJson.model_validate(
-        {
-            "metadata": metadata,
-            "pages": [[{"diagnostic": "private-model-trace"}]],
-            "page_index_map": [0],
-        }
-    )
+    warnings = []
+    monkeypatch.setattr(service.logger, "warning", lambda message, *args: warnings.append(message))
     monkeypatch.setattr(service, "mineru_parse", lambda *args, **kwargs: result)
     monkeypatch.setattr(service, "_pdf_has_substantial_text", lambda *_args: False)
     items, output, _ = service.parse_doc(
@@ -180,8 +174,10 @@ def test_model_diagnostics_require_explicit_debug(monkeypatch, tmp_path, debug):
     assert items == []
     assert (Path(output) / "middle_json.json").is_file()
     assert (Path(output) / "report_content_list.json").is_file()
-    assert (Path(output) / "model_output.json").exists() is debug
-    assert result._model_output is not None, "Export must not mutate the SDK result"
+    assert not (Path(output) / "model_output.json").exists()
+    assert bool(warnings) is debug
+    if debug:
+        assert "no longer exports model_output.json" in warnings[0]
 
 
 def _write_text_layer_pdf(path: Path, page_texts: list[str]) -> None:

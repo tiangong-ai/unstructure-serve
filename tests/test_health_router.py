@@ -56,9 +56,10 @@ def test_ready_checks_all_pool_endpoints_and_uses_auth(client, monkeypatch):
 
 def test_ready_respects_sdk_config_fallback(client, monkeypatch):
     import httpx
-    from mineru.config import config
     from src.routers import health_router
-    from src.services.mineru_service_full import _SERVER_URL_ENV_KEYS
+    from src.services.mineru_service_full import _SERVER_URL_ENV_KEYS, get_mineru_config
+
+    config = get_mineru_config()
 
     for key in (
         *_SERVER_URL_ENV_KEYS,

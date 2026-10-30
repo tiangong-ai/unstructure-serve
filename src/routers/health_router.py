@@ -8,6 +8,7 @@ from src.services.mineru_service_full import (
     _normalize_server_url_input,
     _server_urls_from_env,
     _vlm_config,
+    get_mineru_config,
 )
 from src.utils.response_utils import json_response, pretty_response_flag
 
@@ -27,7 +28,7 @@ async def readiness_check(pretty: bool = Depends(pretty_response_flag)):
     This does not test Redis or the separate image-description service.
     The endpoint pool has no failover, so every endpoint must be reachable.
     """
-    from mineru.config import config
+    config = get_mineru_config()
 
     urls = (
         _server_urls_from_env()

@@ -19,7 +19,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 
 # 部署、维护与恢复
 
-应用使用 Python 3.13.15、MinerU 4.0.12、DocVortex 0.5.16、mineru-vl-utils 2.0.7 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
+仓库应用基线为 Python 3.13.15、MinerU 4.1.2、DocVortex 0.6.8、mineru-vl-utils 2.0.8 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。模板更新不会自动切换运行中的环境或模型，部署时另核对实际版本与镜像。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
 
 所有 shell 命令在仓库根目录执行，文件示例使用相对路径。跨进程或容器的共享目录由部署配置决定，必须指向同一位置；本文不预设机器目录。
 
@@ -43,8 +43,10 @@ Celery 需要 Redis；图片增强另需独立多模态服务。本仓库的 PM2
 下载和验证 CPU 小模型：
 
 ```bash
-uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
-uv run mineru-kit models verify --tier basic --small-backend onnx
+MINERU_MODEL_SMALL_BACKEND=onnx MINERU_MODEL_ONNX_DEVICE=cpu \
+  uv run mineru-kit models download --tier basic --small-backend onnx --source modelscope
+MINERU_MODEL_SMALL_BACKEND=onnx MINERU_MODEL_ONNX_DEVICE=cpu \
+  uv run mineru-kit models verify --tier basic --small-backend onnx
 ```
 
 如需覆盖模型目录，在部署配置中设置 MINERU_HOME。Docker 模型及下载缓存使用命名卷，与应用小模型目录分开。
@@ -53,11 +55,14 @@ uv run mineru-kit models verify --tier basic --small-backend onnx
 
 应用配置优先级为 **进程环境 > .env > TOML 回退值**。PM2 env 属于进程环境，load_dotenv 不会覆盖它；部分空字符串会回退到 TOML，不表示清除原配置。模型启动器对 Docker 端口与显存键有明确例外：先清除历史 PM2 环境覆盖，再让 Compose 读取仓库 `.env`。Python 读取 `.env` 不会替 shell 导出变量。
 
+小模型执行固定为 CPU ONNX。API、普通 worker、全部 parse worker 和直接服务调用都需使用 `MINERU_MODEL_SMALL_BACKEND=onnx`、`MINERU_MODEL_ONNX_DEVICE=cpu`。适配层读取 `.env` 后只补缺失值，并在首次使用上游 `get_config()` 时检查实际配置；已有进程环境的 gpu/auto/torch 不会被覆盖，而是作为不支持的执行配置拒绝。修改 `.env` 不能覆盖 PM2 中的旧值，也不能重置进程已经缓存的 SDK 配置，须排空并重载受影响组件。直接执行上游 `mineru-kit` 不经过本服务的运行策略，按上例显式传入 CPU 环境。
+
 | 配置 | 代码缺省或部署模板 | 作用 |
 | --- | --- | --- |
 | MINERU_DEFAULT_TIER | advanced | 直接 SDK 服务调用的兜底；HTTP 缺省固定 advanced |
 | MINERU_DEFAULT_METHOD | auto | SDK ocr_mode，可选 auto/txt/ocr |
-| MINERU_MODEL_SMALL_BACKEND | 模板 onnx | 应用 CPU 小模型 |
+| MINERU_MODEL_SMALL_BACKEND | 代码缺省及模板 onnx | 本服务仅接受 ONNX 小模型后端 |
+| MINERU_MODEL_ONNX_DEVICE | 代码缺省及模板 cpu | 本服务仅接受 CPU，拒绝 auto/gpu；大模型 vLLM 仍在 GPU |
 | MINERU_INTRA_OP_NUM_THREADS / MINERU_INTER_OP_NUM_THREADS | .env.example、API 和 parse 模板 16/1 | 每个 ONNX 模型会话线程数 |
 | MINERU_MODEL_VLM_SERVER_URL | 模板 http://127.0.0.1:30000 | MinerU 模型端点，不是业务 API 或独立图片模型 |
 | MINERU_MODEL_VLM_MODEL | 模板 mineru4 | 容器公开模型名 |
@@ -94,7 +99,7 @@ HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 ba
 
 新异步任务将原始输入、整本解析检查点、单图结果及最终业务 JSON 保存在 `MINERU_JOB_STORE_DIR`，缺省仓库 `output/jobs`。部署应使用可靠持久磁盘，API 和全部 worker 解析到同一路径；备份时包含该目录。旧任务仍使用原临时工作区和 Redis 结果，不自动迁移。
 
-恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以复用解析及已完成图片。模型、默认 prompt、采样或其他执行配置变化会拒绝复用不匹配的检查点；应恢复原配置再续算，或明确创建新任务。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
+恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以在执行配置匹配的前提下复用解析及已完成图片。profile 包含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、模型、prompt 和采样等设置；4.0 到 4.1 即使都使用 CPU，也不能默认续用旧阶段。需要续算旧任务时恢复原代码、锁文件及配置，或明确创建新任务，不手工补字段或重算旧 manifest 摘要。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
 
 ```bash
 # 仅显示身份、状态和阶段，不打印原文、请求参数或错误正文
@@ -207,7 +212,7 @@ pm2 save
 | --- | --- |
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，缺省 vllm/vllm-openai:v0.21.0；vLLM 0.28.0 通过 MINERU_DOCKER_BASE_IMAGE=vllm/vllm-openai:v0.28.0、MINERU_DOCKER_VLLM_VERSION=0.28.0 覆盖 |
 | 镜像内 Web 依赖 | 默认 FastAPI 0.141.1 / Starlette 1.7.0；vLLM 0.28.0 镜像需通过 MINERU_DOCKER_FASTAPI_VERSION=0.136.3、MINERU_DOCKER_STARLETTE_VERSION=1.6.0 覆盖并通过 pip check |
-| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.0.12-dv0.5.16-vllm0.21.0；vLLM 0.28.0 使用 tiangong/mineru-vlm:4.0.12-dv0.5.16-vllm0.28.0，通过 MINERU_DOCKER_IMAGE_TAG 及匹配的基础镜像/版本参数覆盖，并在切换前构建验收 |
+| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.1.2-dv0.6.8-vllm0.21.0；vLLM 0.28.0 使用 tiangong/mineru-vlm:4.1.2-dv0.6.8-vllm0.28.0，通过 MINERU_DOCKER_IMAGE_TAG 及匹配的基础镜像/版本参数覆盖，并在切换前构建验收 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存预算 | 私有 .env 的 MINERU_DOCKER_PORT；单卡/三卡比例缺省 0.10，四卡专属比例缺省 0.45，均用于启动检查；三卡/四卡 KV 默认每卡 3 GiB，单卡未固定，按实际硬件重新验收 |
 | GPU 绑定 / DP / TP | 三卡由 compose.mineru.parallel.yaml 设置，四卡由 compose.mineru.parallel4.yaml 设置 |
@@ -242,7 +247,7 @@ nvidia-smi 正常不保证容器内 CUDA 可用。检查宿主 UVM 设备节点�
 
 1. 记录部署提交、uv.lock、Python 版本、镜像标识和有效配置，备份到私有 output 子目录；保留模型卷和业务结果。
 2. 在隔离分支或 worktree 中按[依赖维护](dependencies.md)完成兼容检查和[回归验证](validation.md)。
-3. 停止新增提交，收取结果并核对所有相关任务与队列。接口载荷变化时，必须在旧任务处理完后共同切换 API 与 worker。
+3. 停止新增提交，收取结果并核对所有相关任务与队列。SDK 版本或执行 profile 变化时，即使 HTTP 载荷未变，也须处理完旧任务或保留其原版本恢复环境，再共同切换 API 与 worker。
 4. 停妥受影响组件再同步环境；不要覆盖或移动运行中的虚拟环境。虚拟环境可执行文件可能记录创建位置，回滚应恢复原环境位置，或按原 Python 与锁文件重新创建。
 5. 模型变更重建对应 Compose project；应用变更补起 API 与 worker。检查实际推理、鉴权、文档入口及任务生命周期，通过后 pm2 save。
 6. 失败时同步恢复代码、依赖、配置和必要的模型版本；只恢复其中一项可能造成不兼容。

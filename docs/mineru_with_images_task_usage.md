@@ -1,3 +1,21 @@
+---
+lastReviewedAt: 2026-10-31
+lastReviewedCommit: 47251623248cb14e45ee3cfe87fbb6647c4e5612
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When submitting, operating or recovering ordinary asynchronous parsing jobs."
+whenToUpdate: "When ordinary queue routing, request fields, task states or recovery behavior change."
+checkPaths:
+  - src/routers/mineru_task_router.py
+  - src/routers/mineru_with_images_task_router.py
+  - src/services/tasks/mineru_tasks.py
+  - src/services/durable_pipeline.py
+---
+
 # 普通 MinerU 异步任务
 
 > 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
@@ -7,6 +25,8 @@
 两个 POST 均支持 `Idempotency-Key`。新任务保存原始输入、完成的整本解析和单图结果；发布结果不明仍返回可恢复 ID，不删除文件。可用统一 `/tasks/{id}/status`、`/result`、`/resume` 做轻量查询、下载与显式阶段恢复，合同见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。普通失败查询仍为 HTTP 500 状态体，成功结果继续省略 null。
 
 环境、模型和 Docker 准备见[部署说明](mineru_4_upgrade_usage.md)。使用本文件接口时需启动普通 worker。
+
+恢复阶段要求执行 profile 一致，其中包括 SDK/DocVortex 版本和 ONNX 设备。升级到 4.1 后，即使仍使用 CPU 也不能强行复用旧 SDK 的阶段结果；需要续算旧任务时由运维恢复原代码、锁文件和配置，或明确创建新任务。客户端保留已有 ID，不通过重复上传或编辑检查点绕过这个边界。
 
 ## Worker 与队列
 

@@ -1,6 +1,25 @@
+---
+lastReviewedAt: 2026-10-31
+lastReviewedCommit: 47251623248cb14e45ee3cfe87fbb6647c4e5612
+docType: runbook
+scope: repo
+status: current
+authoritative: true
+owner: unstructure-serve
+language: zh-CN
+whenToUse: "When integrating document parsing, asynchronous jobs or result consumption."
+whenToUpdate: "When public request fields, task states, recovery or result contracts change."
+checkPaths:
+  - src/routers/**
+  - src/models/**
+  - src/services/job_submission.py
+  - src/services/durable_pipeline.py
+  - src/scripts/batch_parse.py
+---
+
 # AI 开发者文档拆解接入指南
 
-适用接口：TianGong AI Unstructure Serve / MinerU 4.0.5。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
+适用接口：TianGong AI Unstructure Serve，当前仓库使用 MinerU 4.1.2 契约。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
 
 **先读取目标部署的 `/openapi.json`，再按本文选择工作流。** 本文解释接口语义、恢复规则和结果处理，实际参数枚举以部署中的 OpenAPI 为准。API `info.version` 当前为 `1.0`，不是 MinerU 版本，也不足以标识全部部署变更；集成时保存 schema 摘要和服务发布记录。
 
@@ -334,7 +353,7 @@ curl --fail-with-body "$API_BASE/tasks/$TASK_ID/result" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" -o result.json.part
 ```
 
-恢复重用已完成阶段，不保证底层模型请求恰好执行一次。若模型已响应但结果尚未落盘时进程退出，该图片可能重算。已排队的旧代消息不会写入新代结果；修改解析/图片执行配置可能使旧检查点拒绝复用，需按运维说明处理。不要把 resume 当作取消正在运行的任务。
+恢复重用已完成阶段，不保证底层模型请求恰好执行一次。若模型已响应但结果尚未落盘时进程退出，该图片可能重算。已排队的旧代消息不会写入新代结果；修改 SDK 版本或解析/图片执行配置可能使旧检查点拒绝复用，需由运维恢复原版本环境，或明确创建新任务。客户端不应编辑服务端检查点或把 resume 当作取消正在运行的任务。
 
 ## 6. 结果如何消费
 

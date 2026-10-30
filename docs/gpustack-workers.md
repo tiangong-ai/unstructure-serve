@@ -20,9 +20,9 @@ GPUStack worker 管理模型容器的创建、停止与恢复，应用 API、Cel
 
 ## 模型与共享 GPU
 
-后端模板见 `deploy/gpustack/mineru-backend.example.json`，当前版本为 `4.0.12-vllm0.28.0-custom`，镜像为 `tiangong/mineru-vlm:4.0.12-dv0.5.16-vllm0.28.0`，包含 MinerU 4.0.12、DocVortex 0.5.16 和 mineru-vl-utils 2.0.7。新镜像须先按[依赖指南](dependencies.md)选择 vLLM 0.28.0 基底及匹配的 FastAPI/Starlette 参数，完成构建与真实推理验收后再切换 deployment；不能仅修改标签复用旧镜像。
+后端模板见 `deploy/gpustack/mineru-backend.example.json`，默认版本为 `4.1.2-vllm0.28.0-custom`，镜像为 `tiangong/mineru-vlm:4.1.2-dv0.6.8-vllm0.28.0`，包含 MinerU 4.1.2、DocVortex 0.6.8 和 mineru-vl-utils 2.0.8。模板保留 `4.0.12-vllm0.28.0-custom` 版本定义供回退，不会因此自动升级运行中的 deployment。新镜像须先按[依赖指南](dependencies.md)选择 vLLM 0.28.0 基底及匹配的 FastAPI/Starlette 参数，完成构建与真实推理验收后再切换；不能仅修改标签复用旧镜像。
 
-复用已有模型卷与下载缓存，worker 必须挂载相同模型卷到 `/opt/mineru`，并只读挂载 `deploy/mineru-vllm/model-entrypoint.sh` 到模板指定路径。4.0.11 到 4.0.12 的默认模型仓库引用不变，本次依赖升级无需因此重新下载权重。应用环境保持 CPU ONNX，不安装推理引擎；各应用节点和模型容器分别核对实际三件套版本。
+复用已有模型卷与下载缓存，worker 必须挂载相同模型卷到 `/opt/mineru`，并只读挂载 `deploy/mineru-vllm/model-entrypoint.sh` 到模板指定路径。SDK 升级时先核对模型 ID、revision 和权重清单；引用未变的缓存可继续复用，不删除模型卷来代替兼容验收。应用环境保持 CPU ONNX，不安装推理引擎；各应用节点和模型容器分别核对实际三件套版本。
 
 创建 deployment 时显式复制后端参数，并按目标主机设置 DP 数量、GPU selector 和启动显存比例；TP 保持 1、上下文 8192、每副本 16 序列和 3 GiB KV，保留输出层绑定与 MinerU logits processor。同机 Embedding 与 MinerU 使用不同的 DP RPC、master 和运行时通信端口段，避免 host network 下冲突。错开共享 GPU 上的模型启动，核对预热后的逐卡峰值。
 
@@ -31,6 +31,8 @@ GPUStack worker 管理模型容器的创建、停止与恢复，应用 API、Cel
 ## 调用方切换
 
 多个应用节点使用同一个仓库、同一份 main 与锁文件。共享参数骨架为 `deploy/gpustack/application.env.example`，逐项合并到现有私有 `.env`；不要整份覆盖，更不要跨节点复制 key、Redis、任务存储或锁目录。模板显式设置各类任务超时，避免 API 的 PM2 env 与普通 worker 的代码缺省不同。应用的实际解析并发与本机 GPU 数量独立；三卡和四卡模型都由各自 GPUStack deployment 管理。
+
+API 与所有 worker 显式配置 `MINERU_MODEL_SMALL_BACKEND=onnx`、`MINERU_MODEL_ONNX_DEVICE=cpu`。MinerU 4.1 的 auto 设备选择不属于本服务执行策略；进程环境优先于 `.env`，非 CPU 覆盖会在 SDK 入口拒绝。此约束只针对小模型，大模型仍由 GPUStack 的 vLLM deployment 在 GPU 执行，不配置混合小模型调度。
 
 GPUStack 专用部署同时设置 `VISION_PROVIDER=vllm` 和 `VISION_PROVIDER_CHOICES=vllm`。前者只选首选项，不能阻止向其他已配置 provider 回退；API 模板中的允许列表也不会自动传给 Celery。逐个核对 API、ordinary、parse/dispatch/vision/merge 的有效配置及任务 manifest 中的 fallbacks。改变允许列表须先排空，因为执行 profile 也包含回退策略；保留旧结果的真实来源，不能把外部 provider 补做的成功当作纯 GPUStack 验收。
 
@@ -46,7 +48,7 @@ MinerU 与独立图片模型分别预算：每文档 VLM 并发、整机解析�
 
 按 `docs/validation.md` 执行真实 DP PDF、HTTP ready 和任务验收，检查每个目标实例及 DP engine 收到请求；单一网关健康响应不足以证明所有副本正确。通用代理路径保留前缀，验收包括带鉴权的 `/health`、`/v1/models` 和实际 PDF。与 Embedding 共卡时另做联合请求并记录显存。
 
-逐卡测试设置 `MINERU_TEST_VLM_URL` 为仅包含一个 deployment 的路由，并在进程内加载 `MINERU_TEST_VLM_API_KEY`，同时认证 `/metrics` 与解析请求；不要把密钥写在命令行。应用的 `MINERU_MODEL_VLM_API_KEY` 与测试变量职责独立。迁移应用时检查 PM2 进程环境的优先级，重载后验证有效连接配置、保存 PM2，并保持原模型组停止。修改执行配置 revision，防止旧任务检查点与新配置混用。
+逐卡测试设置 `MINERU_TEST_VLM_URL` 为仅包含一个 deployment 的路由，并在进程内加载 `MINERU_TEST_VLM_API_KEY`，同时认证 `/metrics` 与解析请求；不要把密钥写在命令行。应用的 `MINERU_MODEL_VLM_API_KEY` 与测试变量职责独立。迁移应用时检查 PM2 进程环境的优先级，重载后验证有效连接配置、保存 PM2，并保持原模型组停止。SDK/DocVortex 版本和 ONNX 设备也在检查点 profile 中；切换前排空旧任务，需要恢复时使用其原代码、锁文件和配置，不以仍为 CPU 或仅改 revision 为由复用旧阶段。
 
 ## 回退
 

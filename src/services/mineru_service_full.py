@@ -28,6 +28,22 @@ _SERVER_URL_CACHE: tuple[str, ...] = ()
 _SERVER_URL_CYCLE = None
 
 load_dotenv()
+os.environ.setdefault("MINERU_MODEL_SMALL_BACKEND", "onnx")
+os.environ.setdefault("MINERU_MODEL_ONNX_DEVICE", "cpu")
+
+
+def get_mineru_config():
+    """Load the SDK lazily and reject execution outside this service's CPU policy."""
+    from mineru.config import get_config
+
+    config = get_config()
+    if config.model.small_backend != "onnx" or config.model.onnx_device != "cpu":
+        raise RuntimeError(
+            "MinerU small models must use CPU ONNX: set "
+            "MINERU_MODEL_SMALL_BACKEND=onnx and MINERU_MODEL_ONNX_DEVICE=cpu "
+            "before starting the application."
+        )
+    return config
 
 
 def mineru_parse(*args, **kwargs):
@@ -159,8 +175,9 @@ def _page_range(start_page_id: int, end_page_id: Optional[int]) -> str:
 
 
 def _vlm_config(backend, server_url, server_headers):
-    from mineru.config import VlmConfig, config
+    from mineru.config import VlmConfig
 
+    config = get_mineru_config()
     values = config.model.vlm.model_dump()
     normalize_backend(backend)
     # Legacy backend names select quality only; VLM inference lives in Docker.
@@ -292,13 +309,19 @@ def parse_doc(
     PDF indices remain source-document indices. Native DOCX is only used by
     the existing txt-only branch; the API still converts Office files to PDF.
     """
+    get_mineru_config()
     from mineru.parser import ParseResult
     from mineru.parser.writer import FileBasedDataWriter
 
     del return_txt
     if not path_list:
         raise ValueError("path_list must not be empty.")
-    if dump_debug_intermediate or log_debug_intermediate:
+    if dump_debug_intermediate:
+        logger.warning(
+            "MinerU 4.1 no longer exports model_output.json; "
+            "MiddleJson, content lists and image assets are still saved"
+        )
+    if log_debug_intermediate:
         logger.debug("MinerU 4 saves structured diagnostics alongside materialized assets")
     effective_method = (method or "").strip() or _env_default_method()
     if effective_method not in {"auto", "txt", "ocr"}:
@@ -336,13 +359,8 @@ def parse_doc(
             )
             if result is None:
                 raise RuntimeError(f"MinerU returned no result for {source.name}")
-            # ModelJson contains the raw analysis trace and can exceed hundreds
-            # of MB. The public ParseResult constructor preserves the materialized
-            # document/asset export while omitting that optional diagnostic.
-            exported = (
-                result if dump_debug_intermediate else ParseResult(middle_json=result.middle_json)
-            )
-            exported.save(FileBasedDataWriter(str(artifact_dir)))
+            # MinerU 4.1's public result exports only MiddleJson and assets.
+            result.save(FileBasedDataWriter(str(artifact_dir)))
             try:
                 saved = ParseResult.from_json(
                     (artifact_dir / "middle_json.json").read_text("utf-8")
