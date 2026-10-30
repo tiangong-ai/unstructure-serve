@@ -11,7 +11,9 @@
         "MINERU_PROCESSING_WINDOW_SIZE": "64",
         "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
         "MINERU_INTRA_OP_NUM_THREADS": "16",
-        "MINERU_INTER_OP_NUM_THREADS": "1"
+        "MINERU_INTER_OP_NUM_THREADS": "1",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu"
       },
       "kill_timeout": 1900000
     }

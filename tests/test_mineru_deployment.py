@@ -13,6 +13,61 @@ import pytest
 ROOT = Path(__file__).parents[1]
 
 
+def test_application_profiles_pin_cpu_onnx():
+    for relative in (".env.example", "deploy/gpustack/application.env.example"):
+        settings = dict(
+            line.split("=", 1)
+            for line in (ROOT / relative).read_text().splitlines()
+            if line and not line.startswith("#") and "=" in line
+        )
+        assert settings["MINERU_MODEL_SMALL_BACKEND"] == "onnx", relative
+        assert settings["MINERU_MODEL_ONNX_DEVICE"] == "cpu", relative
+        assert settings["MINERU_INTRA_OP_NUM_THREADS"] == "16", relative
+        assert settings["MINERU_INTER_OP_NUM_THREADS"] == "1", relative
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "ecosystem.config.json",
+        "ecosystem.quatro.json",
+        "ecosystem.celery.json",
+        "ecosystem.two_stage.celery.json",
+        "ecosystem.two_stage.parse4.json",
+    ],
+)
+def test_application_pm2_entries_pin_cpu_onnx(filename):
+    apps = json.loads((ROOT / "deploy/pm2" / filename).read_text())["apps"]
+    for app in apps:
+        assert app["script"] in {".venv/bin/gunicorn", ".venv/bin/celery"}
+        settings = app["env"]
+        assert settings["MINERU_MODEL_SMALL_BACKEND"] == "onnx", app["name"]
+        assert settings["MINERU_MODEL_ONNX_DEVICE"] == "cpu", app["name"]
+        assert settings["MINERU_INTRA_OP_NUM_THREADS"] == "16", app["name"]
+        assert settings["MINERU_INTER_OP_NUM_THREADS"] == "1", app["name"]
+
+
+def test_model_image_uses_compatible_cpu_onnx_generation():
+    dockerfile = (ROOT / "deploy/mineru-vllm/Dockerfile").read_text()
+    assert "'mineru[torch]==4.1.2'" in dockerfile
+    assert "'docvortex==0.6.8'" in dockerfile
+    assert "'mineru-vl-utils==2.0.8'" in dockerfile
+    assert "MINERU_MODEL_SMALL_BACKEND=onnx" in dockerfile
+    assert "MINERU_MODEL_ONNX_DEVICE=cpu" in dockerfile
+    backend = json.loads((ROOT / "deploy/gpustack/mineru-backend.example.json").read_text())
+    assert backend["default_version"] == "4.1.2-vllm0.28.0-custom"
+    assert backend["version_configs"][backend["default_version"]]["image_name"] == (
+        "tiangong/mineru-vlm:4.1.2-dv0.6.8-vllm0.28.0"
+    )
+    # Registering the new default must retain the version used by existing
+    # deployments until their independent model rollout or rollback completes.
+    assert backend["version_configs"]["4.0.12-vllm0.28.0-custom"]["image_name"] == (
+        "tiangong/mineru-vlm:4.0.12-dv0.5.16-vllm0.28.0"
+    )
+    assert backend["default_env"]["MINERU_MODEL_SMALL_BACKEND"] == "onnx"
+    assert backend["default_env"]["MINERU_MODEL_ONNX_DEVICE"] == "cpu"
+
+
 @pytest.fixture
 def compose_env_file():
     # Snap Docker cannot see pytest's default host /tmp namespace.
@@ -43,7 +98,10 @@ def test_public_env_selects_the_pinned_model_image(mode):
             text=True,
             check=True,
         )
-        images.append(json.loads(result.stdout)["services"]["mineru-vlm"]["image"])
+        service = json.loads(result.stdout)["services"]["mineru-vlm"]
+        images.append(service["image"])
+        assert service["environment"]["MINERU_MODEL_SMALL_BACKEND"] == "onnx"
+        assert service["environment"]["MINERU_MODEL_ONNX_DEVICE"] == "cpu"
     assert images[1] == images[0], "Public bootstrap must select the pinned Compose model image"
 
 

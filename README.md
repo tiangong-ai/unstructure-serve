@@ -64,7 +64,7 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
 
-当前技术栈：**Python 3.13.15 · MinerU 4.0.12 · DocVortex 0.5.16 · mineru-vl-utils 2.0.7 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
+当前技术栈：**Python 3.13.15 · MinerU 4.1.2 · DocVortex 0.6.8 · mineru-vl-utils 2.0.8 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，Linux 应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
 ## 先理解需要运行什么
 
@@ -96,7 +96,7 @@ cp -n .env.example .env
 编辑 `.env` 和 `.secrets/secrets.toml`，至少确认：
 
 - API 鉴权与令牌；即使主要使用环境变量，也保留 TOML 必需段落。
-- MinerU 模型地址，默认 `http://127.0.0.1:30000`；小模型使用 ONNX。
+- MinerU 模型地址，默认 `http://127.0.0.1:30000`；小模型固定 `MINERU_MODEL_SMALL_BACKEND=onnx`、`MINERU_MODEL_ONNX_DEVICE=cpu`。
 - Redis broker/backend 与任务目录，API 和 worker 保持一致。
 - 图片增强另填 `VLLM_BASE_URLS`、模型名和凭证。
 - 三卡模板要求 GPU 0/1/2 可用，四卡模板要求 GPU 0/1/2/3 可用；按[部署说明](docs/mineru_4_upgrade_usage.md#docker-与多卡)选择对应组，并按目标显卡调整显存预算。

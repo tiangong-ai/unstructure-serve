@@ -11,7 +11,9 @@
         "MINERU_PROCESSING_WINDOW_SIZE": "64",
         "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
         "MINERU_INTRA_OP_NUM_THREADS": "16",
-        "MINERU_INTER_OP_NUM_THREADS": "1"
+        "MINERU_INTER_OP_NUM_THREADS": "1",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu"
       },
       "kill_timeout": 1900000
     },
@@ -26,7 +28,9 @@
         "MINERU_PROCESSING_WINDOW_SIZE": "64",
         "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
         "MINERU_INTRA_OP_NUM_THREADS": "16",
-        "MINERU_INTER_OP_NUM_THREADS": "1"
+        "MINERU_INTER_OP_NUM_THREADS": "1",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu"
       },
       "kill_timeout": 1900000
     },
@@ -41,7 +45,9 @@
         "MINERU_PROCESSING_WINDOW_SIZE": "64",
         "MINERU_MODEL_VLM_MAX_CONCURRENCY": "8",
         "MINERU_INTRA_OP_NUM_THREADS": "16",
-        "MINERU_INTER_OP_NUM_THREADS": "1"
+        "MINERU_INTER_OP_NUM_THREADS": "1",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu"
       },
       "kill_timeout": 1900000
     },
@@ -52,7 +58,11 @@
       "interpreter": ".venv/bin/python",
       "args": "-A src.services.two_stage_pipeline worker -n vision@%h -l info -Q queue_vision_urgent,queue_vision -P threads -c 32 --prefetch-multiplier=1",
       "env": {
-        "CELERY_TASK_VISION_QUEUE": "queue_vision"
+        "CELERY_TASK_VISION_QUEUE": "queue_vision",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "kill_timeout": 1900000
     },
@@ -63,7 +73,11 @@
       "interpreter": ".venv/bin/python",
       "args": "-A src.services.two_stage_pipeline worker -n dispatch@%h -l info -Q queue_dispatch_urgent,queue_dispatch -P threads -c 4 --prefetch-multiplier=1",
       "env": {
-        "CELERY_TASK_DISPATCH_QUEUE": "queue_dispatch"
+        "CELERY_TASK_DISPATCH_QUEUE": "queue_dispatch",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "kill_timeout": 1900000
     },
@@ -74,7 +88,11 @@
       "interpreter": ".venv/bin/python",
       "args": "-A src.services.two_stage_pipeline worker -n merge@%h -l info -Q queue_merge_urgent,default -P threads -c 4 --prefetch-multiplier=1",
       "env": {
-        "CELERY_TASK_MERGE_QUEUE": "default"
+        "CELERY_TASK_MERGE_QUEUE": "default",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "kill_timeout": 1900000
     }

@@ -1,6 +1,6 @@
 services:
   mineru-vlm:
-    image: tiangong/mineru-vlm:${MINERU_DOCKER_IMAGE_TAG:-4.0.12-dv0.5.16-vllm0.21.0}
+    image: tiangong/mineru-vlm:${MINERU_DOCKER_IMAGE_TAG:-4.1.2-dv0.6.8-vllm0.21.0}
     build:
       context: .
       args:
@@ -26,6 +26,8 @@ services:
     entrypoint: ["/bin/bash", "/usr/local/bin/mineru-model-entrypoint"]
     environment:
       MINERU_MODEL_SOURCE: ${MINERU_MODEL_SOURCE:-modelscope}
+      MINERU_MODEL_SMALL_BACKEND: onnx
+      MINERU_MODEL_ONNX_DEVICE: cpu
       MINERU_MODEL_VLM_ENGINE: vllm
       MINERU_DOCKER_GPU_MEMORY: ${MINERU_DOCKER_GPU_MEMORY:-0.10}
       MINERU_DOCKER_KV_CACHE_MEMORY_BYTES: ${MINERU_DOCKER_KV_CACHE_MEMORY_BYTES:-}

@@ -26,6 +26,8 @@ checkPaths:
 
 POST 支持 `Idempotency-Key`；统一状态、下载及恢复入口见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。新任务在磁盘保存全文和逐图检查点，队列消息仅带 ID；`MINERU_VISION_WAVE_SIZE` 缺省 32，完成一波后再派发下一波缺失图片。进度中的图片数是去重后的请求数，不是页数或所有图片位置数。任一阶段失败保留已完成内容，修复原因后显式 resume；解析中途失败仍重做整本解析。
 
+完成阶段只有在执行 profile 一致时才能复用，摘要包含 SDK/DocVortex 版本、小模型后端和 `onnx_device`。升级到 4.1 即使仍为 CPU，也不能手工补字段或改摘要来续用旧阶段；切换前排空任务，需要恢复旧任务时使用其原代码、锁文件和配置，或明确重新提交。旧视觉输出版本的兼容只在其余执行配置完全一致时适用。
+
 `Configured vision providers failed` 后的异常类型用于区别超时、连接等推理故障；只有没有可调用 provider 时才提示检查配置与 key。超时不代表 key 失效，也不意味着已完成解析和图片检查点丢失。确认没有活跃阶段、端点恢复后按原 ID 显式 resume，再让客户端沿原输出目录续取；不重新上传整本文件，不把恢复后成功计为首次成功。
 
 ## 队列与配置
@@ -38,6 +40,8 @@ POST 支持 `Idempotency-Key`；统一状态、下载及恢复入口见 [AI 指�
 | vision | `queue_vision` | `queue_vision_urgent` | `celery-two-stage-vision` / threads 32 |
 | dispatch | `queue_dispatch` | `queue_dispatch_urgent` | `celery-two-stage-dispatch` / threads 4 |
 | merge | `default` | `queue_merge_urgent` | `celery-two-stage-merge` / threads 4 |
+
+`queue_parse_gpu` 保留既有队列名以兼容路由，不代表应用小模型在 GPU 执行。所有 API/parse worker 明确使用 onnx/cpu；大模型请求仍交给独立的 vLLM 服务。
 
 API 和全部 worker 都需要相同的 broker、result backend、工作区路径及队列设置：
 

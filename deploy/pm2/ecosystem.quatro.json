@@ -18,7 +18,11 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
-        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "out_file": "output/logs/unstructured-gunicorn-0.log",
       "error_file": "output/logs/unstructured-gunicorn-0.log",
@@ -43,7 +47,11 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
-        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30001"
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30001",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "out_file": "output/logs/unstructured-gunicorn-1.log",
       "error_file": "output/logs/unstructured-gunicorn-1.log",
@@ -68,7 +76,11 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
-        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30002"
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30002",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "out_file": "output/logs/unstructured-gunicorn-2.log",
       "error_file": "output/logs/unstructured-gunicorn-2.log",
@@ -93,7 +105,11 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "nv-community/Qwen3.8-Flash-Next-NVFP4",
         "VISION_CONTEXT_WINDOW": "4",
-        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30003"
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30003",
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu",
+        "MINERU_INTRA_OP_NUM_THREADS": "16",
+        "MINERU_INTER_OP_NUM_THREADS": "1"
       },
       "out_file": "output/logs/unstructured-gunicorn-3.log",
       "error_file": "output/logs/unstructured-gunicorn-3.log",
