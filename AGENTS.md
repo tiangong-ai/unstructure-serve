@@ -116,7 +116,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 - Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
 - scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
-- 隔离任务在成功/失败后显式关闭本任务已加载的 DocVortex 渲染池，避免 Python 等待嵌套进程导致固定退出延迟；保留原 hard timeout 与进程组收尾作为兜底，不通过缩短等待或提前返回来跳过清理。
+- 隔离任务发送成功/失败结果后，在解释器退出前先关闭本任务已加载的 MinerU VLM runtime，再独立关闭已加载的 DocVortex 渲染池。不要为未使用 VLM 的任务额外导入或初始化 SDK，也不要关闭父进程/worker 的共享运行时；SDK 清理失败仍须执行渲染池清理。保留原 hard timeout、正常退出窗口与进程组收尾作为兜底，不通过缩短等待、提前返回或忽略 atexit 错误来跳过清理。
 - `run_isolated_call` 使用 Pipe 接收线程配合子进程存活检查，子进程无结果退出时报告退出码，不等到整段 hard timeout；超时包含执行及结果传输，进程组清理可额外消耗退出窗口。大结果传输也必须持续监督，不退回先 join 再读取的死锁模式。
 - 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为三个独立 solo/1 worker（名称 parse、parse-2、parse-3），均消费 urgent/normal，prefetch=1；其余线程池。每个解析 worker 的 VLM 并发为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
 - API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
