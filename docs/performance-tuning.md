@@ -270,7 +270,7 @@ TP2 使用两卡，串行改善不到 1%，并发样本没有改善，未形成�
 
 用 cProfile/采样剖析区分序列化、拼接、图片 base64、磁盘与模型等待。当前文本拼接使用列表 join、共享 surrogate 清理，不重复 UTF-8 编解码；保持阅读顺序和标题换行合同。不要未经剖析把所有后处理移到更多线程，Python 线程不保证 CPU 字符串处理更快。
 
-当前同步隔离任务已经显式关闭 DocVortex 渲染池；不要通过更短的 watchdog 或提前返回来隐藏进程退出耗时。临时目录、图片和跨 worker 共享路径必须继续正确收尾。
+隔离解析任务在发布完整结果后，先显式关闭已加载的 MinerU VLM runtime，再关闭 DocVortex 渲染池；同步、普通任务与持久 parse 共用这一收尾边界。MinerU 4.1.2 的异步客户端若只依赖普通 atexit，可能在 Python 线程池关闭后报 `cannot schedule new futures after shutdown`；业务 SUCCESS 本身不能证明退出清理正常。不要通过更短的 watchdog、提前返回或降低日志门槛隐藏退出问题。临时目录、图片和跨 worker 共享路径必须继续正确收尾。
 
 持久异步任务的全文、图片清单和最终结果落在 `MINERU_JOB_STORE_DIR`，Redis 只传阶段引用。结果文件通过原子完成标记提交，Redis 结果过期后仍可查询已保留的任务。旧任务仍依赖 Redis 结果；两类都应及时下载并长期归档。两个 app 共同使用 `CELERY_RESULT_EXPIRES`，代码及模板缺省 86400 秒；修改后共同重载 API/worker，检查各自有效值。远端视觉上传的图片体积和网络往返也会限制吞吐。
 

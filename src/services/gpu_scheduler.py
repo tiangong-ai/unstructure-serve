@@ -169,6 +169,18 @@ def _run_child_job(publish, target, args, kwargs) -> None:
     except Exception as exc:  # noqa: BLE001 - propagate failure info through queue
         publish({"ok": False, "error": str(exc)})
     finally:
+        # The SDK's atexit hook runs after Python has stopped its executors.
+        # Close this task's loaded VLM clients while their async runtime can
+        # still drain work; unused runtimes must not be imported here.
+        runtime = sys.modules.get("mineru.model.vlm.runtime")
+        if runtime is not None:
+            try:
+                runtime.shutdown_cached_models()
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "MinerU runtime cleanup failed (%s); watchdog will finish cleanup",
+                    type(exc).__name__,
+                )
         # multiprocessing waits for nested children before normal atexit hooks.
         # Close only this task's already-loaded render pool, while the watchdog
         # remains responsible for hard timeouts and failed cleanup.

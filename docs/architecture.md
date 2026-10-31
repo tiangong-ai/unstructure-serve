@@ -39,7 +39,7 @@ flowchart LR
 
 - Router 负责字段、鉴权后的请求编排与 HTTP 合同。阻塞 I/O 经线程池执行；不是给每个同步函数加 async 就能非阻塞。
 - `upload_io.py` 以 1 MiB 缓冲复制 Starlette 已接收的 UploadFile，避免第二份整文件内存副本。它不是在 multipart 接收前限流，也不构成文件体积上限。
-- `gpu_scheduler.py` 为同步/普通任务提供独立解析子进程、hard timeout 和进程组收尾。Future 用异步包装等待；HTTP 超时后先保留源文件，任务结束再删除。
+- `gpu_scheduler.py` 为同步/普通任务提供独立解析子进程、hard timeout 和进程组收尾，持久 parse 也复用其隔离调用。子进程先发送完整成功/失败结果，再关闭本任务已加载的 MinerU VLM runtime 和 DocVortex 渲染池；两项清理独立执行，避免 SDK 的异步客户端延迟到解释器线程池关闭后才释放。清理失败或阻塞仍由原退出窗口与任务进程组回收处理，不改写已发送结果。Future 用异步包装等待；HTTP 超时后先保留源文件，任务结束再删除。
 - `parse_capacity.py` 在所有本机解析入口共享 Linux 文件锁容量。API worker 数量只改变 HTTP 容量；缺省解析上限仍为 3。不同机器/不共享锁目录的容器不受同一上限约束。
 - `content_projection.py` 统一 V1 内容到旧业务块的投影与文本组合；同步图片和 two-stage 通过各自的图片解析回调保留增强/筛选差异，调度器保持普通与科研入口的当前行为。它不负责 HTTP null 策略或任务状态。
 - `mineru_service_full.py` 是上游 SDK 适配层，保存资产后归一化业务字段、页码、阅读顺序与 checkbox；若解析为零块，仅在所选 PDF 页文本层明显非空时拒绝该结果，防止失败检查点被当成成功。新 MinerU 输出变化优先在此吸收。
