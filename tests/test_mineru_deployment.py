@@ -49,18 +49,21 @@ def test_application_pm2_entries_pin_cpu_onnx(filename):
 
 def test_model_image_uses_compatible_cpu_onnx_generation():
     dockerfile = (ROOT / "deploy/mineru-vllm/Dockerfile").read_text()
-    assert "'mineru[torch]==4.1.2'" in dockerfile
+    assert "'mineru[torch]==4.1.3'" in dockerfile
     assert "'docvortex==0.6.8'" in dockerfile
     assert "'mineru-vl-utils==2.0.8'" in dockerfile
     assert "MINERU_MODEL_SMALL_BACKEND=onnx" in dockerfile
     assert "MINERU_MODEL_ONNX_DEVICE=cpu" in dockerfile
     backend = json.loads((ROOT / "deploy/gpustack/mineru-backend.example.json").read_text())
-    assert backend["default_version"] == "4.1.2-vllm0.28.0-custom"
+    assert backend["default_version"] == "4.1.3-vllm0.28.0-custom"
     assert backend["version_configs"][backend["default_version"]]["image_name"] == (
-        "tiangong/mineru-vlm:4.1.2-dv0.6.8-vllm0.28.0"
+        "tiangong/mineru-vlm:4.1.3-dv0.6.8-vllm0.28.0"
     )
     # Registering the new default must retain the version used by existing
     # deployments until their independent model rollout or rollback completes.
+    assert backend["version_configs"]["4.1.2-vllm0.28.0-custom"]["image_name"] == (
+        "tiangong/mineru-vlm:4.1.2-dv0.6.8-vllm0.28.0"
+    )
     assert backend["version_configs"]["4.0.12-vllm0.28.0-custom"]["image_name"] == (
         "tiangong/mineru-vlm:4.0.12-dv0.5.16-vllm0.28.0"
     )

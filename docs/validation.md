@@ -40,16 +40,18 @@ uv run --group dev pytest
 `test_mineru_cpu_runtime.py` 在新进程读取真实 SDK 配置，验证四档在进入解析器前都缺省为 onnx/cpu，显式 gpu/auto/torch 和提前缓存的非 CPU 配置会被拒绝；它不加载真实模型。`test_health_router.py` 与持久流水线测试核对相同的配置入口和 profile，`test_mineru4_adapter.py` 保持旧诊断参数可调用，同时要求保存真实结构化产物、不再期待 `model_output.json`。这些合同检查不能替代运行时 CPU provider、源文档质量和真实模型请求验收。
 
 `test_mineru_deployment.py` 验证 Compose 的三卡/四卡默认每卡固定 3 GiB KV、拓扑专属覆盖与显式空值回退、PM2 不覆盖私有配置、旧进程环境在模型启动器中被清除、已有最终镜像免构建且禁止拉取、缺失镜像走构建路径，以及容器入口始终传启动检查比例、固定 KV 时再传 KV 字节数。它只验证参数组装；共享 GPU 的真实峰值和 PDF 正确性仍须运行下方验收。
-MinerU 4.1.2 / DocVortex 0.6.8 / mineru-vl-utils 2.0.8 定向升级时，先在独立虚拟环境检查锁文件和常规测试，再用 p2 四档、含图论文、长于处理窗口的 PDF 验证词间空格、页码、关键数字、科学下标、勾选项和可解码图片。实际小模型会话应使用 CPU provider，不能仅凭 `small_backend=onnx` 或没有安装 Torch 推定 CPU，也不能把可用 WebGPU provider 当成已使用 GPU。模型镜像单独构建并检查 `pip check`、CUDA 张量运算、真实 PDF 及 DP 副本；切换运行服务后再验证同步、普通任务和 two-stage 的响应合同。未对照相同文件与负载前，不把上游性能数据写成本项目提速结论。
+MinerU 4.1.3 / DocVortex 0.6.8 / mineru-vl-utils 2.0.8 定向升级时，先在独立虚拟环境检查锁文件和常规测试，再用 p2 四档、含图论文、长于处理窗口的 PDF 验证词间空格、页码、关键数字、科学下标、勾选项和可解码图片。实际小模型会话应使用 CPU provider，不能仅凭 `small_backend=onnx` 或没有安装 Torch 推定 CPU，也不能把可用 WebGPU provider 当成已使用 GPU。模型镜像单独构建并检查 `pip check`、CUDA 张量运算、真实 PDF 及 DP 副本；切换运行服务后再验证同步、普通任务和 two-stage 的响应合同。未对照相同文件与负载前，不把上游性能数据写成本项目提速结论。
 
-升级验收还须验证 profile 中的版本和 `onnx_device`：旧 SDK 或缺失设备字段的阶段检查点不能被手工补写后继续复用；恢复旧任务须使用其原代码、锁文件及配置。完成旧任务或明确保留可恢复环境之后，才能共同切换 API 和相关 worker。常规配置测试、隔离真实解析以及生产切换是不同证据，分别记录实际完成范围。
+升级验收还须验证 profile 中的版本和 `onnx_device`：4.1.2 检查点不能直接在 4.1.3 环境 resume，旧 SDK 或缺失设备字段的阶段检查点不能被手工补写后继续复用；恢复旧任务须使用其原代码、锁文件及配置。完成旧任务或明确保留可恢复环境之后，才能共同切换 API 和相关 worker。常规配置测试、隔离真实解析以及生产切换是不同证据，分别记录实际完成范围。
 Compose 配置测试的临时 `--env-file` 写入 Git 忽略的 `output` 并在测试后删除；Snap Docker 看不到宿主 pytest 默认的 `/tmp`，将文件放在该处会让配置检查直接失败。
 
 `test_vision_capacity_http.py` 使用本地真实 TCP/HTTP 连接模拟 TLS 握手不响应和 HTTP 503，验证快速切换、跨调用冷却及恢复后重新分配；正常响应刻意晚于连接预算，确保不会误用短预算截断推理。`test_vision_endpoint_routing.py` 另以固定响应验证普通图片清理后空内容在同一次调用中切换、只编码图片一次、全部端点无内容及半开不误恢复；图片流程测试验证仅无内容时写入 `[图片内容无法识别]` 并继续，连接故障仍失败，严格 OCR 不执行普通图片清理。固定响应不能证明小图或二维码的真实识别质量，仍须使用下面的真实 PDF 验收。`test_vision_health.py` 覆盖探测鉴权/前缀、有限兼容回退、模型匹配、总超时、禁止重定向、跨实例 leader 租约、状态过期和关闭时取消；健康成功不得直接恢复并发。
 
 持久任务的针对性测试包括 `test_durable_jobs.py`、`test_durable_pipeline.py`、`test_job_api.py` 和 `test_manage_jobs.py`：覆盖发布结果不明、元数据落盘失败、旧代消息、逐阶段复用、文件校验、下载租约与保留期清理。共享视觉容量包含真实 fork/spawn/进程死亡、跨进程半开独占、失败后继续熔断及旧在途成功不能覆盖新故障，以及本地 HTTP fixture；只有显式模型回归才算实际推理。
 
-`test_parse_render_cleanup.py` 覆盖隔离子进程的完整结果发布与资源收尾：先发布，再关闭已加载的 MinerU runtime，最后独立关闭 DocVortex；SDK 关闭异常不能改变结果或跳过渲染清理，未加载 SDK 的任务不额外初始化模型。与原有硬超时、崩溃、后代清理和大结果传输测试一起验证 watchdog 边界。升级实测还需从全新日志窗口核对同步、普通与 two-stage 子进程退出，不能用测试插件中的提前关闭掩盖生产路径的 atexit 错误。
+`test_parse_render_cleanup.py` 覆盖隔离子进程的完整结果发布与资源收尾：先发布，再关闭已加载的 MinerU runtime，最后独立关闭 DocVortex；SDK 关闭异常不能改变结果或跳过渲染清理，未加载 SDK 的任务不额外初始化模型。与原有硬超时、崩溃、后代清理和大结果传输测试一起验证 watchdog 边界。MinerU 4.1.3 的空闲 runtime 退出修复不替代上述主动生命周期；升级实测还需从全新日志窗口核对同步、普通与 two-stage 子进程退出，不能用测试插件中的提前关闭掩盖生产路径的 atexit 错误。
+
+配置检查另核对应用模板、模型容器与 GPUStack 后端的 `MINERU_TELEMETRY_DISABLED=1`，并在运行服务验收时确认其有效值。4.1.3 可选 Doclib 遥测默认开启，当前 parser 路径不使用 Doclib；该开关和上游 Router 新功能不扩大本服务的 HTTP/任务验收范围。
 
 故障回归须保留故障前后的输入摘要、任务 ID/generation、parse manifest 和已完成图片的 SHA256/mtime。实测九页论文在指定单图请求前注入一次失败，恢复后原解析及三张已完成图片未改变，六张最终图片各实际调用模型一次。另对真实 SDK 子进程定点 SIGKILL，检查快速失败、同 ID 恢复及任务进程组收尾。注入故障与上游实际超时分开报告，不全局停止共享模型或清空队列。
 
