@@ -1028,7 +1028,7 @@ wheels = [
 
 [[package]]
 name = "mineru"
-version = "4.1.2"
+version = "4.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
@@ -1078,7 +1078,7 @@ dependencies = [
     { name = "watchfiles" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/63/a3a1dd4edb21bf2ebf9dc879ed1e38295117be0ca4054f39fcb90141d450/mineru-4.1.2-py3-none-any.whl", hash = "sha256:d0cf1ac0dc90766d59833f47c9852d6a732a4ce106cf16931a62a5d55067c6cf", size = 3827075, upload-time = "2026-10-29T17:11:54.077Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/4c/a91654caaae95c427b72c7784e963ad12724d370eede7518acc060776472/mineru-4.1.3-py3-none-any.whl", hash = "sha256:cd077510ccd259e034832c9c704aa85ce8c34f1e286323574d4c08b8cbf7420a", size = 3834756, upload-time = "2026-10-30T10:43:48.319Z" },
 ]
 
 [[package]]
@@ -2097,7 +2097,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "kombu", extras = ["redis"], specifier = ">=5.6" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mineru", specifier = ">=4.1.2,<4.2" },
+    { name = "mineru", specifier = ">=4.1.3,<4.2" },
     { name = "mineru-vl-utils", specifier = "==2.0.8" },
     { name = "openai", specifier = ">=2,<3" },
     { name = "pillow", specifier = ">=12.3.0" },

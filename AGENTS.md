@@ -16,7 +16,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。仓库依赖基线是 MinerU 4.1.2 + DocVortex 0.6.8 + mineru-vl-utils 2.0.8 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。仓库基线和模板不代表某台运行中的服务已经升级，切换前须按实际依赖与镜像验收。验证范围与命令见 [验证指南](docs/validation.md)。
+仓库为 `tiangong-ai/unstructure-serve`。仓库依赖基线是 MinerU 4.1.3 + DocVortex 0.6.8 + mineru-vl-utils 2.0.8 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。仓库基线和模板不代表某台运行中的服务已经升级，切换前须按实际依赖与镜像验收。验证范围与命令见 [验证指南](docs/validation.md)。
 
 
 ## 文档治理
@@ -107,7 +107,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 - 三个异步 POST 支持 Idempotency-Key，保存原始输入后只发送 job_id/generation 引用，固定返回已知 ID/PENDING，不读取发布后的 Redis 状态；不明确发布返回含 ID 的 503 并保留输入。重复键与不同参数/内容冲突 409，过期墓碑 410。Office 转换在异步 parse 隔离进程内执行。
 - durable_pipeline 保存整本 parse manifest、逐图输入及结果；阶段排它锁与生命周期共享锁防重复/清理竞态。默认每波 MINERU_VISION_WAVE_SIZE=32，整波完成才发下一波，慢图会阻塞后续波次；不是逐图滚动补位。图片完成返回稳定小引用，全文不得再次放入 chord callback 或 Redis 结果。普通任务也复用整本与逐图结果；只有完成标记提交后才成功，工作区不在 merge 中删除。
 - GET /tasks/{id}/status 不返回全文；/result 校验摘要后流式返回业务 JSON，持锁覆盖下载/断连；POST /resume 在无活跃阶段时提升 generation，旧代消息禁止写入。旧三类 GET 先查持久存储再回退 Redis，并保留各自 null/失败码合同。旧任务不自动迁移。
-- 检查点冻结执行配置摘要（含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、解析和实际视觉选择、prompt/采样、端点摘要），配置不一致拒绝复用；同模型别名替换权重时提升 MINERU_EXECUTION_PROFILE_REVISION，改变阶段输出语义时更新执行 profile 协议版本。SDK 升级即使仍使用 CPU，也不能将旧检查点补字段或重算摘要后强行复用；需要续算时恢复原代码、锁文件和配置，或明确创建新任务。视觉输出版本 2 将无内容响应写入单图标记；在其他设置完全一致时允许版本 1 的已完成解析/视觉检查点继续复用，未完成图片按新策略处理，纯解析版本仍为 1。失败发生在整本解析完成前仍需重做解析；模型响应后落盘前退出也可能重算该图，不承诺 exactly-once 或按页续算。
+- 检查点冻结执行配置摘要（含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、解析和实际视觉选择、prompt/采样、端点摘要），配置不一致拒绝复用；同模型别名替换权重时提升 MINERU_EXECUTION_PROFILE_REVISION，改变阶段输出语义时更新执行 profile 协议版本。SDK 升级即使仍使用 CPU，也不能将旧检查点补字段或重算摘要后强行复用，4.1.2 检查点不能直接在 4.1.3 环境 resume；需要续算时恢复原代码、锁文件和配置，或明确创建新任务。视觉输出版本 2 将无内容响应写入单图标记；在其他设置完全一致时允许版本 1 的已完成解析/视觉检查点继续复用，未完成图片按新策略处理，纯解析版本仍为 1。失败发生在整本解析完成前仍需重做解析；模型响应后落盘前退出也可能重算该图，不承诺 exactly-once 或按页续算。
 - manage_jobs recover 仅原代重发 publication=pending/uncertain；resume 提升代次复用已完成阶段；gc --retention-days 7 缺省预览，--apply 才清理已结束且无活跃租约的任务。未配置自动定时清理；运维必须规划磁盘和保留策略，不清理在途工作区。
 - 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`；普通 worker 不消费 two-stage 的解析/视觉/default merge 队列，防止不同 Celery app 抢到未注册任务。
 - two-stage 部署显式配置 normal 队列 `queue_parse_gpu/queue_vision/queue_dispatch/default`；四类 urgent 为 `queue_parse_urgent/queue_vision_urgent/queue_dispatch_urgent/queue_merge_urgent`。API 与每个 worker 必须配置一致，不能只改 worker 的 `-Q`。
@@ -116,7 +116,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 - Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
 - API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
 - scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
-- 隔离任务发送成功/失败结果后，在解释器退出前先关闭本任务已加载的 MinerU VLM runtime，再独立关闭已加载的 DocVortex 渲染池。不要为未使用 VLM 的任务额外导入或初始化 SDK，也不要关闭父进程/worker 的共享运行时；SDK 清理失败仍须执行渲染池清理。保留原 hard timeout、正常退出窗口与进程组收尾作为兜底，不通过缩短等待、提前返回或忽略 atexit 错误来跳过清理。
+- 隔离任务发送成功/失败结果后，在解释器退出前先关闭本任务已加载的 MinerU VLM runtime，再独立关闭已加载的 DocVortex 渲染池。MinerU 4.1.3 的空闲 runtime 退出修复不替代此主动生命周期。不要为未使用 VLM 的任务额外导入或初始化 SDK，也不要关闭父进程/worker 的共享运行时；SDK 清理失败仍须执行渲染池清理。保留原 hard timeout、正常退出窗口与进程组收尾作为兜底，不通过缩短等待、提前返回或忽略 atexit 错误来跳过清理。
 - `run_isolated_call` 使用 Pipe 接收线程配合子进程存活检查，子进程无结果退出时报告退出码，不等到整段 hard timeout；超时包含执行及结果传输，进程组清理可额外消耗退出窗口。大结果传输也必须持续监督，不退回先 join 再读取的死锁模式。
 - 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为三个独立 solo/1 worker（名称 parse、parse-2、parse-3），均消费 urgent/normal，prefetch=1；其余线程池。每个解析 worker 的 VLM 并发为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
 - API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
@@ -131,12 +131,13 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 - 共享 GPUStack 主路由时，parse worker 数不与本机 GPU 一一绑定；先核对两台应用合计的解析槽和每文档 VLM 并发，再测客户端在途窗口。独立图片模型须在所有应用核对实际采样参数，不能只切换 URL/model；Qwen3.8 使用已验证的 0.2/0.8/20/0 模板。视觉槽位属于主机范围，变更时排空并统一新目录；具体预算与验证边界见调优指南。
 
 - 进程环境优先于 `.env`，再回退到 `.secrets/secrets.toml`。PM2 `env` 属于进程环境，不会被 `load_dotenv()` 覆盖；Python 加载 `.env` 不会替调用方 shell 导出变量。
+- MinerU 4.1.3 的可选 Doclib 遥测默认开启，应用与模型部署模板显式禁用 `MINERU_TELEMETRY_DISABLED=1`。当前无状态 parser 不使用 Doclib；不据此引入其 Tasks API、动态 Router 或资源管理协议。直接运行上游工具时另核对启动环境。
 - 配置模块仍要求 TOML 的 FASTAPI/OPENAI/GOOGLE/VLLM 段存在；复制 `deploy/secrets.example.toml` 初始化。公开模板不得包含实际凭证；部分字段空串会回退到 TOML，不代表清除原配置。
 - 三卡部署入口为 `deploy/pm2/ecosystem.vllm.parallele.config.json` → `deploy/mineru-vllm/serve.sh parallel`，合并基础 Compose 与 `deploy/mineru-vllm/compose.mineru.parallel.yaml`。单容器绑定 GPU 0/1/2，vLLM DP=3、TP=1，通过单地址内部负载均衡；不设置 external/hybrid LB。PM2 前台托管 Compose，停止超时 70 秒覆盖容器 60 秒退出窗口。启动器仅解析 Compose 配置的镜像名；本地已有该最终镜像时使用 `up --no-build --pull never`，缺失时按原流程 `up --build`，PM2 恢复亦如此。更新 Dockerfile 后须更新镜像标签并显式验收，不能用旧标签暗示代码已重建。单卡基础 Compose 与其他独立容器模板是可选拓扑，不同时管理同一 project。应用 `GPU_IDS` 不控制 Docker GPU。复用已有缓存卷时通过 `MINERU_DOCKER_*_VOLUME` 指定并启用 `MINERU_DOCKER_VOLUMES_EXTERNAL=true`，不删除原卷。
 - 四卡可选入口为 `deploy/manage.sh start model4` 与 `deploy/manage.sh start app4`，对应 `serve.sh parallel4`、四 GPU Compose 覆盖和第四个 parse worker。三卡入口及默认参数继续独立可用；同一主机只启动一种模型拓扑。统一管理脚本在启动或重启 model/model4 前拒绝另一种拓扑仍在线的情况；不要直接无 `--only` 启动整份 PM2 cjs。
 - MinerU2.5 Pro 2605-1.2B 权重没有独立的 lm_head.weight；上游 2026-10-08 才在顶层配置声明 tie_word_embeddings=true，旧本地缓存可能缺少此字段。基础和多卡 Compose 均向 vLLM 传递顶层 hf-overrides tie_word_embeddings=true，可通过 MINERU_DOCKER_TIE_WORD_EMBEDDINGS 按模型配置覆盖。vLLM 0.28.0 若未显式绑定输出层，会出现整页输出 !、被截断、解析结果为空；/health 与 /ready 仍可能成功，必须用真实文本 PDF 检查非空内容。此次模型仓库只更新配置，权重未变，不以刷新权重代替覆盖参数或验收。
 - Docker 默认基线为 vLLM 0.21.0 配套 Torch/CUDA；可用 `MINERU_DOCKER_BASE_IMAGE` 和 `MINERU_DOCKER_VLLM_VERSION` 为目标环境选择上游允许的版本。vLLM 0.28.0 对 FastAPI 要求 `>=0.133,<0.137`，镜像内的 FastAPI/Starlette 用独立构建参数选择并经 `pip check` 验证，不跟随应用锁文件。模型上下文 8192；应用使用独立 `uv.lock`。升级镜像时重新检查依赖与 PDF，不在应用中补装 vLLM。
-- MinerU 4.1.2 要求 DocVortex `>=0.6.8,<0.7`、mineru-vl-utils `>=2.0.8,<3`；应用锁文件和新镜像固定为 0.6.8 / 2.0.8。Linux 基础包带有 WebGPU provider 不等于本服务启用 GPU 小模型，CPU 策略仍须显式验证。两环境升级后检查原生 PDF 词间空格、公式/勾选项、图片资产与渲染子进程清理；当前应用锁文件不含 OpenCV。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是模板缺省，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围；GPUStack 模板保留旧 4.0.12 后端定义用于回退，不自动切换运行中的 deployment。
+- MinerU 4.1.3 要求 DocVortex `>=0.6.8,<0.7`、mineru-vl-utils `>=2.0.8,<3`；应用锁文件和新镜像固定为 0.6.8 / 2.0.8。Linux 基础包带有 WebGPU provider 不等于本服务启用 GPU 小模型，CPU 策略仍须显式验证。两环境升级后检查原生 PDF 词间空格、公式/勾选项、图片资产与渲染子进程清理；当前应用锁文件不含 OpenCV。ONNX 未显式设置线程时读取环境变量，最终回退为 4/1，部署模板仍为 16/1；资产遵循 SDK 保存后的路径，不依赖旧哈希命名。兼容升级保留上游 OpenAI、Redis、Pydantic 等约束，具体来源见依赖指南。vLLM 0.21.0 是模板缺省，不因 `torch` extra 未限制 vLLM 就绕过 MinerU `full` extra 的引擎范围；GPUStack 模板保留旧 4.1.2 后端定义用于回退，不自动切换运行中的 deployment。
 - 当前解析权重为稠密 Qwen2-VL 1.2B（14 attention heads、2 KV heads）；三卡 DP=3/TP=1，四卡 DP=4/TP=1，不适用 TP4、EP 或原生 MTP。模型显存参数由私有 `.env` 控制，PM2 模板不覆盖；启动器清除旧 PM2 环境中残留的端口/显存键。单卡/三卡比例缺省 0.10，四卡专属比例缺省 0.45，四卡不会继承通用 0.10；这些只是拓扑缺省，须按目标显卡和共驻留服务独立验收。三卡和四卡默认固定每卡 3 GiB KV 缓存，单卡默认不固定；`MINERU_DOCKER_KV_CACHE_MEMORY_BYTES`（四卡为 `_MODEL4`）可覆盖正整数字节数，显式空值恢复比例定容。固定 KV 时比例仍用于启动空闲显存检查，但不计算 KV 容量。保留每副本 16 序列/8192 上下文；调优需区分独立图片模型，保留 MinerU logits processor、BF16 和共享 GPU 显存预算；架构约束与测量方法见调优指南第 6 节。
 - 手动启动压测容器时覆盖镜像继承的 `com.docker.compose.project/service` 标签为独立测试项目，并核对实际容器标签；仅修改名字和端口不足以隔离生产 Compose 的退出联动。共享 GPU 上错开模型启动，最终配置在测试容器退出后验收；显存须在真实推理预热后再次测量，不把刚就绪时的占用当峰值。
 - Docker Snap 的开机 CDI 扫描可能早于 UVM 设备创建；基础 Compose 显式映射 `nvidia-uvm` 和 `nvidia-uvm-tools` 设备节点，启动器最多等待约 120 秒。`nvidia-smi` 正常不代表 CUDA 可用，应验证容器内实际张量计算；不要为修复本服务重启共享 Docker 或卸载 GPU 驱动。
