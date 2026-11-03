@@ -144,14 +144,14 @@ curl --fail http://127.0.0.1:30000/health
 
 ## 如何调用
 
-常规 PDF 建议显式传 `tier=standard` 作为业务验收起点；复杂版面在 standard 不达标时再对照 advanced。四档均保留可选，**HTTP 和批量 CLI 省略档位仍为 advanced**，推荐调用不改变兼容默认。档位选择与质量边界见 [AI 接入指南](docs/ai-integration.md#31-推荐档位与调用方式)。
+本项目以识别质量为优先，**默认及推荐调用均使用 `advanced`**，普通论文、报告和知识库入库也按此起步。`standard` 仅在代表性业务样本通过质量验收后，作为该类文档的可选档位；耗时更短不表示识别效果等价。四档和资源参数继续可调，档位选择与验收要求见 [AI 接入指南](docs/ai-integration.md#31-推荐档位与调用方式)。
 
 启用鉴权时带 Bearer。下面假定 shell 已有 `FASTAPI_BEARER_TOKEN`；curl 不会自动读取 `.env`。
 
 ```bash
 curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=true' \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' -F 'tier=standard'
+  -F 'file=@input/p2.pdf' -F 'tier=advanced'
 ```
 
 | POST 接口 | 执行方式 | 图片增强 |
@@ -172,7 +172,7 @@ curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=t
 ```bash
 # 不额外描述图片；需要图片增强改 --mode two-stage，并使用新的输出目录
 uv run python -m src.scripts.batch_parse \
-  --mode parse --tier standard --input-dir input/batch --output-dir output/batch-parse-standard \
+  --mode parse --tier advanced --input-dir input/batch --output-dir output/batch-parse-advanced \
   --max-in-flight 2
 ```
 

@@ -27,7 +27,7 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 
 同步科研 `/mineru_sci` 没有异步任务合同，不提供伪装成队列的批量模式。`parse` 的 advanced 本身仍会使用 MinerU VLM；“不带图片识别”指省去独立图片描述阶段。
 
-新批次的常规 PDF 推荐显式 `--tier standard`；遇到版面或阅读顺序不达标，再用新输出目录对照 `--tier advanced`。默认值仍为 advanced，basic/flash 也继续可选。选档和精确抽取的人工核验边界见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。以下示例只用于新批次，旧批次续跑保持原参数。
+新批次以识别质量为优先，默认及示例统一使用 `--tier advanced`。`standard` 仅作为代表性业务样本质量验收通过后的可选档位，不因压测更快就默认切换。四档继续可选，验收要求见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。以下示例只用于新批次；已有批次续跑保持原参数，切换档位须使用新输出目录。
 
 ## 直接使用
 
@@ -36,21 +36,21 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 ```bash
 # 预览文件数和总字节数，不上传、不创建输出目录、不验证服务容量
 uv run python -m src.scripts.batch_parse \
-  --tier standard --input-dir input/batch --output-dir output/batch-parse-standard --dry-run
+  --tier advanced --input-dir input/batch --output-dir output/batch-parse-advanced --dry-run
 
 # 纯解析；一次成功落盘后补下一份
 uv run python -m src.scripts.batch_parse \
-  --mode parse --tier standard --input-dir input/batch --output-dir output/batch-parse-standard \
+  --mode parse --tier advanced --input-dir input/batch --output-dir output/batch-parse-advanced \
   --max-in-flight 2
 
 # 分阶段图片增强
 uv run python -m src.scripts.batch_parse \
-  --mode two-stage --tier standard --input-dir input/batch --output-dir output/batch-images-standard \
+  --mode two-stage --tier advanced --input-dir input/batch --output-dir output/batch-images-advanced \
   --max-in-flight 2
 
 # 普通队列图片增强，可显式指定 provider/model/prompt
 uv run python -m src.scripts.batch_parse \
-  --mode images --tier standard --input-dir input/batch --output-dir output/batch-ordinary-images-standard
+  --mode images --tier advanced --input-dir input/batch --output-dir output/batch-ordinary-images-advanced
 ```
 
 默认只扫描目录第一层 PDF；`--recursive` 扫描子目录，`--extensions pdf,docx,pptx` 选择格式，`--extensions all` 采用服务支持的 PDF、图片及 Office 格式清单，不包含 TXT/Markdown。目录和同名不同扩展名分别保存，不会相互覆盖。扫描结果为空直接失败。输入目录是本批次的稳定清单，运行/续跑过程中不要移动、删除或修改已经提交的文件。

@@ -73,7 +73,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 ## 解析合同
 
 - 六个 POST 入口均有 `tier` 表单枚举：`flash/basic/standard/advanced`，不传固定 `advanced`，非法值 422。枚举位于 `src/utils/mineru_backend.py`；任务通过现有 `backend` / `backend_value` 字段保存提交时的选择。
-- 推荐调用与兼容缺省分开：新批次常规 PDF 从显式 standard 开始，复杂版面用新任务对照 advanced；四档和资源参数继续可调，不因推荐而改写 HTTP/CLI 缺省。关键公式、单位和引用上标仍需原页核验，实测条件与限制集中在调优指南第 16 节；改变 tier 使用新批次目录，旧批次按原参数续跑。
+- 识别质量优先：HTTP/CLI 默认和常规调用示例统一使用 advanced。standard 只作为经过代表性业务样本质量验收后的可选档位，不以耗时改善或结构检查通过推定质量等价；四档和资源参数继续可调。关键正文、阅读顺序、表格、公式/单位、引用及图片须对照原页核验；实测条件与限制集中在调优指南第 16 节。改变 tier 使用新批次目录，旧批次按原参数续跑。
 - `/mineru`、`/mineru_sci`、`/mineru_with_images` 和两个普通 `/task` 的 `chunk_type`、`return_txt` 是 **query 参数**；仅 `/two_stage/task` 将它们定义为 form。文档、curl 和脚本示例必须按真实 OpenAPI 编写。
 - 直接服务调用未指定档位时读取 `MINERU_DEFAULT_TIER`，再兼容旧 backend；两者均未配置时使用 `advanced`。旧映射：pipeline→basic、hybrid→standard、vlm→advanced。旧名称只影响档位，大模型推理仍走 Docker；不要重新引入本机引擎。
 - OCR 策略仍由 SDK `method=auto/txt/ocr` 或服务环境 `MINERU_DEFAULT_METHOD` 控制；HTTP/统一批量 CLI 不公开 ocr_mode，客户端设置该环境不会传给服务。问题页可在隔离 SDK 中对照 OCR，切换生产模式需排空并按 profile 边界重载，不据两页诊断全局强制 OCR。
