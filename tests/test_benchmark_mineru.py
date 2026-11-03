@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import sys
 from types import SimpleNamespace
 
@@ -13,6 +14,8 @@ from src.scripts import benchmark_mineru as benchmark
 
 @pytest.fixture(autouse=True)
 def isolated_benchmark_worker_environment(monkeypatch):
+    # main() tests use synthetic inputs and must not load private local config.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
     # Mocked executors run worker initialization in pytest's own process.
     # Register both keys before its direct assignments so teardown restores
     # the caller's original values, including originally absent variables.
@@ -143,6 +146,9 @@ def test_cli_applies_tier_to_warmup_jobs_and_report(monkeypatch, tmp_path, argum
             return [function(value) for value in values]
 
     def parse(job):
+        # Applies to the initial warmup as well as every measured job.
+        assert os.environ["MINERU_MODEL_VLM_MAX_CONCURRENCY"] == "6"
+        assert os.environ["MINERU_PROCESSING_WINDOW_SIZE"] == "24"
         jobs.append(job)
         return {
             "pid": 123,
@@ -173,6 +179,10 @@ def test_cli_applies_tier_to_warmup_jobs_and_report(monkeypatch, tmp_path, argum
             str(source),
             "--jobs",
             "2",
+            "--concurrency",
+            "6",
+            "--window",
+            "24",
             "--output",
             str(output),
             *arguments,
@@ -184,6 +194,8 @@ def test_cli_applies_tier_to_warmup_jobs_and_report(monkeypatch, tmp_path, argum
     assert all(job[3] == tier for job in jobs)
     report = json.loads((output / "report.json").read_text())
     assert report["summary"]["tier"] == tier
+    assert report["summary"]["concurrency"] == 6
+    assert report["summary"]["window"] == 24
     assert report["summary"]["warmup"]["parses_per_worker"] == 1
     assert len(report["warmup_jobs"]) == 1
     assert len(report["jobs"]) == 2

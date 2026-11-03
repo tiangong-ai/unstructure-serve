@@ -73,8 +73,10 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 ## 解析合同
 
 - 六个 POST 入口均有 `tier` 表单枚举：`flash/basic/standard/advanced`，不传固定 `advanced`，非法值 422。枚举位于 `src/utils/mineru_backend.py`；任务通过现有 `backend` / `backend_value` 字段保存提交时的选择。
+- 推荐调用与兼容缺省分开：新批次常规 PDF 从显式 standard 开始，复杂版面用新任务对照 advanced；四档和资源参数继续可调，不因推荐而改写 HTTP/CLI 缺省。关键公式、单位和引用上标仍需原页核验，实测条件与限制集中在调优指南第 16 节；改变 tier 使用新批次目录，旧批次按原参数续跑。
 - `/mineru`、`/mineru_sci`、`/mineru_with_images` 和两个普通 `/task` 的 `chunk_type`、`return_txt` 是 **query 参数**；仅 `/two_stage/task` 将它们定义为 form。文档、curl 和脚本示例必须按真实 OpenAPI 编写。
 - 直接服务调用未指定档位时读取 `MINERU_DEFAULT_TIER`，再兼容旧 backend；两者均未配置时使用 `advanced`。旧映射：pipeline→basic、hybrid→standard、vlm→advanced。旧名称只影响档位，大模型推理仍走 Docker；不要重新引入本机引擎。
+- OCR 策略仍由 SDK `method=auto/txt/ocr` 或服务环境 `MINERU_DEFAULT_METHOD` 控制；HTTP/统一批量 CLI 不公开 ocr_mode，客户端设置该环境不会传给服务。问题页可在隔离 SDK 中对照 OCR，切换生产模式需排空并按 profile 边界重载，不据两页诊断全局强制 OCR。
 - PDF、受支持图片和 Office 转 PDF 清单才是服务输入边界；Markdown/TXT 拒绝。不要因上游新增格式而自动扩大接口范围。
 - `parse_doc()` 使用无状态 `mineru.parser.parse`，默认 PDF `page_range=all`。零基 start/end 转成一基范围，保留源页号；返回 `(content_list, artifact_dir, None)`。先通过公开 `ParseResult.save()` 保存 MiddleJson/图片，再渲染 V1 并补齐旧字段；图片引用缺失必须失败。MinerU 4.1 已移除原始 `model_output.json` 导出；保留 `dump_debug_intermediate` 参数以兼容调用，传 true 时明确警告但不伪造诊断文件，`log_debug_intermediate` 继续控制结构化产物的 debug 日志。
 - 所有解析档位、`/ready` 和持久执行 profile 共用 `mineru_service_full.get_mineru_config()`。先以不覆盖进程环境的方式读取 `.env`，再为缺失值设置 `MINERU_MODEL_SMALL_BACKEND=onnx`、`MINERU_MODEL_ONNX_DEVICE=cpu`，最后惰性调用上游 `get_config()` 并检查实际值。显式 `gpu`、`auto` 或 `torch` 不会被静默改写，而是在进入解析器前拒绝；SDK 被提前缓存为非 CPU 配置也必须拒绝。不要引入全局 GPU 自动探测、混合调度或重置上游私有配置缓存。
