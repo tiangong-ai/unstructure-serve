@@ -462,7 +462,7 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 
 ## 16. MinerU 4.1.4 的档位与参数选择
 
-以下是 2026-11-03 的真实 PDF 对照，原始文件、逐轮 JSON、日志与资源采样位于私有 `output/mineru414-upgrade-20261103`。它支持选择调用起点，不代表所有文档的速度或语义准确率。
+以下是 2026-11-03 的真实 PDF 对照，原始文件、逐轮 JSON、日志与资源采样位于私有 `output/mineru414-upgrade-20261103`。这些记录用于性能对照，不是逐页人工标注的准确率评测，也不证明 standard 与 advanced 质量等价。本项目以质量优先，默认及推荐调用保持 advanced；standard 仅在代表性业务样本质量验收通过后作为可选档位。
 
 ### 16.1 固定条件下比较档位
 
@@ -490,7 +490,7 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 
 另外使用同一隔离模型，通过独立 loopback Uvicorn API 对九页论文交错执行三轮同步 HTTP 请求，每个请求走实际 scheduler 隔离子进程。standard 中位数为 9.88 秒（9.86–11.07），advanced 为 11.93 秒（11.87–13.21）；源页 1–9 与非空正文检查通过，鉴权有效，测试服务正常退出，新日志没有 SDK/渲染进程清理错误。它证明显式 tier 的真实 HTTP 调用和该样本延迟，不代表生产 Gunicorn 并发、Celery 排队或独立图片阶段。
 
-### 16.2 质量决定是否提高档位
+### 16.2 质量优先与 standard 的采用条件
 
 四档 p2 的关键金额、勾选项和资产检查通过；论文主要正文、展示公式、化学式与图像资产，以及 fese 整本页号检查通过。原页抽查同时发现以下边界：
 
@@ -498,7 +498,7 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 - fese 的复杂多栏流程页面中，standard 倾向生成较多离散文字块，advanced 会改变表格/图片分组与阅读顺序。需要图文分组时应对问题页作 advanced 对照，不能仅比较块数量或把图片保留误判为正文丢失。
 - advanced 没有自动消除上述论文单位/上标问题，不能作为无条件质量回退；独立图片模型仍有原有验收边界。
 
-因此，新批次常规论文/报告从显式 `standard` 开始；希望使用 CPU 小模型完成解析时按需选 `basic`，快速预览按需选 `flash`；复杂版面或 standard 不达标时用新任务对照 `advanced`。HTTP/统一 CLI 的省略值仍为 advanced，不改变已有调用和续跑身份。客户端可复制的命令集中在 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)和[批量客户端](batch-processing.md)，不要让业务调用方修改服务器线程或模型拓扑。
+因此，新批次常规论文、报告和知识库入库默认及推荐使用 `advanced`。只有对代表性业务样本（含复杂版面和易错页）完成原文及 advanced 对照，确认正文、顺序、表格、公式/单位和相关图片满足业务要求后，才可对已验收的文档类型显式选择 `standard`；不能把耗时改善、页数/资产校验或少量关键字段通过当作质量等价证据。未验证、验收失败或文档类型/SDK/模型改变时，保持 advanced 并重新验收。basic/flash 仍可按明确的 CPU 或预览需求选择。HTTP/统一 CLI 的 advanced 缺省、四档可选和续跑身份不变。可复制调用集中在 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)和[批量客户端](batch-processing.md)。
 
 ### 16.3 资源参数的推荐起点
 
@@ -513,7 +513,7 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 
 | 参数 | 建议起点 | 调整条件 |
 | --- | --- | --- |
-| 请求 `tier` / CLI `--tier` | 新批次显式 standard；兼容缺省 advanced | 按原页质量选择，保留四档 |
+| 请求 `tier` / CLI `--tier` | 默认及推荐 advanced | standard 仅在代表性业务样本质量验收通过后可选；保留四档 |
 | ONNX intra/inter | 当前已测主机 16/1 | 核数/CPU 配额不同再测 4/8/16；不是全进程线程上限 |
 | `MINERU_MODEL_VLM_MAX_CONCURRENCY` | 8 | 多应用合计请求预算后再增；16 未形成足够采用证据 |
 | `MINERU_PARSE_SLOTS` / parse worker | GPUStack 骨架 4；独立模板 3 | 先按全机 RAM、模型容量和排队情况验证，不按 GPU 数直接推断 |
@@ -536,7 +536,7 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 
 `MINERU_DEFAULT_METHOD=auto` 继续作为服务起点；`txt/ocr` 是已有可调解析策略，与 tier 独立。164 页报告的问题页具有可见正常文字、文本层却错码的图内标签：standard/auto 保留了部分乱码；standard/ocr 的问题页复测恢复了主要图内标签。论文问题页的 OCR 复测恢复了所检查单位的斜杠和括号，但引用上标混入化学式的问题仍存在。因此只对遇到乱码/单位丢失的问题文档或页面做 OCR 对照，不全局强制 OCR，也不把这两页诊断扩展成整本 OCR 质量承诺。
 
-开发维护可在独立测试环境、确认模型空闲后，在隔离 SDK 基准中显式选择 OCR，使用新输出目录和槽目录：
+以下保留 standard 档位以复现上述 OCR 诊断，**仅为隔离实验示例，不是生产默认调用建议**。两页诊断不能替代 standard 的业务样本质量验收；质量优先的生产调用仍使用 advanced。开发维护应在独立测试环境、确认模型空闲后，使用新输出目录和槽目录：
 
 ```bash
 MINERU_DEFAULT_METHOD=ocr MINERU_PARSE_SLOTS=1 \
@@ -548,6 +548,6 @@ uv run python -m src.scripts.benchmark_mineru \
   --output output/tuning/ocr-probe-run-01
 ```
 
-上述环境只影响该本机 SDK 进程。先看问题页时，受控脚本可使用 `parse_doc(..., tier="standard", method="ocr", start_page_id=22, end_page_id=22)`；页范围为零基，脚本须有 main guard，并用 `run_isolated_call(..., hard_timeout=1800)` 保留进程监督与退出清理。
+上述环境只影响该本机 SDK 进程。同一隔离复现实验若只看问题页，受控脚本可使用 `parse_doc(..., tier="standard", method="ocr", start_page_id=22, end_page_id=22)`；页范围为零基，脚本须有 main guard，并用 `run_isolated_call(..., hard_timeout=1800)` 保留进程监督与退出清理。
 
 本项目 HTTP 表单和统一批量 CLI 没有 `ocr_mode`/`--ocr-mode` 参数；给客户端设置 `MINERU_DEFAULT_METHOD` 不会传给服务器。若运维配置专用 OCR 实例，应先排空、设置服务环境并重载全部相关 API/worker，核对执行 profile；旧模式检查点不能混用。业务调用方继续按部署 OpenAPI 传参，发现乱码时请求运维复测，不将上游 CLI 选项当成本项目 API 字段。

@@ -20,7 +20,7 @@ checkPaths:
 
 > 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
 
-新批次常规 PDF 建议显式选择 `standard`，复杂版面再以新任务对照 `advanced`；省略 tier 的兼容默认仍为 advanced，四档均可选。调用示例和质量核验边界见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。改变已有批次档位时使用新输出目录，旧任务按原参数续查。
+新批次以识别质量为优先，默认及推荐调用使用 `advanced`；`standard` 只作为代表性业务样本质量验收通过后的可选档位，四档均保留。调用示例和验收要求见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。改变已有批次档位时使用新输出目录，旧任务按原参数续查。
 
 入口为 `POST /two_stage/task`、`GET /two_stage/task/{task_id}` 和 `GET /two_stage/queue_status`，使用 Celery app `src.services.two_stage_pipeline`。它与[普通异步任务](mineru_with_images_task_usage.md)分别使用自己的任务和队列。
 
@@ -122,7 +122,7 @@ shell 中先设置实际 `FASTAPI_BEARER_TOKEN`；Python 会读取 `.env`，curl
 API_BASE=http://127.0.0.1:7770
 curl --fail-with-body "$API_BASE/two_stage/task" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' -F 'tier=standard' \
+  -F 'file=@input/p2.pdf' -F 'tier=advanced' \
   -F 'chunk_type=true' -F 'return_txt=true' -F 'priority=normal'
 ```
 
@@ -156,8 +156,8 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
 ```bash
 uv run python -m src.scripts.batch_parse \
   --mode two-stage --base-url http://127.0.0.1:7770 \
-  --input-dir input/batch --output-dir output/batch-images-standard \
-  --tier standard --max-in-flight 2
+  --input-dir input/batch --output-dir output/batch-images-advanced \
+  --tier advanced --max-in-flight 2
 ```
 
 默认 chunk_type=true、return_txt=false，结果为 JSON；需要全文增加 `--return-txt`。客户端只维持小窗口任务，成功保存结果后补下一份，不需要一次上传整个目录。任务记录、超时、`--resume-only` 和结果恢复见[统一批量客户端](batch-processing.md)。

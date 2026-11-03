@@ -89,8 +89,8 @@ Markdown/TXT 不属于文档解析输入；不要因为上游 MinerU 支持更�
 
 - `flash`：以规则/原生内容提取为主，必要时使用 OCR；适合快速预览，不保证 PDF 的复杂版面与完整性。
 - `basic`：小模型 OCR、公式/表格识别。
-- `standard`：小模型结合 MinerU VLM。
-- `advanced`：默认，更多 VLM 计算用于困难文档。
+- `standard`：小模型结合 MinerU VLM，仅作为业务样本质量验收通过后的可选档位。
+- `advanced`：质量优先的默认及推荐档位，更多 VLM 参与解析。
 
 不要提交旧的 `pipeline/vlm/hybrid` 名称；tier 非法返回 422。HTTP 不传 tier 固定 advanced，不随服务层默认档位环境变化。
 
@@ -102,16 +102,16 @@ Markdown/TXT 不属于文档解析输入；不要因为上游 MinerU 支持更�
 
 | 场景 | 建议请求 | 验收重点 |
 | --- | --- | --- |
-| 普通论文、报告、知识库入库 | 显式 `tier=standard` | 正文、阅读顺序、表格行列与公式 |
-| standard 在特定版面不达标 | 同一文件新任务传 `tier=advanced` 对照 | 是否确实改善问题页；更高档位不保证更准确 |
+| 普通论文、报告、知识库入库及尚未验收的新文档类型 | 默认使用 `tier=advanced` | 正文完整性、阅读顺序、表格行列、公式/单位与相关图片 |
+| 已通过代表性业务样本质量验收，且希望降低耗时或资源投入 | 可显式选择 `tier=standard` | 相对原文与 advanced 对照确认满足业务质量要求；不从短样本推及其他文档类型 |
 | 不依赖 VLM、以 CPU 兼容为先 | `tier=basic` | OCR、公式和表格质量是否满足业务 |
 | 可接受版面误差的快速预览 | `tier=flash` | 内容是否足够用于预览，不直接作为精确抽取验收 |
 
-本项目真实样本对照支持将 standard 作为常规解析的起点，但不能据此保证每种文档都等价或更快。公式、单位分隔符、引用上标及关键数值仍应对照原页；两档都可能出错，不将 advanced 当成自动修复开关。上游取舍见 [MinerU 档位说明](https://github.com/opendatalab/MinerU/discussions/5707)。
+本项目采用质量优先策略，保持 advanced 默认。现有实测覆盖性能和部分结构/内容检查，没有完成逐页人工标注的准确率评测，不能证明 standard 与 advanced 质量等价，也不构成默认降档依据。采用 standard 前，应按实际文档类型选取代表性样本（包括复杂版面和易错页），对照原文与 advanced 检查正文缺漏、阅读顺序、表格行列、公式/单位、引用及相关图片，记录质量验收结果；未通过或尚未验证时继续使用 advanced。文档类型、SDK 或模型变化后应重新验收。advanced 也不能保证所有字段正确，关键内容仍需原页复核。上游档位机制见 [MinerU 档位说明](https://github.com/opendatalab/MinerU/discussions/5707)，本项目调用按上述质量优先策略执行。
 
 图片增强仍按第 1 节选择 images/two-stage 工作流，`tier` 只控制解析档位，独立图片模型与参数保持各自配置。长文档和批量使用异步入口，初次业务验收在途设为 1，通过后再试 2；任务多时不提高 urgent 优先级代替容量规划。
 
-下面的新任务示例显式选 standard。需要 advanced/basic/flash 时替换该字段；省略字段仍为 advanced。已有任务/批次保持原 tier，切换档位用新任务及新输出目录，不能将新示例直接套到旧批次续跑。
+下面的新任务示例显式选 advanced，省略字段也使用 advanced。standard 仅用于已完成上述业务质量验收的文档类型；basic/flash 按明确的资源或预览需求选择。已有任务/批次保持原 tier，切换档位用新任务及新输出目录，不能将新示例直接套到旧批次续跑。
 
 ## 4. 可直接使用的 curl 示例
 
@@ -123,7 +123,7 @@ Markdown/TXT 不属于文档解析输入；不要因为上游 MinerU 支持更�
 curl --fail-with-body "$API_BASE/mineru?chunk_type=true&return_txt=true" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
   -F 'file=@document.pdf' \
-  -F 'tier=standard' \
+  -F 'tier=advanced' \
   -o parsed.json
 ```
 
@@ -133,7 +133,7 @@ curl --fail-with-body "$API_BASE/mineru?chunk_type=true&return_txt=true" \
 curl --fail-with-body "$API_BASE/mineru_with_images?chunk_type=true&return_txt=true" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
   -F 'file=@document.pdf' \
-  -F 'tier=standard' \
+  -F 'tier=advanced' \
   -o parsed-with-images.json
 ```
 
@@ -143,7 +143,7 @@ curl --fail-with-body "$API_BASE/mineru_with_images?chunk_type=true&return_txt=t
 curl --fail-with-body "$API_BASE/two_stage/task" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
   -F 'file=@document.pdf' \
-  -F 'tier=standard' \
+  -F 'tier=advanced' \
   -F 'chunk_type=true' \
   -F 'return_txt=true' \
   -F 'priority=normal'
@@ -170,7 +170,7 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
 ```bash
 curl --fail-with-body "$API_BASE/mineru/task?chunk_type=true&return_txt=true" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@document.pdf' -F 'tier=standard' -F 'priority=normal'
+  -F 'file=@document.pdf' -F 'tier=advanced' -F 'priority=normal'
 ```
 
 查询路径必须对应：`GET /mineru/task/{task_id}`。需要普通图片任务时，POST/GET 都改成 `/mineru_with_images/task`。不能把不同 app 的任务 ID 拿到另一类查询路径当作通用接口使用。

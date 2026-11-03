@@ -20,7 +20,7 @@ checkPaths:
 
 > 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
 
-新批次常规 PDF 建议显式选择 `standard`，复杂版面再以新任务对照 `advanced`；省略 tier 的兼容默认仍为 advanced，四档均可选。调用示例和质量核验边界见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。改变已有批次档位时使用新输出目录，旧任务按原参数续查。
+新批次以识别质量为优先，默认及推荐调用使用 `advanced`；`standard` 只作为代表性业务样本质量验收通过后的可选档位，四档均保留。调用示例和验收要求见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。改变已有批次档位时使用新输出目录，旧任务按原参数续查。
 
 本文件覆盖 `POST /mineru/task` 和 `POST /mineru_with_images/task`；后者额外进行图片视觉识别。两者使用 Celery app `src.services.celery_app`，分别运行 `mineru.parse` / `mineru.parse_images`，通过同路径的 `GET .../{task_id}` 查询结果。
 
