@@ -420,7 +420,7 @@ wheels = [
 
 [[package]]
 name = "docvortex"
-version = "0.6.8"
+version = "0.6.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -453,11 +453,11 @@ dependencies = [
     { name = "ziamath" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/0a/b7571b5ceec29fe452c5aabf23c5adadb60a070ba95724ecfaeb9418e83c/docvortex-0.6.8-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:a48591427400d5390d472527adf89c2633fddaf1cb46dafbebf1b1cf50761b53", size = 5254858, upload-time = "2026-10-29T10:20:14.486Z" },
-    { url = "https://files.pythonhosted.org/packages/6a/2f/98c3cdb7d8d088f76242f3c7d7d36601c01e67a9e1eca2e5b7ab8f0159d3/docvortex-0.6.8-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:f1bed58291218cec99c52b63ebdf559eeca004ca5d07409f61b1715d07122639", size = 5297551, upload-time = "2026-10-29T10:20:16.483Z" },
-    { url = "https://files.pythonhosted.org/packages/7a/9d/34ae0b2fbb4d7448d3481f69cf9999ecaaa5c65d6fa80d7bfd18606f0eab/docvortex-0.6.8-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:efead69e6148e793c91e740d855d9cfa90d3caad9890c8eed3d80aaca2e601b2", size = 5426479, upload-time = "2026-10-29T10:20:18.422Z" },
-    { url = "https://files.pythonhosted.org/packages/2d/70/68c93893bde2b5f97bbc1c153455d99c95a99d405e003979468cb62a11fe/docvortex-0.6.8-cp311-abi3-win_amd64.whl", hash = "sha256:c988acdd2d47548b904ab4323135be29b539570570697f846ea418901e3196cb", size = 5320524, upload-time = "2026-10-29T10:20:20.098Z" },
-    { url = "https://files.pythonhosted.org/packages/59/0c/24bbe852e0d14c893283597889268a89a6acf791e3d195a9cefd40c1004a/docvortex-0.6.8-cp311-abi3-win_arm64.whl", hash = "sha256:b7134a2078111f900eb205136bb1e70637c5e39dbbf7558040a7ed880e4194b1", size = 5148807, upload-time = "2026-10-29T10:20:21.835Z" },
+    { url = "https://files.pythonhosted.org/packages/49/65/086435e2568329d586b906daa55528f5fa2161dd27ff172db43c7b5a1807/docvortex-0.6.11-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:499ef2773d63592621995fd39647a1c67ad94bc98a85ea8d0b275ab2c47ad458", size = 5266576, upload-time = "2026-11-02T12:46:06.35Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/21/def75308003a70a2c28f387ad30216e02697263eb2d07cb3363f5de1abf5/docvortex-0.6.11-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:134a5b7d00b541f2949268a896d92e538d3826c4b0348beb3c0ef6da31e62d83", size = 5310535, upload-time = "2026-11-02T12:46:08.482Z" },
+    { url = "https://files.pythonhosted.org/packages/44/3e/7e17863cca973ac24b1632a3f7c7abf08f0409889869f353c5718873f289/docvortex-0.6.11-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:be32a3a6802908f1533ae4973bf97a1e18e16b2c94d82946dc610cb30b6d8ffd", size = 5438841, upload-time = "2026-11-02T12:46:10.358Z" },
+    { url = "https://files.pythonhosted.org/packages/04/01/ce6c1365dee93489313a5029a4b6889df9047c2ee2d6ab7504746a390b69/docvortex-0.6.11-cp311-abi3-win_amd64.whl", hash = "sha256:c4282154a1e4fdc723da7fe2c8c948695acc3b3255aa40a6356566e64342d2f7", size = 5332722, upload-time = "2026-11-02T12:46:12.035Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/a8/349be875cd91010aa9b9af5bd4acb46ade8e74a447e5f8bd679ad324dd71/docvortex-0.6.11-cp311-abi3-win_arm64.whl", hash = "sha256:63e4e4a66b49fb7be50ba915f4e5b22f9306787ece3c42a28b70d537c381fc79", size = 5161208, upload-time = "2026-11-02T12:46:13.711Z" },
 ]
 
 [[package]]
@@ -1028,7 +1028,7 @@ wheels = [
 
 [[package]]
 name = "mineru"
-version = "4.1.3"
+version = "4.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
@@ -1078,7 +1078,7 @@ dependencies = [
     { name = "watchfiles" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/4c/a91654caaae95c427b72c7784e963ad12724d370eede7518acc060776472/mineru-4.1.3-py3-none-any.whl", hash = "sha256:cd077510ccd259e034832c9c704aa85ce8c34f1e286323574d4c08b8cbf7420a", size = 3834756, upload-time = "2026-10-30T10:43:48.319Z" },
+    { url = "https://files.pythonhosted.org/packages/68/f0/82eda6336a796d226e1792246e74b84bdb9ac603339137b0dc82c8cebe48/mineru-4.1.4-py3-none-any.whl", hash = "sha256:15b5c70ce8f48f1532eca5ebf7f610ad7cab677c16f571190667f69aadeb4a8c", size = 3841079, upload-time = "2026-11-02T13:35:13.007Z" },
 ]
 
 [[package]]
@@ -2089,7 +2089,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "celery", extras = ["redis"], specifier = ">=5.6.3" },
-    { name = "docvortex", specifier = "==0.6.8" },
+    { name = "docvortex", specifier = "==0.6.11" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "flower", specifier = ">=2.1.0" },
     { name = "google-genai", specifier = ">=2.24.0" },
@@ -2097,7 +2097,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "kombu", extras = ["redis"], specifier = ">=5.6" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mineru", specifier = ">=4.1.3,<4.2" },
+    { name = "mineru", specifier = ">=4.1.4,<4.2" },
     { name = "mineru-vl-utils", specifier = "==2.0.8" },
     { name = "openai", specifier = ">=2,<3" },
     { name = "pillow", specifier = ">=12.3.0" },

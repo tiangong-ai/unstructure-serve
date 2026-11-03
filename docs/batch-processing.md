@@ -27,6 +27,8 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 
 同步科研 `/mineru_sci` 没有异步任务合同，不提供伪装成队列的批量模式。`parse` 的 advanced 本身仍会使用 MinerU VLM；“不带图片识别”指省去独立图片描述阶段。
 
+新批次的常规 PDF 推荐显式 `--tier standard`；遇到版面或阅读顺序不达标，再用新输出目录对照 `--tier advanced`。默认值仍为 advanced，basic/flash 也继续可选。选档和精确抽取的人工核验边界见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。以下示例只用于新批次，旧批次续跑保持原参数。
+
 ## 直接使用
 
 先准备输入目录，以下示例在仓库根目录执行；生产同机缺省地址是 `http://127.0.0.1:7770`，远程用 `--base-url https://your-service/prefix`，保留反向代理路径前缀。认证优先 `FASTAPI_BEARER_TOKEN` 环境变量，其次仓库 `.env`，最后仓库 `.secrets/secrets.toml` 的 `FASTAPI.BEARER_TOKEN`。不通过命令行传令牌。无鉴权的测试 API 才显式使用 `--no-auth`。
@@ -34,21 +36,21 @@ lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
 ```bash
 # 预览文件数和总字节数，不上传、不创建输出目录、不验证服务容量
 uv run python -m src.scripts.batch_parse \
-  --input-dir input/batch --output-dir output/batch-parse --dry-run
+  --tier standard --input-dir input/batch --output-dir output/batch-parse-standard --dry-run
 
 # 纯解析；一次成功落盘后补下一份
 uv run python -m src.scripts.batch_parse \
-  --mode parse --input-dir input/batch --output-dir output/batch-parse \
+  --mode parse --tier standard --input-dir input/batch --output-dir output/batch-parse-standard \
   --max-in-flight 2
 
 # 分阶段图片增强
 uv run python -m src.scripts.batch_parse \
-  --mode two-stage --input-dir input/batch --output-dir output/batch-images \
+  --mode two-stage --tier standard --input-dir input/batch --output-dir output/batch-images-standard \
   --max-in-flight 2
 
 # 普通队列图片增强，可显式指定 provider/model/prompt
 uv run python -m src.scripts.batch_parse \
-  --mode images --input-dir input/batch --output-dir output/batch-ordinary-images
+  --mode images --tier standard --input-dir input/batch --output-dir output/batch-ordinary-images-standard
 ```
 
 默认只扫描目录第一层 PDF；`--recursive` 扫描子目录，`--extensions pdf,docx,pptx` 选择格式，`--extensions all` 采用服务支持的 PDF、图片及 Office 格式清单，不包含 TXT/Markdown。目录和同名不同扩展名分别保存，不会相互覆盖。扫描结果为空直接失败。输入目录是本批次的稳定清单，运行/续跑过程中不要移动、删除或修改已经提交的文件。
@@ -61,6 +63,7 @@ uv run python -m src.scripts.batch_parse \
 
 | 选项 | 新客户端缺省 | 含义 |
 | --- | ---: | --- |
+| `--tier` | advanced | flash/basic/standard/advanced；显式选择解析档位，改变档位必须使用新输出目录 |
 | `--max-in-flight` | 2 | 正在上传或已提交但尚未取回结果的文件数；不代表 GPU 数或图片请求数 |
 | `--upload-concurrency` | 2 | 独立上传线程上限，受在途窗口约束 |
 | `--query-concurrency` | 4 | 独立状态/结果查询线程上限，不与上传互相阻塞 |

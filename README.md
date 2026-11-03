@@ -64,7 +64,7 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
 
-当前技术栈：**Python 3.13.15 · MinerU 4.1.3 · DocVortex 0.6.8 · mineru-vl-utils 2.0.8 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，Linux 应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
+当前技术栈：**Python 3.13.15 · MinerU 4.1.4 · DocVortex 0.6.11 · mineru-vl-utils 2.0.8 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，Linux 应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
 ## 先理解需要运行什么
 
@@ -144,12 +144,14 @@ curl --fail http://127.0.0.1:30000/health
 
 ## 如何调用
 
+常规 PDF 建议显式传 `tier=standard` 作为业务验收起点；复杂版面在 standard 不达标时再对照 advanced。四档均保留可选，**HTTP 和批量 CLI 省略档位仍为 advanced**，推荐调用不改变兼容默认。档位选择与质量边界见 [AI 接入指南](docs/ai-integration.md#31-推荐档位与调用方式)。
+
 启用鉴权时带 Bearer。下面假定 shell 已有 `FASTAPI_BEARER_TOKEN`；curl 不会自动读取 `.env`。
 
 ```bash
 curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=true' \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' -F 'tier=advanced'
+  -F 'file=@input/p2.pdf' -F 'tier=standard'
 ```
 
 | POST 接口 | 执行方式 | 图片增强 |
@@ -170,11 +172,11 @@ curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=t
 ```bash
 # 不额外描述图片；需要图片增强改 --mode two-stage，并使用新的输出目录
 uv run python -m src.scripts.batch_parse \
-  --mode parse --input-dir input/batch --output-dir output/batch-parse \
+  --mode parse --tier standard --input-dir input/batch --output-dir output/batch-parse-standard \
   --max-in-flight 2
 ```
 
-示例假定已将待处理文件放入 `input/batch`；也可替换为自己的输入目录。`--mode images` 为普通队列图片增强。默认 advanced、输出 JSON；可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
+示例假定已将待处理文件放入 `input/batch`；也可替换为自己的输入目录。`--mode images` 为普通队列图片增强。省略 `--tier` 默认 advanced、输出 JSON；改变档位必须使用新输出目录，已有批次按原参数续跑。可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
 
 ## 文档与开发
 

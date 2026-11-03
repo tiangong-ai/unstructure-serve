@@ -20,13 +20,15 @@ checkPaths:
 
 > 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
 
+新批次常规 PDF 建议显式选择 `standard`，复杂版面再以新任务对照 `advanced`；省略 tier 的兼容默认仍为 advanced，四档均可选。调用示例和质量核验边界见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。改变已有批次档位时使用新输出目录，旧任务按原参数续查。
+
 入口为 `POST /two_stage/task`、`GET /two_stage/task/{task_id}` 和 `GET /two_stage/queue_status`，使用 Celery app `src.services.two_stage_pipeline`。它与[普通异步任务](mineru_with_images_task_usage.md)分别使用自己的任务和队列。
 
 处理顺序：保存文件 → MinerU parse → dispatch 分发图片 → vision 并行识别 → merge 按原阅读顺序回填并原子保存结果；工作区按保留策略清理。模型和环境准备见[部署说明](mineru_4_upgrade_usage.md)。
 
 POST 支持 `Idempotency-Key`；统一状态、下载及恢复入口见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。新任务在磁盘保存全文和逐图检查点，队列消息仅带 ID；`MINERU_VISION_WAVE_SIZE` 缺省 32，完成一波后再派发下一波缺失图片。进度中的图片数是去重后的请求数，不是页数或所有图片位置数。任一阶段失败保留已完成内容，修复原因后显式 resume；解析中途失败仍重做整本解析。
 
-完成阶段只有在执行 profile 一致时才能复用，摘要包含 SDK/DocVortex 版本、小模型后端和 `onnx_device`。4.1.2 检查点不能直接在 4.1.3 环境 resume，即使仍为 CPU，也不能手工补字段或改摘要来续用旧阶段；切换前排空任务，需要恢复旧任务时使用其原代码、锁文件和配置，或明确重新提交。旧视觉输出版本的兼容只在其余执行配置完全一致时适用。
+完成阶段只有在执行 profile 一致时才能复用，摘要包含 SDK/DocVortex 版本、小模型后端和 `onnx_device`。4.1.3 检查点不能直接在 4.1.4 环境 resume，即使仍为 CPU，也不能手工补字段或改摘要来续用旧阶段；切换前排空任务，需要恢复旧任务时使用其原代码、锁文件和配置，或明确重新提交。旧视觉输出版本的兼容只在其余执行配置完全一致时适用。
 
 `Configured vision providers failed` 后的异常类型用于区别超时、连接等推理故障；只有没有可调用 provider 时才提示检查配置与 key。超时不代表 key 失效，也不意味着已完成解析和图片检查点丢失。确认没有活跃阶段、端点恢复后按原 ID 显式 resume，再让客户端沿原输出目录续取；不重新上传整本文件，不把恢复后成功计为首次成功。
 
@@ -120,7 +122,7 @@ shell 中先设置实际 `FASTAPI_BEARER_TOKEN`；Python 会读取 `.env`，curl
 API_BASE=http://127.0.0.1:7770
 curl --fail-with-body "$API_BASE/two_stage/task" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
-  -F 'file=@input/p2.pdf' -F 'tier=advanced' \
+  -F 'file=@input/p2.pdf' -F 'tier=standard' \
   -F 'chunk_type=true' -F 'return_txt=true' -F 'priority=normal'
 ```
 
@@ -154,8 +156,8 @@ curl --fail-with-body "$API_BASE/two_stage/task/$TASK_ID" \
 ```bash
 uv run python -m src.scripts.batch_parse \
   --mode two-stage --base-url http://127.0.0.1:7770 \
-  --input-dir input/batch --output-dir output/batch-images \
-  --tier advanced --max-in-flight 2
+  --input-dir input/batch --output-dir output/batch-images-standard \
+  --tier standard --max-in-flight 2
 ```
 
 默认 chunk_type=true、return_txt=false，结果为 JSON；需要全文增加 `--return-txt`。客户端只维持小窗口任务，成功保存结果后补下一份，不需要一次上传整个目录。任务记录、超时、`--resume-only` 和结果恢复见[统一批量客户端](batch-processing.md)。

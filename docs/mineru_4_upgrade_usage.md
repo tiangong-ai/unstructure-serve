@@ -19,7 +19,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 
 # 部署、维护与恢复
 
-仓库应用基线为 Python 3.13.15、MinerU 4.1.3、DocVortex 0.6.8、mineru-vl-utils 2.0.8 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。模板更新不会自动切换运行中的环境或模型，部署时另核对实际版本与镜像。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
+仓库应用基线为 Python 3.13.15、MinerU 4.1.4、DocVortex 0.6.11、mineru-vl-utils 2.0.8 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。模板更新不会自动切换运行中的环境或模型，部署时另核对实际版本与镜像。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
 
 所有 shell 命令在仓库根目录执行，文件示例使用相对路径。跨进程或容器的共享目录由部署配置决定，必须指向同一位置；本文不预设机器目录。
 
@@ -100,7 +100,7 @@ HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 ba
 
 新异步任务将原始输入、整本解析检查点、单图结果及最终业务 JSON 保存在 `MINERU_JOB_STORE_DIR`，缺省仓库 `output/jobs`。部署应使用可靠持久磁盘，API 和全部 worker 解析到同一路径；备份时包含该目录。旧任务仍使用原临时工作区和 Redis 结果，不自动迁移。
 
-恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以在执行配置匹配的前提下复用解析及已完成图片。profile 包含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、模型、prompt 和采样等设置；4.1.2 检查点不能直接在 4.1.3 环境 resume，4.0 到 4.1 即使都使用 CPU，也不能默认续用旧阶段。需要续算旧任务时恢复原代码、锁文件及配置，或明确创建新任务，不手工补字段或重算旧 manifest 摘要。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
+恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以在执行配置匹配的前提下复用解析及已完成图片。profile 包含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、模型、prompt 和采样等设置；4.1.3 检查点不能直接在 4.1.4 环境 resume，4.0 到 4.1 即使都使用 CPU，也不能默认续用旧阶段。需要续算旧任务时恢复原代码、锁文件及配置，或明确创建新任务，不手工补字段或重算旧 manifest 摘要。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
 
 ```bash
 # 仅显示身份、状态和阶段，不打印原文、请求参数或错误正文
@@ -213,7 +213,7 @@ pm2 save
 | --- | --- |
 | 基础镜像 | Dockerfile 的 VLLM_IMAGE 参数，缺省 vllm/vllm-openai:v0.21.0；vLLM 0.28.0 通过 MINERU_DOCKER_BASE_IMAGE=vllm/vllm-openai:v0.28.0、MINERU_DOCKER_VLLM_VERSION=0.28.0 覆盖 |
 | 镜像内 Web 依赖 | 默认 FastAPI 0.141.1 / Starlette 1.7.0；vLLM 0.28.0 镜像需通过 MINERU_DOCKER_FASTAPI_VERSION=0.136.3、MINERU_DOCKER_STARLETTE_VERSION=1.6.0 覆盖并通过 pip check |
-| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.1.3-dv0.6.8-vllm0.21.0；vLLM 0.28.0 使用 tiangong/mineru-vlm:4.1.3-dv0.6.8-vllm0.28.0，通过 MINERU_DOCKER_IMAGE_TAG 及匹配的基础镜像/版本参数覆盖，并在切换前构建验收 |
+| 应用模型镜像 | 默认 tiangong/mineru-vlm:4.1.4-dv0.6.11-vllm0.21.0；vLLM 0.28.0 使用 tiangong/mineru-vlm:4.1.4-dv0.6.11-vllm0.28.0，通过 MINERU_DOCKER_IMAGE_TAG 及匹配的基础镜像/版本参数覆盖，并在切换前构建验收 |
 | 上下文 / 并发序列 | Compose command 的 max-model-len=8192、max-num-seqs=16 |
 | 对外端口 / 每卡显存预算 | 私有 .env 的 MINERU_DOCKER_PORT；单卡/三卡比例缺省 0.10，四卡专属比例缺省 0.45，均用于启动检查；三卡/四卡 KV 默认每卡 3 GiB，单卡未固定，按实际硬件重新验收 |
 | GPU 绑定 / DP / TP | 三卡由 compose.mineru.parallel.yaml 设置，四卡由 compose.mineru.parallel4.yaml 设置 |

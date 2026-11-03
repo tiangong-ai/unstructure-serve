@@ -20,13 +20,15 @@ checkPaths:
 
 > 新批次使用[统一批量客户端](batch-processing.md)：`--mode parse` 为普通纯解析，`--mode images` 为普通图片增强，`--mode two-stage` 为分阶段图片增强。默认在途 2，JSON 落盘并保存任务记录；旧脚本仅保留兼容续跑。
 
+新批次常规 PDF 建议显式选择 `standard`，复杂版面再以新任务对照 `advanced`；省略 tier 的兼容默认仍为 advanced，四档均可选。调用示例和质量核验边界见 [AI 接入指南](ai-integration.md#31-推荐档位与调用方式)。改变已有批次档位时使用新输出目录，旧任务按原参数续查。
+
 本文件覆盖 `POST /mineru/task` 和 `POST /mineru_with_images/task`；后者额外进行图片视觉识别。两者使用 Celery app `src.services.celery_app`，分别运行 `mineru.parse` / `mineru.parse_images`，通过同路径的 `GET .../{task_id}` 查询结果。
 
 两个 POST 均支持 `Idempotency-Key`。新任务保存原始输入、完成的整本解析和单图结果；发布结果不明仍返回可恢复 ID，不删除文件。可用统一 `/tasks/{id}/status`、`/result`、`/resume` 做轻量查询、下载与显式阶段恢复，合同见 [AI 指南 §5.4](ai-integration.md#54-提交幂等轻量查询与阶段恢复)。普通失败查询仍为 HTTP 500 状态体，成功结果继续省略 null。
 
 环境、模型和 Docker 准备见[部署说明](mineru_4_upgrade_usage.md)。使用本文件接口时需启动普通 worker。
 
-恢复阶段要求执行 profile 一致，其中包括 SDK/DocVortex 版本和 ONNX 设备。4.1.2 检查点不能直接在 4.1.3 环境 resume，即使仍使用 CPU 也不能强行复用旧 SDK 的阶段结果；需要续算旧任务时由运维恢复原代码、锁文件和配置，或明确创建新任务。客户端保留已有 ID，不通过重复上传或编辑检查点绕过这个边界。
+恢复阶段要求执行 profile 一致，其中包括 SDK/DocVortex 版本和 ONNX 设备。4.1.3 检查点不能直接在 4.1.4 环境 resume，即使仍使用 CPU 也不能强行复用旧 SDK 的阶段结果；需要续算旧任务时由运维恢复原代码、锁文件和配置，或明确创建新任务。客户端保留已有 ID，不通过重复上传或编辑检查点绕过这个边界。
 
 ## Worker 与队列
 
