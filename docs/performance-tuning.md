@@ -20,7 +20,7 @@ checkPaths:
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
 
-应用基线：MinerU 4.1.3、DocVortex 0.6.8、mineru-vl-utils 2.0.8、Python 3.13.15、CPU ONNX 小模型、FastAPI 与 Celery。模型镜像与部署方式单独记录；原生模板和 GPUStack 托管不共享生命周期。本指南给出资源变化后的测量与选择方法；历史表中的本机值是当时已测起点，不是新机器的通用最优值。
+应用基线：MinerU 4.1.4、DocVortex 0.6.11、mineru-vl-utils 2.0.8、Python 3.13.15、CPU ONNX 小模型、FastAPI 与 Celery。模型镜像与部署方式单独记录；原生模板和 GPUStack 托管不共享生命周期。本指南给出资源变化后的测量与选择方法；历史表中的本机值是当时已测起点，不是新机器的通用最优值。
 
 当前小模型策略固定为 onnx/cpu，模板线程为 16/1，不引入按文档或按模型的 CPU/GPU 混合调度。SDK 4.1 即使安装了 WebGPU provider，也须通过显式 CPU 配置与真实会话确认执行位置。先沿用 CPU 预算、VLM 请求窗口和既有文档完整性约束，再测线程及在途文件数；版本升级本身不构成提速结论。HTTP 默认仍为 advanced，档位是调用方的解析选项，不因速度测量而自动切换。
 
@@ -117,14 +117,18 @@ MINERU_RUN_VISION_PDFS=1 uv run --group dev pytest tests/test_vision_input_pdf.p
 ```bash
 MINERU_INTRA_OP_NUM_THREADS=16 MINERU_INTER_OP_NUM_THREADS=1 \
 uv run python -m src.scripts.benchmark_mineru \
-  --workers 3 --concurrency 8 --window 64 --jobs 6 \
+  --tier advanced --workers 3 --concurrency 8 --window 64 --jobs 6 \
   --files input/p2.pdf \
     input/wu-et-al-2025-carbon-footprint-of-battery-grade-lithium-chemicals-in-china.pdf \
     input/fese.pdf \
   --output output/tuning/baseline-run-01
 ```
 
-读取 `report.json` 中的 batch wall time、pages_per_second、service P50/P95 和 completion P95。`service_seconds` 不含 worker 队列等待，`completion_seconds` 含等待；初始化预热不计入批次耗时。
+`--tier` 接受四档，省略时仍为 advanced；比较档位必须显式传值，`MINERU_DEFAULT_TIER` 不覆盖该参数。workers、concurrency、window 和 ONNX 线程均可单独调整，每轮只改变待检验项。
+
+读取 `report.json` 中的批次耗时、pages_per_second、service P50/P95 和 completion P95。每个 job 保存源文件 SHA256/字节数/页数、实际 tier、运行时包版本、CPU ONNX 与 VLM 有效配置，并完整解码引用图片；`warmup_jobs` 单独保存各进程预热记录。`parse_seconds` 为 SDK 适配层完整解析与保存耗时；`service_seconds` 还包含完整性/图片/输入摘要校验，不含 worker 队列等待；`completion_seconds` 含等待。初始化预热不计入批次耗时，但服务端缓存可能被相同输入预热。进程退出前先关闭已加载 SDK runtime，再关闭 DocVortex 渲染池。
+
+基准不记录凭证或模型端点；另在私有实验记录中保存所用镜像 ID、实际模型修订、GPU 拓扑和负载。单靠客户端包版本不能证明模型服务版本。解析槽位仍生效，隔离压测必须配置独立 `MINERU_PARSE_SLOT_DIR`，并显式核对 `MINERU_PARSE_SLOTS`，避免压测与生产争用容量。
 
 ### 4.3 端到端与容量基准
 

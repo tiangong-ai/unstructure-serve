@@ -38,17 +38,17 @@ uv run python -m src.scripts.batch_parse \
 
 # 纯解析；一次成功落盘后补下一份
 uv run python -m src.scripts.batch_parse \
-  --mode parse --input-dir input/batch --output-dir output/batch-parse \
+  --mode parse --tier advanced --input-dir input/batch --output-dir output/batch-parse \
   --max-in-flight 2
 
 # 分阶段图片增强
 uv run python -m src.scripts.batch_parse \
-  --mode two-stage --input-dir input/batch --output-dir output/batch-images \
+  --mode two-stage --tier advanced --input-dir input/batch --output-dir output/batch-images \
   --max-in-flight 2
 
 # 普通队列图片增强，可显式指定 provider/model/prompt
 uv run python -m src.scripts.batch_parse \
-  --mode images --input-dir input/batch --output-dir output/batch-ordinary-images
+  --mode images --tier advanced --input-dir input/batch --output-dir output/batch-ordinary-images
 ```
 
 默认只扫描目录第一层 PDF；`--recursive` 扫描子目录，`--extensions pdf,docx,pptx` 选择格式，`--extensions all` 采用服务支持的 PDF、图片及 Office 格式清单，不包含 TXT/Markdown。目录和同名不同扩展名分别保存，不会相互覆盖。扫描结果为空直接失败。输入目录是本批次的稳定清单，运行/续跑过程中不要移动、删除或修改已经提交的文件。
@@ -61,6 +61,7 @@ uv run python -m src.scripts.batch_parse \
 
 | 选项 | 新客户端缺省 | 含义 |
 | --- | ---: | --- |
+| `--tier` | advanced | flash/basic/standard/advanced；显式选择解析档位，改变档位必须使用新输出目录 |
 | `--max-in-flight` | 2 | 正在上传或已提交但尚未取回结果的文件数；不代表 GPU 数或图片请求数 |
 | `--upload-concurrency` | 2 | 独立上传线程上限，受在途窗口约束 |
 | `--query-concurrency` | 4 | 独立状态/结果查询线程上限，不与上传互相阻塞 |

@@ -20,7 +20,7 @@ GPUStack worker 管理模型容器的创建、停止与恢复，应用 API、Cel
 
 ## 模型与共享 GPU
 
-后端模板见 `deploy/gpustack/mineru-backend.example.json`，默认版本为 `4.1.3-vllm0.28.0-custom`，镜像为 `tiangong/mineru-vlm:4.1.3-dv0.6.8-vllm0.28.0`，包含 MinerU 4.1.3、DocVortex 0.6.8 和 mineru-vl-utils 2.0.8。模板保留 `4.1.2-vllm0.28.0-custom` 版本定义供回退，不会因此自动升级运行中的 deployment。新镜像须先按[依赖指南](dependencies.md)选择 vLLM 0.28.0 基底及匹配的 FastAPI/Starlette 参数，完成构建与真实推理验收后再切换；不能仅修改标签复用旧镜像。
+后端模板见 `deploy/gpustack/mineru-backend.example.json`，默认版本为 `4.1.4-vllm0.28.0-custom`，镜像为 `tiangong/mineru-vlm:4.1.4-dv0.6.11-vllm0.28.0`，包含 MinerU 4.1.4、DocVortex 0.6.11 和 mineru-vl-utils 2.0.8。模板保留 `4.1.3-vllm0.28.0-custom` 及更早版本定义供回退，不会因此自动升级运行中的 deployment。新镜像须先按[依赖指南](dependencies.md)选择 vLLM 0.28.0 基底及匹配的 FastAPI/Starlette 参数，完成构建与真实推理验收后再切换；不能仅修改标签复用旧镜像。
 
 复用已有模型卷与下载缓存，worker 必须挂载相同模型卷到 `/opt/mineru`，并只读挂载 `deploy/mineru-vllm/model-entrypoint.sh` 到模板指定路径。SDK 升级时先核对模型 ID、revision 和权重清单；引用未变的缓存可继续复用，不删除模型卷来代替兼容验收。应用环境保持 CPU ONNX，不安装推理引擎；各应用节点和模型容器分别核对实际三件套版本。
 
