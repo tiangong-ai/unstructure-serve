@@ -36,7 +36,7 @@ def main(argv=None):
         sub = commands.add_parser(
             name,
             help=(
-                "Republish uncertain submission"
+                "Republish uncertain submissions or shared parse handoffs"
                 if name == "recover"
                 else "Resume an inactive job with a new generation"
             ),
@@ -80,19 +80,16 @@ def main(argv=None):
             if args.command == "resume":
                 job_store.resume_job(args.job_id)
                 publish_existing_job(args.job_id)
-            elif record["publication"] != "published" and job_store.status(args.job_id)[
-                "state"
-            ] not in {"SUCCESS", "EXPIRED"}:
-                publish_existing_job(args.job_id)
+            elif job_store.status(args.job_id)["state"] not in {"SUCCESS", "EXPIRED"}:
+                from src.services.shared_parse import WORKFLOW, recover_handoff
+
+                if record["publication"] != "published":
+                    publish_existing_job(args.job_id)
+                elif record.get("workflow") == WORKFLOW:
+                    recover_handoff(args.job_id, expected_generation=record["generation"])
             result = job_store.status(args.job_id)
             result.pop("error", None)
-        except (
-            job_store.JobBusy,
-            job_store.JobConflict,
-            job_store.PublishUncertain,
-            FileNotFoundError,
-            ValueError,
-        ) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             # Do not print exception chains containing broker URLs or document paths.
             parser.exit(1, f"{type(exc).__name__}: job action could not be completed\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -1,12 +1,13 @@
 import pytest
 
 
-def test_both_apps_use_the_same_redis_delivery_and_result_budget(monkeypatch):
+def test_apps_use_the_same_redis_delivery_and_result_budget(monkeypatch):
     from src.services.celery_runtime import runtime_options
     from celery import Celery
 
     monkeypatch.setenv("CELERY_VISIBILITY_TIMEOUT", "21600")
-    for name in ("ordinary", "two-stage"):
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+    for name in ("ordinary", "two-stage", "shared-parse"):
         app = Celery(name, broker="redis://localhost/0")
         app.conf.update(runtime_options(app.conf.broker_url, 86400))
         assert app.conf.broker_transport_options["visibility_timeout"] == 21600
@@ -29,3 +30,11 @@ def test_non_redis_broker_does_not_receive_redis_options():
     from src.services.celery_runtime import runtime_options
 
     assert runtime_options("amqp://localhost", 86400) == {"result_expires": 86400}
+
+
+def test_shared_parse_uses_distinct_redis_priority_buckets():
+    from src.services.celery_runtime import runtime_options
+
+    assert runtime_options("redis://localhost/0", 86400)["broker_transport_options"][
+        "priority_steps"
+    ] == [0, 9]

@@ -19,6 +19,7 @@ def runtime_options(broker_url: str, result_expires: int) -> dict:
             broker_transport_options={
                 "visibility_timeout": visibility,
                 "queue_order_strategy": "priority",
+                "priority_steps": [0, 9],
             },
             result_backend_transport_options={"visibility_timeout": visibility},
         )

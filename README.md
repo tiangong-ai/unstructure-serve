@@ -28,9 +28,9 @@ GPUStack 托管部署先读 [共享模型与应用配置](docs/gpustack-workers.
 请初始化并启动当前工作区中 TianGong AI Unstructure Serve 的整套文档解析设施。
 先阅读仓库 AGENTS.md、README.md 和 docs/mineru_4_upgrade_usage.md，核对现有进程、端口、GPU、模型缓存和私有配置。已有配置和缓存应复用，缺失配置按示例初始化；不要覆盖凭证或修改系统 Python。缺少必须由我提供的凭证/地址时，明确列出缺项。
 按 uv.lock 使用 Python 3.13.15，应用安装 CPU ONNX 依赖，MinerU 大模型只运行在 Docker。按文档准备和验证小模型，检查 Redis、独立图片模型；若依赖由其他项目管理，按其已有方式使用，不重复创建。
-三卡使用 deploy/manage.sh start model 和 start app；四卡使用 start model4 和 start app4。等待模型实际健康后再启动所选 app 组及 start ordinary，启动 API、对应的 two-stage worker、视觉端点探测进程与普通 worker。已有在线进程不要重复重启；同一主机只选一种模型拓扑，不直接对整份 PM2 cjs 执行不带 --only 的 start。
+三卡使用 deploy/manage.sh start model 和 start app；四卡使用 start model4 和 start app4。等待模型实际健康后再启动所选 app 组及 start ordinary，启动 API、公共解析 worker、two-stage 后续 worker、解析交接恢复进程、视觉端点探测进程与普通后续 worker。已有在线进程不要重复重启；同一主机只选一种模型拓扑，不直接对整份 PM2 cjs 执行不带 --only 的 start。
 若私有配置使用 GPUStack，改按 docs/gpustack-workers.md 验证网关和模型，只启动 app4 + ordinary；不执行上述 model/model4 操作，不能从本机 GPU 数量推导应用 worker 数。
-验证 API /health、/ready、普通及 two-stage 队列消费者、图片模型可用性，并用 input/p2.pdf 和含图论文做小规模真实验收。完成后 pm2 save；检查开机恢复是否已配置，缺失则按 pm2 startup 的提示配置。
+验证 API /health、/ready、公共解析及各后续队列消费者、图片模型可用性，并用 input/p2.pdf 和含图论文做小规模真实验收。完成后 pm2 save；检查开机恢复是否已配置，缺失则按 pm2 startup 的提示配置。
 最后列出本项目进程、端口、检查结果、尚缺的配置和可用的调用方式。不要输出密钥，不操作无关服务，不用全局 PM2 删除或 Redis 清空命令。
 ```
 
@@ -42,7 +42,7 @@ GPUStack 托管部署先读 [共享模型与应用配置](docs/gpustack-workers.
 复用现有 .venv、uv.lock、私有配置和缓存。按现有三卡或四卡拓扑使用 deploy/manage.sh start model 或 start model4 补起模型并验证健康，再 start app 或 start app4、start ordinary 补起应用；配置更新需要 restart 时，仅重启受影响组件并先等其任务收敛。不要直接 pm2 resurrect 恢复该用户的所有项目，也不要重启共享 Docker/Redis 或改动其他项目。
 GPUStack 托管部署保留其模型生命周期，仅核对统一网关，按 docs/gpustack-workers.md 补起 app4 + ordinary；不要恢复原生模型组。
 如驱动升级后 GPU 可见但推理失败，按部署说明检查 UVM/CDI 和容器内 CUDA，不以 nvidia-smi 正常作为修复完成的依据。
-核对 API、所选拓扑的三个或四个解析 worker、视觉/调度/合并 worker、普通 worker、视觉端点探测进程和全部模型 GPU，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录及持久任务清单（uv run python -m src.scripts.manage_jobs list），发布不明确的任务按部署说明 recover；失败任务修复原因并确认没有活跃阶段后才按原 ID resume。恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
+核对 API、所选拓扑的三个或四个解析 worker、视觉/调度/合并 worker、普通 worker、解析交接恢复进程、视觉端点探测进程和全部模型 GPU，并做小规模真实 PDF 验收。检查批量输出目录中的任务记录及持久任务清单（uv run python -m src.scripts.manage_jobs list），首次发布未确认的任务按部署说明 recover。解析后交接不确定时继续查询原 ID，并检查交接恢复进程。实际失败的任务修复原因并确认没有活跃阶段后才按原 ID resume。恢复客户端时使用原命令、原输出目录续查，不重复提交已有 task_id。
 完成后 pm2 save，说明原因、修复内容、验证结果和仍未恢复的依赖，不输出密钥。
 ```
 
@@ -51,7 +51,7 @@ GPUStack 托管部署保留其模型生命周期，仅核对统一网关，按 d
 ```text
 请安全停止当前工作区中 TianGong AI Unstructure Serve 的文档解析设施。
 先读 AGENTS.md 和 README.md，确认本项目进程及依赖归属。先停止新增提交，保留各批量客户端的输入、输出目录和任务记录；统一客户端可停止后用原命令加 --resume-only 重新运行，只查询并保存已提交任务，不补交或重试文件。其他提交来源也停止新增请求，保持 API/worker/模型可用直到已有任务结果已收取。
-检查普通和 two-stage 的 ready、active、reserved、scheduled/unacked 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
+检查公共解析、后续及仍有消费者的旧队列 ready/unacked 和 worker active/reserved/scheduled 任务，等待本批任务与各阶段队列收敛；不要把停止 CLI 当成取消服务端任务，不强杀仍在处理的千页文档。如有无法收敛的任务，说明具体任务和原因，不盲目清理。
 任务收敛后，依次执行 deploy/manage.sh stop api、stop ordinary、按所选拓扑 stop workers 或 stop workers4、stop vision-health、按所选拓扑 stop model 或 stop model4，确认本项目进程已停止、MinerU 容器已退出，再 pm2 save，使停止状态在重启后保持。
 GPUStack 托管部署只停止应用组，跳过上述 model/model4 操作；共享模型由 GPUStack 管理，不因停止某一解析应用而停止其他调用方使用的模型。
 Redis 和独立图片模型如为共享或其他项目管理的服务，保持运行；仅在确认专用于本项目且停止不会影响其他服务时，按其已有启动方式停止。不删除容器卷、模型缓存、结果、任务记录或私有配置，不使用 pm2 delete all、Redis flush 或全局进程清理。
@@ -64,7 +64,7 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 
 默认图片描述模型为 **Qwen3.8-Flash-Next-NVFP4**，通过私有 `VLLM_BASE_URLS` 配置独立多模态端点；与 MinerU 文档解析模型分开管理。
 
-当前技术栈：**Python 3.13.15 · MinerU 4.1.4 · DocVortex 0.6.11 · mineru-vl-utils 2.0.8 · CPU ONNX · Docker vLLM 0.21.0（可按环境选 0.28.0）· FastAPI/Celery**。应用依赖由 `uv.lock` 固定，Linux 应用环境不安装 Torch/vLLM。质量默认 `advanced`，也支持 `flash/basic/standard`。
+当前应用基线为 **Python 3.13.15 · MinerU 4.2.3 · DocVortex 0.6.24 · mineru-vl-utils 2.0.9 · CPU ONNX · FastAPI/Celery**，由 `uv.lock` 固定。Linux 应用环境不安装 Torch/vLLM；独立 GPU 模型镜像仍使用 MinerU 4.1.4，原生模板缺省 vLLM 0.21.0，GPUStack 示例为 0.28.0。质量默认 `advanced`，也支持 `flash/basic/standard`。
 
 ## 先理解需要运行什么
 
@@ -73,8 +73,9 @@ Redis 和独立图片模型如为共享或其他项目管理的服务，保持�
 | Docker MinerU VLM | 解析模型；三卡 DP=3 或四卡 DP=4，单地址 30000 | standard/advanced |
 | Gunicorn API | 上传、提交、查询，默认 7770 | 所有服务调用 |
 | Redis | Celery 队列与结果状态 | 异步任务 |
-| 普通 Celery worker | 纯解析或完整图片增强任务 | 两个普通 `/task` 接口 |
-| two-stage worker | 三卡组六个（其中解析三个），四卡组七个（其中解析四个） | 图片增强批处理 |
+| 公共解析 worker | 同节点三个异步入口共用优先级解析队列，三进程或四进程 | 三个 `/task` 接口 |
+| 普通 Celery worker | 纯解析结果组装或普通图片增强，兼容旧任务 | 两个普通 `/task` 接口 |
+| two-stage 后续 worker | 图片分发、识别及结果汇总 | 两段式图片增强 |
 | 视觉端点探测进程 | 主动探测独立图片端点，向 API/worker 共享状态 | 图片增强；start app 自动包含 |
 | 独立图片模型服务 | 为提取出来的图片生成描述 | 图片增强；与 MinerU VLM 是两个服务 |
 
@@ -122,7 +123,7 @@ curl --fail http://127.0.0.1:30000/health
 pm2 save
 ```
 
-`app` 包含 API、六个 two-stage worker 和视觉端点探测进程；`ordinary` 启动普通 worker。以下脚本命令均从仓库根目录执行；重复 start 会跳过已在线进程，修改配置请使用 restart。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
+`app` 包含 API、三个公共解析 worker、三个 two-stage 后续 worker、解析交接恢复进程和视觉端点探测进程；`app4` 再加第四个公共解析 worker，`ordinary` 启动普通后续 worker。以下脚本命令均从仓库根目录执行；重复 start 会跳过已在线进程，修改配置请使用 restart。PM2 模板位于 `deploy/pm2`，模型 YAML 位于 `deploy/mineru-vllm`，Gunicorn 参数位于 `deploy/gunicorn.conf.py`。可选 Flower 不会自动启动。
 
 ## 重启后恢复与日常维护
 
@@ -159,9 +160,11 @@ curl --fail-with-body 'http://127.0.0.1:7770/mineru?chunk_type=true&return_txt=t
 | `/mineru` | 同步 | 否 |
 | `/mineru_sci` | 同步科研入口 | 否 |
 | `/mineru_with_images` | 同步 | 是 |
-| `/mineru/task` | 普通队列 | 否 |
-| `/mineru_with_images/task` | 普通队列 | 是 |
-| `/two_stage/task` | 分阶段队列 | 是 |
+| `/mineru/task` | 公共解析 → 普通结果组装 | 否 |
+| `/mineru_with_images/task` | 公共解析 → 普通后续 | 是 |
+| `/two_stage/task` | 公共解析 → 分发、识别、汇总 | 是 |
+
+同一节点内，三个异步入口的 `urgent` 在公共 worker 领取下一份任务时优先于已排队的 `normal`。正在执行的任务继续完成。
 
 六个接口均上传 `file`，可选表单 `tier`；`flash` 适合电子 PDF 文本层预览，`basic` 使用 OCR 小模型，`standard/advanced` 调用 Docker VLM。`chunk_type`、`return_txt` 在前五个接口中是 URL 查询参数，仅 two-stage 使用表单。返回页码从 1 开始，`return_txt=true` 附加按阅读顺序拼接的文本。
 
@@ -176,7 +179,7 @@ uv run python -m src.scripts.batch_parse \
   --max-in-flight 2
 ```
 
-示例假定已将待处理文件放入 `input/batch`；也可替换为自己的输入目录。`--mode images` 为普通队列图片增强。省略 `--tier` 默认 advanced、输出 JSON；改变档位必须使用新输出目录，已有批次按原参数续跑。可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
+示例假定已将待处理文件放入 `input/batch`；也可替换为自己的输入目录。`--mode images` 为普通图片增强。省略 `--tier` 默认 advanced、输出 JSON；改变档位必须使用新输出目录，已有批次按原参数续跑。可调档位、上传/轮询超时，支持子目录和 Office/图片格式，原输出目录续跑不会盲目重投。千页整本首次试验用一个文件、在途 1，并先完成服务端长任务配置验收。完整选择规则见 [AI 接入指南](docs/ai-integration.md)。
 
 ## 文档与开发
 

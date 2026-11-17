@@ -9,8 +9,8 @@ whenToUse: "When submitting or resuming document batches."
 whenToUpdate: "When the documented entrypoints or operational contracts change."
 checkPaths:
   - src/scripts/**
-lastReviewedAt: 2026-09-21
-lastReviewedCommit: 3b999427985a85e05529fba16e0f9156c7e29826
+lastReviewedAt: 2026-11-17
+lastReviewedCommit: 843b472ec979b2dd05cc233d6019d3536af6715d
 ---
 
 # 统一批量解析客户端
@@ -81,6 +81,8 @@ HTTP 超时是网络阶段的无进展超时，不是硬性整次请求墙钟截
 客户端先查询轻量 `/tasks/{id}/status`，仅 SUCCESS 后下载 `/tasks/{id}/result`，服务端无需在状态轮询中加载、序列化全文；客户端仍会解析并保存完整业务 JSON。只有状态接口返回 404 时才兼容回退旧模式 GET；认证错误、网络错误和其他 HTTP 错误不触发回退，EXPIRED 明确停止并保留本地记录。输出继续保持普通模式省略 null、two-stage 保留 null，已有批次可直接续跑。
 
 `--priority urgent` 可发紧急任务；日常批量保持 normal。不要为了提速将整个目录改为 urgent。`--max-attempts 2` 只在确认 FAILURE/REVOKED 后允许再提交一次；普通 API 的失败虽然是 HTTP 500，仍会作为明确终态处理。服务端配置错误应先修复再提高尝试上限。
+
+三个异步入口在同一节点共享解析优先级队列。urgent 优先于仍在队列中的 normal，不中断已领取的任务，也不保证先完成图片增强。解析完成后若后续交接尚未确认，服务端保持 `STARTED` 并报告 `handoff=uncertain`；客户端继续查询原 ID，由服务端恢复进程补交接，不新建尝试。该机制与首次提交的 `publication=uncertain` 不同，后者仍按下述人工核查与恢复流程处理。
 
 ## 中断与续跑
 

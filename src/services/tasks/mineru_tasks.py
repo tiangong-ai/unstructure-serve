@@ -46,3 +46,10 @@ def run_mineru_with_images_task(payload: Dict[str, Any]) -> dict:
     finally:
         if workspace:
             shutil.rmtree(workspace, ignore_errors=True)
+
+
+@celery_app.task(name="mineru.finish_durable", acks_late=True)
+def finish_mineru_task(ref: Dict[str, Any]) -> dict:
+    from src.services.durable_pipeline import finish_durable_job
+
+    return finish_durable_job(ref)

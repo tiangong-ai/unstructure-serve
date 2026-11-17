@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
-from src.services import job_store
-from src.services.tasks import mineru_tasks
+from src.services import job_store, shared_parse_app
 
 
 def test_mineru_with_images_task_rejects_markdown(client, monkeypatch):
@@ -12,7 +11,7 @@ def test_mineru_with_images_task_rejects_markdown(client, monkeypatch):
         called = True
         raise AssertionError("task should not be queued for Markdown uploads")
 
-    monkeypatch.setattr(mineru_tasks.run_mineru_with_images_task, "apply_async", fake_apply_async)
+    monkeypatch.setattr(shared_parse_app.parse_document, "apply_async", fake_apply_async)
 
     response = client.post(
         "/mineru_with_images/task",
@@ -27,12 +26,13 @@ def test_mineru_with_images_task_rejects_markdown(client, monkeypatch):
 def test_mineru_with_images_task_invalid_model_no_longer_returns_422(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_apply_async(*, args, queue, task_id):
+    def fake_apply_async(*, args, queue, priority):
         captured["payload"] = args[0]
         captured["queue"] = queue
+        captured["priority"] = priority
         return SimpleNamespace(id="task-123", state="PENDING")
 
-    monkeypatch.setattr(mineru_tasks.run_mineru_with_images_task, "apply_async", fake_apply_async)
+    monkeypatch.setattr(shared_parse_app.parse_document, "apply_async", fake_apply_async)
 
     response = client.post(
         "/mineru_with_images/task",
@@ -44,6 +44,8 @@ def test_mineru_with_images_task_invalid_model_no_longer_returns_422(client, mon
     job_id = response.json()["task_id"]
     assert response.json()["state"] == "PENDING"
     assert captured["payload"] == {"job_id": job_id, "generation": 0}
+    assert captured["queue"] == shared_parse_app.SHARED_PARSE_QUEUE
+    assert captured["priority"] == 9
     options = job_store.read_job(job_id)["options"]
     assert options["vision_provider"] == "missing-provider"
     assert options["vision_model"] == "missing-model"

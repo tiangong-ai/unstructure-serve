@@ -20,7 +20,7 @@ checkPaths:
 
 本文件作为开发运维文档提交 Git，但不通过 FastAPI、llms.txt 或服务文档路由暴露。运行凭证、原始文档和实测输出仍保持私有；不得通过通用静态目录挂载仓库。
 
-应用基线：MinerU 4.1.4、DocVortex 0.6.11、mineru-vl-utils 2.0.8、Python 3.13.15、CPU ONNX 小模型、FastAPI 与 Celery。模型镜像与部署方式单独记录；原生模板和 GPUStack 托管不共享生命周期。本指南给出资源变化后的测量与选择方法；历史表中的本机值是当时已测起点，不是新机器的通用最优值。
+应用基线：MinerU 4.2.3、DocVortex 0.6.24、mineru-vl-utils 2.0.9、Python 3.13.15、CPU ONNX 小模型、FastAPI 与 Celery。模型模板仍为 MinerU 4.1.4。模型镜像与部署方式单独记录；原生模板和 GPUStack 托管不共享生命周期。本指南给出资源变化后的测量与选择方法；历史表中的本机值是当时已测起点，不是新机器的通用最优值。
 
 当前小模型策略固定为 onnx/cpu，模板线程为 16/1，不引入按文档或按模型的 CPU/GPU 混合调度。SDK 4.1 即使安装了 WebGPU provider，也须通过显式 CPU 配置与真实会话确认执行位置。先沿用 CPU 预算、VLM 请求窗口和既有文档完整性约束，再测线程及在途文件数；版本升级本身不构成提速结论。HTTP 默认仍为 advanced，档位是调用方的解析选项，不因速度测量而自动切换。
 
@@ -323,11 +323,11 @@ uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout
 | 客户端轮询 | 新 CLI 等待预算 21600 秒、GET 60 秒均可调；旧脚本仍 800/30 秒 | 覆盖排队+完整流水线；超时续查原 ID，不能重投 |
 | 普通异步解析 | 持久 parse 阶段在独立子进程执行，缺省 1800 秒；普通/图片环境可覆盖 | 该期限覆盖转换、等待解析槽、解析及 IPC，不是所有图片请求的整任务期限 |
 | two-stage parse | 通过独立子进程执行；MINERU_TWO_STAGE_HARD_TIMEOUT_SECONDS 缺省回退任务预算 1800 秒 | 进程提前退出或超时明确失败，仍需保证单份整本可在实际预算内完成 |
-| Redis 未确认消息 | 普通和 two-stage 均 late ack，持久任务用阶段锁/代次与缓存防重复执行；确认期限代码 3600 秒、模板 21600 秒 | 确认期限覆盖最长单条任务；手工恢复优先复用原任务完成的阶段 |
+| Redis 未确认消息 | 公共解析及下游使用 late ack，持久任务用阶段锁/代次与检查点防重复执行；确认期限代码 3600 秒、模板 21600 秒 | 确认期限覆盖最长单条任务的领取、转换、槽位等待、解析、检查点提交与交接；恢复优先复用已完成阶段 |
 | 中间/最终结果 | Redis chord 引用保留一天；全文和完成标记在持久目录，按运维保留策略清理 | Redis TTL 覆盖单波最慢图片及回调；磁盘容量覆盖所有保留资产，成功后及时收取 |
 | 停机 | parse PM2 等待窗口 1900 秒 | 长任务超此时间时不要在活跃中重启；扩大预算须与恢复机制一起评估 |
 
-Redis visibility timeout 到期可使未确认任务被重新投递；扩大它也会延迟故障后的恢复。Celery 要求相关 broker/backend/app 设置一致，共享 broker 的应用存在较短设置时还会影响效果，见 [Celery Redis 官方说明](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html#visibility-timeout)。本项目通过共享配置模块把 `CELERY_VISIBILITY_TIMEOUT` 同时接到这三处，两个 app 均适用。修改后共同重载所有消费者；同 broker 的外部应用也须核对。它不等于任务执行期限或 exactly-once；普通和 two-stage 均使用 late ack；持久任务支持显式恢复和阶段复用，仍需验证消息丢失、重复和存储故障。
+Redis visibility timeout 到期可使未确认任务被重新投递；扩大它也会延迟故障后的恢复。Celery 要求相关 broker/backend/app 设置一致，共享 broker 的应用存在较短设置时还会影响效果，见 [Celery Redis 官方说明](https://docs.celeryq.dev/en/stable/getting-started/backends-and-brokers/redis.html#visibility-timeout)。本项目通过共享配置模块把 `CELERY_VISIBILITY_TIMEOUT` 同时接到这三处，三个 app 均适用。修改后共同重载所有消费者；同 broker 的外部应用也须核对。它不等于任务执行期限或 exactly-once；公共解析及下游均使用 late ack；持久任务支持显式恢复和阶段复用，仍需验证消息丢失、重复和存储故障。
 
 容量验收中应同时检查同一 task_id 的执行事件/日志，避免两个 worker 重复处理同一工作区；客户端没有重复 POST 不代表 broker 不会重投。two-stage 默认每波最多 32 张缺失图片，完成后再派发下一波；全文不再附在每张图片的 chord 回调中。API 仍没有按调用者、页数或总字节的全局准入预算，客户端在途 2 是起始实验，不是内存安全保证。持久资产会积累，必须配合保留策略和磁盘监控。
 
@@ -429,8 +429,8 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 | 控制项 | 每个应用节点的起点 | 约束范围 |
 | --- | --- | --- |
 | API_WORKERS | 4 | HTTP 进程，不等于 GPU 实例 |
-| two-stage parse | 4 个 solo/1，prefetch=1；使用 app4/workers4 组 | 每进程一份文档，合计两节点 8 份 |
-| MINERU_PARSE_SLOTS / MINERU_SCHEDULER_WORKERS | 4 / 4 | API、普通及 two-stage 共享本机解析槽 |
+| 公共 parse | 4 个 solo/1，prefetch=1；使用 app4/workers4 组 | 三个异步入口共享，每进程一份文档，合计两节点 8 份 |
+| MINERU_PARSE_SLOTS / MINERU_SCHEDULER_WORKERS | 4 / 4 | 同步与异步共用本机解析槽，各节点独立调度 |
 | 每 parser VLM 并发 / processing window | 8 / 64 页 | 每文档区域请求与内部渲染窗口 |
 | ONNX intra/inter | 16 / 1 | 每模型会话，不是整机线程上限 |
 | ordinary / vision worker | threads/16、threads/32 | 独立任务队列；实际模型并发另受共享槽约束 |
@@ -438,11 +438,11 @@ vLLM 视觉客户端默认 `VLLM_VISION_CONNECT_TIMEOUT_SECONDS=5`、`VLLM_VISIO
 | VISION_BATCH_SIZE | 3 | 同步/普通图片每文档窗口，不控制 two-stage |
 | VLLM_VISION_ENDPOINT_SLOTS | 8 | 本机所有调用方共享；两节点共 16，不是每文档 8 |
 
-上述是已测短文档负载的生产起点，不是由七个 GPU 推导的最优公式。保持 vLLM 非 thinking 与已验证采样 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0；如果另一应用仍用通用默认值 1/1/40/2，先修正采样，避免把长尾输出当成 parse worker 不够。
+上述并发数基于历史短文档测量，可作为公共队列部署的起点，不是由七个 GPU 推导的最优公式。保持 vLLM 非 thinking 与已验证采样 temperature/top_p/top_k/presence_penalty=0.2/0.8/20/0；如果另一应用仍用通用默认值 1/1/40/2，先修正采样，避免把长尾输出当成 parse worker 不够。
 
 同一份九页论文、两节点各四份的实际 HTTP/two-stage 对照中，将应用解析预算由 3+4 提升为 4+4 后，原三进程节点整批由约 61 秒降至 43 秒，两节点全批由约 61 秒降至 47 秒；页码与指定图表数字/单位通过。只修正采样时，另一节点四份任务由约 77 秒降至 46 秒。两类对照不混为一个优化因素。指标来自私有 `output/gpustack-capacity-20261009`，重复同一已预热文件可能受缓存影响，不能外推千页或不同内容的满载吞吐。
 
-提高客户端在途数不等于增加实际 parse 进程。此前 3+4 解析预算下提交 14 份产生两批排队，不能据此断言 14 个真实 worker 的性能。四进程配置批量建议从每节点 2 份在途开始，短文档经测量可到 4；长文档仍按既有 1→2→3 流程验收。不要仅为排队增加 API worker 或把每台 parse 数直接设为集群 GPU 数。
+提高客户端在途数不等于增加实际 parse 进程。此前 3+4 解析预算下提交 14 份产生两批排队，不能据此断言 14 个真实 worker 的性能。四进程配置批量建议从每节点 2 份在途开始，短文档经测量可到 4；长文档仍按既有 1→2→3 流程验收。不要仅为排队增加 API worker 或把每台 parse 数直接设为集群 GPU 数。分别记录公共解析两档 ready 和最老等待时长、领取至取得解析槽的时间、各后续队列积压及任务目录可用空间。后处理持续跟不上时，按可用空间和等待预算告警并暂停或压低新增任务量，再收取已有结果。
 
 改共享槽数必须排空所有入口并同时重载 API、ordinary、全部 parse/vision/dispatch/merge，使用一致的新槽目录，不删除在用锁。四 parse 进程即使运行在三 GPU 主机上也使用 app4；该组不启动模型，不可误用 model4 接管 GPUStack 的模型生命周期。
 

@@ -13,9 +13,10 @@ case "$group" in
   model) names=mineru-vlm-docker-parallel ;;
   model4) names=mineru-vlm-docker-parallel4 ;;
   workers4) names=celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-parse-4,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge ;;
-  app4) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-parse-4,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge,vision-health-monitor ;;
+  app4) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-parse-4,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge,vision-health-monitor,parse-handoff-recovery ;;
   vision-health) names=vision-health-monitor ;;
-  app) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge,vision-health-monitor ;;
+  handoff-recovery) names=parse-handoff-recovery ;;
+  app) names=unstructured-gunicorn,celery-two-stage-parse,celery-two-stage-parse-2,celery-two-stage-parse-3,celery-two-stage-vision,celery-two-stage-dispatch,celery-two-stage-merge,vision-health-monitor,parse-handoff-recovery ;;
   *) echo "Unknown group: $group" >&2; exit 2 ;;
 esac
 case "$group:$action" in
@@ -57,5 +58,5 @@ case "$action" in
   stop) IFS=, read -ra targets <<< "$names"; for target in "${targets[@]}"; do pm2 stop "$target"; done ;;
   status) pm2 status ;;
   logs) pm2 logs "${names%%,*}" --lines 100 ;;
-  *) echo "Usage: $0 {start|restart|stop|status|logs} {app|app4|api|workers|workers4|ordinary|model|model4|vision-health}" >&2; exit 2 ;;
+  *) echo "Usage: $0 {start|restart|stop|status|logs} {app|app4|api|workers|workers4|ordinary|model|model4|vision-health|handoff-recovery}" >&2; exit 2 ;;
 esac

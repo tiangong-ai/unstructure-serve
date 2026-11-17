@@ -176,6 +176,16 @@ def _validate_manifest(job_id, manifest):
             raise RuntimeError("Stored parse asset failed integrity verification")
 
 
+def validate_parse_checkpoint(record):
+    """Require the saved parse to match this job without running the parser."""
+    job_id = record["job_id"]
+    manifest = _manifest(job_id)
+    if _digest(store.source_path(job_id)) != record["source_sha256"]:
+        raise RuntimeError("Stored job input failed integrity verification")
+    _assert_profile(record, manifest)
+    _validate_manifest(job_id, manifest)
+
+
 def _parse_input(source, output, *, backend):
     """Run conversion and MinerU inside the same supervised task group."""
     output = Path(output)
@@ -388,6 +398,7 @@ def pending_vision(ref, *, limit):
     def execute(record):
         if store.status(ref["job_id"])["state"] == "SUCCESS":
             return []
+        store.record_handoff(ref["job_id"], ref["generation"], "published", received=True)
         manifest = _manifest(ref["job_id"])
         _assert_profile(record, manifest)
         pending = [
@@ -457,29 +468,49 @@ def run_durable_job(ref):
             store.read_result(ref["job_id"])
             return store.result_reference(ref["job_id"])
         ensure_parsed(ref)
-        window = max(1, int(os.getenv("VISION_BATCH_SIZE", "3")))
-        pending = iter(pending_vision(ref, limit=2**31))
-        with ThreadPoolExecutor(max_workers=window) as pool:
-            futures = set()
-
-            def submit_next():
-                seq = next(pending, None)
-                if seq is not None:
-                    futures.add(pool.submit(run_vision, {**_reference(ref), "seq": seq}))
-
-            for _ in range(window):
-                submit_next()
-            try:
-                while futures:
-                    completed, _ = wait(futures, return_when=FIRST_COMPLETED)
-                    for future in completed:
-                        futures.remove(future)
-                        future.result()
-                    for _ in completed:
-                        submit_next()
-            finally:
-                for future in futures:
-                    future.cancel()
-        return assemble(ref)
+        return _finish_ordinary(ref)
 
     return _stage(ref, "ordinary", execute)
+
+
+def finish_durable_job(ref):
+    """Run ordinary post-processing using a completed parse checkpoint."""
+
+    def execute(record):
+        if record["mode"] not in {"parse", "images"}:
+            raise ValueError("Unexpected ordinary post-processing mode")
+        if store.status(ref["job_id"])["state"] == "SUCCESS":
+            store.read_result(ref["job_id"])
+            return store.result_reference(ref["job_id"])
+        store.record_handoff(ref["job_id"], ref["generation"], "published", received=True)
+        validate_parse_checkpoint(record)
+        return _finish_ordinary(ref)
+
+    return _stage(ref, "ordinary", execute)
+
+
+def _finish_ordinary(ref):
+    window = max(1, int(os.getenv("VISION_BATCH_SIZE", "3")))
+    pending = iter(pending_vision(ref, limit=2**31))
+    with ThreadPoolExecutor(max_workers=window) as pool:
+        futures = set()
+
+        def submit_next():
+            seq = next(pending, None)
+            if seq is not None:
+                futures.add(pool.submit(run_vision, {**_reference(ref), "seq": seq}))
+
+        for _ in range(window):
+            submit_next()
+        try:
+            while futures:
+                completed, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    futures.remove(future)
+                    future.result()
+                for _ in completed:
+                    submit_next()
+        finally:
+            for future in futures:
+                future.cancel()
+    return assemble(ref)

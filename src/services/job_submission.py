@@ -11,32 +11,25 @@ from src.utils.upload_io import persist_upload
 
 
 def publish_record(record):
+    from src.services.shared_parse_app import (
+        SHARED_PARSE_PRIORITY,
+        SHARED_PARSE_QUEUE,
+        parse_document,
+    )
+
     ref = {"job_id": record["job_id"], "generation": record["generation"]}
     priority = record["options"].get("priority", "normal")
-    if record["mode"] == "two-stage":
-        from src.services.two_stage_pipeline import (
-            resolve_two_stage_queues,
-            submit_durable_two_stage,
-        )
-
-        queues = resolve_two_stage_queues(priority)
-        return submit_durable_two_stage(
-            ref,
-            parse_queue=queues["parse"],
-            vision_queue=queues["vision"],
-            dispatch_queue=queues["dispatch"],
-            merge_queue=queues["merge"],
-        )
-    from src.config.config import CELERY_TASK_MINERU_QUEUE, CELERY_TASK_URGENT_QUEUE
-    from src.services.tasks.mineru_tasks import run_mineru_task, run_mineru_with_images_task
-
-    task = run_mineru_with_images_task if record["mode"] == "images" else run_mineru_task
-    queue = CELERY_TASK_URGENT_QUEUE if priority == "urgent" else CELERY_TASK_MINERU_QUEUE
-    return task.apply_async(args=[ref], queue=queue, task_id=record["job_id"])
+    return parse_document.apply_async(
+        args=[ref],
+        queue=SHARED_PARSE_QUEUE,
+        priority=SHARED_PARSE_PRIORITY["urgent" if priority == "urgent" else "normal"],
+    )
 
 
 def publish_existing_job(job_id):
-    return job_store.publish_job(job_id, publish_record)
+    from src.services.shared_parse import WORKFLOW
+
+    return job_store.publish_job(job_id, publish_record, workflow=WORKFLOW)
 
 
 def _publish(job_id):
