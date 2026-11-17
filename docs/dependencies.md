@@ -24,7 +24,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 
 | 环境 | 当前约定 | 验证方式 |
 | --- | --- | --- |
-| 应用 | Python 3.13.15、MinerU 4.1.4 基础包、DocVortex 0.6.11、mineru-vl-utils 2.0.8、CPU ONNX；不安装 Torch/vLLM | `uv sync --locked --group dev --check`、`uv pip check` |
+| 应用 | Python 3.13.15、MinerU 4.2.3 基础包、DocVortex 0.6.24、mineru-vl-utils 2.0.9、CPU ONNX；Linux 应用不安装 Torch/vLLM | `uv sync --locked --group dev --check`、`uv pip check` |
 | Docker 模型 | 模板缺省 vLLM 0.21.0 配套的 Torch/CUDA，新镜像安装 MinerU 4.1.4、DocVortex 0.6.11 与 mineru-vl-utils 2.0.8；GPUStack 示例使用 vLLM 0.28.0 | 构建中的 `pip check`、容器 CUDA 计算及真实 PDF |
 | 系统工具 | LibreOffice、Poppler、Pandoc 等 | [部署检查](mineru_4_upgrade_usage.md)与 Office 回归 |
 
@@ -39,12 +39,12 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 3. 在隔离环境生成候选锁文件，检查升级与移除项，再运行常规测试及[真实 PDF 回归](validation.md)。应用与 Docker 分别检查，不混用依赖。
 4. 确认在途任务收敛后，按[升级与回滚](mineru_4_upgrade_usage.md#升级与回滚)切换；保存中间提交，逐次审查暂存改动。
 
-执行 profile 包含 SDK/DocVortex 版本和 ONNX 设备。4.1.3 检查点不能直接在 4.1.4 环境 resume，4.0 到 4.1 的旧检查点也不会因两边都使用 CPU 而自动兼容；切换前排空任务，需要续算旧任务时保留并恢复原代码、锁文件及私有配置，不手工补写 manifest 字段或摘要。
+执行 profile 包含 SDK/DocVortex 版本和 ONNX 设备。4.1.4 环境生成的检查点不能在 4.2.3 环境 resume，即使两边都使用 CPU。升级前让旧任务在原环境完成，需要续算旧任务时保留并恢复原代码、锁文件及私有配置，不手工补写 manifest 字段或摘要。
 
 以下命令只在隔离的开发环境执行，不直接修改运行服务使用的环境：
 
 ```bash
-uv lock --upgrade-package mineru --upgrade-package docvortex
+uv lock --upgrade-package mineru --upgrade-package docvortex --upgrade-package mineru-vl-utils
 uv sync --locked --group dev
 uv pip check
 uv run --group dev pytest
@@ -58,7 +58,7 @@ uv run --group dev pytest
 
 | 包 | 约束来源 | 当前选择 |
 | --- | --- | --- |
-| OpenAI SDK | MinerU 4.1.4 要求 `openai>=1.70,<3` | 2.54.0，不能直接换成 3.x |
+| OpenAI SDK | MinerU 4.2.3 要求 `openai>=1.70,<3` | 2.54.0，不能直接换成 3.x |
 | Redis Python 客户端 | Kombu 的 Redis extra 要求 `<6.5` | 6.4.0；与 Redis 服务端版本是两回事 |
 | pydantic-core | Pydantic 2.14.0 精确依赖 `==2.50.0` | 随 Pydantic 一起升级 |
 | tomlkit | Gradio 要求 `<0.15` | 0.14.0 |
@@ -68,7 +68,9 @@ MinerU 4.1.4 的 `full` extra 声明 `vllm>=0.19.1,<0.31.0`。模型镜像模板
 
 vLLM 0.21.0 和 0.28.0 都支持 `--kv-cache-memory-bytes`。容器入口按私有 `.env` 选择固定 KV 字节数或显存比例，无需为切换预算修改镜像依赖；具体键及验证见[部署说明](mineru_4_upgrade_usage.md#docker-与多卡)。
 
-MinerU 4.1.4 要求 DocVortex `>=0.6.11,<0.7`、mineru-vl-utils `>=2.0.8,<3`、pypdfium2 `>=5.13,<6` 和兼容平台的 ONNX Runtime；应用锁文件和新模型镜像选择 DocVortex 0.6.11、mineru-vl-utils 2.0.8。`uv.lock` 定向更新 MinerU、DocVortex 及其必需传递依赖，其余兼容版本继续锁定。模型镜像保留与 vLLM/Torch/CUDA 配套的推理环境，FastAPI/Starlette 与独立应用环境分别求解，不能把应用锁文件直接安装进模型容器。约束依据见 [MinerU 4.1.4](https://pypi.org/pypi/mineru/4.1.4/json)及 [DocVortex 0.6.11](https://pypi.org/pypi/docvortex/0.6.11/json) 包元数据。
+应用 MinerU 4.2.3 要求 DocVortex `>=0.6.24,<0.7`、mineru-vl-utils `>=2.0.9,<3`、mineru-llama-cpp `>=0.2.1,<1`、pypdfium2 `>=5.13,<6` 和兼容平台的 ONNX Runtime。定向锁定上述三个 SDK 包及所需的 mineru-llama-cpp 0.2.1，其余兼容版本继续沿用。模型镜像的 vLLM/Torch/CUDA 与 FastAPI/Starlette 单独求解，继续按本表的模型基线验收。约束依据见 [MinerU 4.2.3](https://pypi.org/pypi/mineru/4.2.3/json)及 [DocVortex 0.6.24](https://pypi.org/pypi/docvortex/0.6.24/json) 包元数据。
+
+4.2 系列带来正文、布局和跨页表格修复。4.2.1 修复原生 PDF 中接近 360° 的水平文本被错误过滤。4.2.3 的托管服务超时及恢复来自上游 WebUI、Router 和 API Server，本服务仍通过无状态 Python SDK 和独立任务进程实施自身的超时及恢复。应用升级需在既有 VLM 端点上验收原生 PDF、表格、公式及旧 API 输出。若后续升级模型镜像，4.2.3 在启动 vLLM 前会拒绝 `vllm<0.29.0` 与 `transformers>=5.23.0` 的组合。见 [4.2.0](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.2.0-released)、[4.2.1](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.2.1-released)及 [4.2.3](https://github.com/opendatalab/MinerU/releases/tag/mineru-4.2.3-released) 发行说明。
 
 本服务通过无状态 `mineru.parser.parse` 保存 `ParseResult`/MiddleJson，再生成既有 HTTP 结果；同步和异步入口的等待、持久任务、恢复及产物保留继续由本服务管理。4.1 上游 Tasks、file-parse 和 Router 的 HTTP 迁移不改变本服务的六个 POST 入口、默认 advanced 档位或持久任务协议，本服务不接入其资源回收策略。接口差异见 [4.1 迁移说明](https://github.com/opendatalab/MinerU/blob/mineru-4.1.3-released/docs/zh/reference/migration_4_1.md)。
 
