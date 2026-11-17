@@ -45,7 +45,8 @@ class TaskPriority(str, Enum):
 def _two_stage_queue_names() -> list[str]:
     normal_queues = resolve_two_stage_queues(TaskPriority.NORMAL.value)
     urgent_queues = resolve_two_stage_queues(TaskPriority.URGENT.value)
-    ordered_names = dict.fromkeys([*normal_queues.values(), *urgent_queues.values()])
+    shared_queue = os.getenv("CELERY_SHARED_PARSE_QUEUE", "").strip() or "queue_parse_shared"
+    ordered_names = dict.fromkeys([*normal_queues.values(), *urgent_queues.values(), shared_queue])
     return [name for name in ordered_names if name]
 
 
@@ -198,7 +199,7 @@ def two_stage_task_status(task_id: str):
 
 @router.get(
     "/two_stage/queue_status",
-    summary="Fetch two-stage Celery queue backlog",
+    summary="Fetch shared parse and two-stage Celery queue backlog",
 )
 def two_stage_queue_status():
     broker_url = celery_app.conf.broker_url
@@ -223,12 +224,23 @@ def two_stage_queue_status():
     queue_names = _two_stage_queue_names()
     try:
         redis_client = redis.Redis.from_url(broker_url)
-        queue_lengths = {
-            queue_name: int(redis_client.llen(queue_name)) for queue_name in queue_names
+        transport = getattr(celery_app.conf, "broker_transport_options", None) or {}
+        steps = transport.get("priority_steps", [0, 3, 6, 9])
+        separator = transport.get("sep", "\x06\x16")
+        prefix = transport.get("global_keyprefix", "")
+        priority_lengths = {
+            queue: {
+                step: int(
+                    redis_client.llen(prefix + queue + (separator + str(step) if step else ""))
+                )
+                for step in steps
+            }
+            for queue in queue_names
         }
+        queue_lengths = {queue: sum(counts.values()) for queue, counts in priority_lengths.items()}
         unacked_counts = {queue_name: 0 for queue_name in queue_names}
 
-        for raw_entry in redis_client.hvals("unacked"):
+        for raw_entry in redis_client.hvals(prefix + transport.get("unacked_key", "unacked")):
             queue_name = _extract_unacked_queue_name(raw_entry)
             if queue_name in unacked_counts:
                 unacked_counts[queue_name] += 1
@@ -238,4 +250,14 @@ def two_stage_queue_status():
             detail=f"Failed to query Redis queue status: {exc}",
         ) from exc
 
-    return {"broker": "redis", "queues": queue_lengths, "unacked": unacked_counts}
+    shared_queue = os.getenv("CELERY_SHARED_PARSE_QUEUE", "").strip() or "queue_parse_shared"
+    return {
+        "broker": "redis",
+        "queues": queue_lengths,
+        "unacked": unacked_counts,
+        "shared_parse": {
+            "queue": shared_queue,
+            "urgent": priority_lengths[shared_queue].get(0, 0),
+            "normal": priority_lengths[shared_queue].get(9, 0),
+        },
+    }

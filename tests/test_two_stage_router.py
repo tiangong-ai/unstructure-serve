@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from src.routers import two_stage_router
-from src.services import job_store, two_stage_pipeline
+from src.services import job_store, shared_parse_app
 from src.services.vision_service import VisionModel, VisionProvider
 
 
@@ -19,21 +19,11 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch):
     model_value = next(iter(VisionModel))
     captured = {}
 
-    def publish(ref, **queues):
-        captured.update(ref=ref, queues=queues)
+    def publish(**kwargs):
+        captured.update(kwargs)
         return SimpleNamespace(id="internal-celery-id")
 
-    monkeypatch.setattr(two_stage_pipeline, "submit_durable_two_stage", publish, raising=False)
-    monkeypatch.setattr(
-        two_stage_pipeline,
-        "resolve_two_stage_queues",
-        lambda priority: {
-            "parse": "queue_parse_urgent",
-            "vision": "queue_vision_urgent",
-            "dispatch": "queue_dispatch_urgent",
-            "merge": "queue_merge_urgent",
-        },
-    )
+    monkeypatch.setattr(shared_parse_app.parse_document, "apply_async", publish)
     resp = client.post(
         "/two_stage/task",
         data={
@@ -49,19 +39,15 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch):
     assert resp.status_code == 200
     job_id = resp.json()["task_id"]
     assert resp.json()["state"] == "PENDING"
-    assert captured["ref"] == {"job_id": job_id, "generation": 0}
+    assert captured["args"] == [{"job_id": job_id, "generation": 0}]
     options = job_store.read_job(job_id)["options"]
     assert options["chunk_type"] is True
     assert options["return_txt"] is True
     assert options["vision_provider"] == provider_value.value
     assert options["vision_model"] == model_value.value
     assert options["prompt"] == "describe"
-    assert captured["queues"] == {
-        "parse_queue": "queue_parse_urgent",
-        "vision_queue": "queue_vision_urgent",
-        "dispatch_queue": "queue_dispatch_urgent",
-        "merge_queue": "queue_merge_urgent",
-    }
+    assert captured["queue"] == shared_parse_app.SHARED_PARSE_QUEUE
+    assert captured["priority"] == 0
 
 
 def test_two_stage_queue_status_reports_redis_backlog(client, monkeypatch):
@@ -121,6 +107,7 @@ def test_two_stage_queue_status_reports_redis_backlog(client, monkeypatch):
             "queue_vision_urgent": 0,
             "queue_dispatch_urgent": 0,
             "queue_merge_urgent": 0,
+            "queue_parse_shared": 0,
         },
         "unacked": {
             "queue_parse_gpu": 1,
@@ -131,5 +118,7 @@ def test_two_stage_queue_status_reports_redis_backlog(client, monkeypatch):
             "queue_vision_urgent": 0,
             "queue_dispatch_urgent": 0,
             "queue_merge_urgent": 0,
+            "queue_parse_shared": 0,
         },
+        "shared_parse": {"queue": "queue_parse_shared", "urgent": 0, "normal": 0},
     }

@@ -1,0 +1,17 @@
+{
+  "apps": [
+    {
+      "name": "parse-handoff-recovery",
+      "cwd": ".",
+      "script": ".venv/bin/python",
+      "interpreter": "none",
+      "args": "-m src.services.handoff_recovery",
+      "env": {
+        "MINERU_MODEL_SMALL_BACKEND": "onnx",
+        "MINERU_MODEL_ONNX_DEVICE": "cpu"
+      },
+      "kill_timeout": 30000,
+      "restart_delay": 3000
+    }
+  ]
+}

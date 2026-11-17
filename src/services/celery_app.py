@@ -35,6 +35,7 @@ celery_app.conf.update(
     task_routes={
         "mineru.parse": {"queue": CELERY_TASK_MINERU_QUEUE},
         "mineru.parse_images": {"queue": CELERY_TASK_MINERU_QUEUE},
+        "mineru.finish_durable": {"queue": CELERY_TASK_MINERU_QUEUE},
     },
     **runtime_options(CELERY_BROKER_URL, CELERY_RESULT_EXPIRES),
 )

@@ -19,7 +19,7 @@ checkPaths:
 
 # AI 开发者文档拆解接入指南
 
-适用接口：TianGong AI Unstructure Serve，当前仓库使用 MinerU 4.1.4 契约。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
+适用接口：TianGong AI Unstructure Serve，当前仓库的解析应用使用 MinerU 4.2.3。本文面向编写客户端、Agent 工具或业务集成的开发者；不需要知道服务器 CPU/GPU 拓扑。
 
 **先读取目标部署的 `/openapi.json`，再按本文选择工作流。** 本文解释接口语义、恢复规则和结果处理，实际参数枚举以部署中的 OpenAPI 为准。API `info.version` 当前为 `1.0`，不是 MinerU 版本，也不足以标识全部部署变更；集成时保存 schema 摘要和服务发布记录。
 
@@ -81,9 +81,11 @@ Markdown/TXT 不属于文档解析输入；不要因为上游 MinerU 支持更�
 | `tier` | form | form | `flash/basic/standard/advanced`，缺省固定 `advanced` |
 | `chunk_type` | **query** | **form** | 缺省 false；保留结构类型，图片增强块标 image |
 | `return_txt` | **query** | **form** | 缺省 false；附加按原顺序拼接的 txt |
-| `priority` | 仅两个普通 task 的 form | form | 缺省 normal；urgent 不是中断正在执行的任务 |
+| `priority` | 仅两个普通 task 的 form | form | 缺省 normal；urgent 在同节点的公共解析队列中优先领取 |
 | `provider/model/prompt` | 仅图片接口的 form | form | 可选独立图片模型与提示词 |
 | `pretty` | query | 不提供 | 仅影响普通接口 JSON 排版 |
+
+同一节点的三个异步入口共用解析队列。公共解析 worker 空闲时，已在队列中的 urgent 优先领取；已领取的任务继续执行。优先级不保证更早完成图片增强，也不跨节点。普通两个入口继续不区分大小写识别 urgent，其他字符串归入 normal。two-stage 仅接受 normal 或 urgent。
 
 纯解析入口没有 provider/model/prompt。`tier` 控制 MinerU 解析质量，不选择独立图片模型：
 
@@ -301,7 +303,7 @@ HTTP 上传流式发送；网络阶段超时不等于整次请求墙钟截止时
 
 **选择异步队列，一份完整 PDF 一个任务，客户端按小窗口持续补位。不要用多个同步长连接顶住整批，也不要默认拆成单页/每十页任务。** 页数不是资源需求的充分指标：扫描分辨率、图表密度、文件体积和图片模型速度都会改变耗时与峰值。
 
-当前验收边界：已完成合成 400/1000 页和原生 1016 页的整本 SDK 解析，检查页序、资产及重复表格关键内容；另有 400 页普通解析、90 页 two-stage 与 111 页普通图片任务的完整 HTTP/Celery 验收，包含客户端超时后续查。这仍不代表所有千页文档或 20 万页批量的容量与故障恢复均已验证。调用方不能仅凭本指南或 `/ready=200` 判断这种容量已验证。
+既有版本已完成合成 400/1000 页和原生 1016 页的整本 SDK 解析，检查页序、资产及重复表格关键内容；另有 400 页普通解析、90 页 two-stage 与 111 页普通图片任务的完整 HTTP/Celery 验收，包含客户端超时后续查。这仍不代表所有千页文档或 20 万页批量的容量与故障恢复均已验证。调用方不能仅凭本指南或 `/ready=200` 判断这种容量已验证。
 
 #### A. 确定工作流与服务端准备情况
 
@@ -352,11 +354,11 @@ uv run python -m src.scripts.batch_parse \
 
 提交返回 `200 + PENDING` 只说明获得了已保存的任务身份。若 broker 发布结果不明，返回 `503`，`detail.task_id` 和 `detail.publication=uncertain` 标识保留的任务；先保存 ID 并查询。丢失全部 POST 响应时，可以在确认原始文件及参数未变后使用**原幂等键**重复同一 POST 找回 ID；不带键的重复上传会创建新任务。CLI 对 SUBMITTING 仍保守停止，由调用方核查后恢复记录，不自动重传。
 
-统一 CLI 会保存 503 响应中明确返回的任务 ID 后停止新增提交，续跑继续查询；没有发布的任务需要运维恢复发布。已记录失败的 ID 在续跑时也先重新查询，因此服务端显式 resume 后可以沿用原输出目录收取结果。CLI 续跑本身不调用服务端 resume。
+统一 CLI 会保存 503 响应中明确返回的任务 ID 后停止新增提交，续跑继续查询；首次发布未确认时，由运维按同一 ID 恢复。若状态为 STARTED 且 `handoff=uncertain`，后台会尝试补发解析后的交接，调用方应继续查询原 ID，长时间没有进展时通知运维。调用 resume 后，新代处于 PENDING 时仍按原优先级等待公共解析 worker 领取。已记录失败的 ID 在续跑时也先重新查询，因此服务端显式 resume 后可以沿用原输出目录收取结果。CLI 续跑本身不调用服务端 resume。
 
 | 入口 | 合同 |
 | --- | --- |
-| `GET /tasks/{task_id}/status` | 轻量 JSON：state、stage、generation、publication，以及可用的图片完成数；不含全文。未知持久 ID 返回 404，清理后为 EXPIRED |
+| `GET /tasks/{task_id}/status` | 轻量状态包含 state、stage、generation、首次 publication，另提供已记录的 handoff 和图片进度。未知持久 ID 返回 404，清理后为 EXPIRED |
 | `GET /tasks/{task_id}/result` | 成功后下载业务 JSON 本体（result 和可选 txt），不是外层状态对象；尚未完成 409，已清理 410 |
 | `POST /tasks/{task_id}/resume` | 修复失败原因后显式恢复；保留 task_id、增加 generation，复用完成的解析/图片检查点；仍有阶段执行、已成功或已过期返回 409 |
 
@@ -370,7 +372,7 @@ curl --fail-with-body "$API_BASE/tasks/$TASK_ID/result" \
   -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" -o result.json.part
 ```
 
-恢复重用已完成阶段，不保证底层模型请求恰好执行一次。若模型已响应但结果尚未落盘时进程退出，该图片可能重算。已排队的旧代消息不会写入新代结果；修改 SDK 版本或解析/图片执行配置可能使旧检查点拒绝复用，需由运维恢复原版本环境，或明确创建新任务。客户端不应编辑服务端检查点或把 resume 当作取消正在运行的任务。
+恢复重用已完成阶段，不保证底层模型请求恰好执行一次。若模型已响应但结果尚未落盘时进程退出，该图片可能重算。已排队的旧代消息不会写入新代结果；4.1.4 应用的解析检查点不可在 4.2.3 应用复用，变化的解析或图片执行配置也会拒绝不匹配的检查点，需由运维恢复原版本环境，或明确创建新任务。客户端不应编辑服务端检查点或把 resume 当作取消正在运行的任务。
 
 ## 6. 结果如何消费
 
@@ -478,8 +480,8 @@ curl --fail-with-body "$API_BASE/openapi.json" -o openapi.json
 ```text
 接入 TianGong 文档解析 API。API_BASE 和 Bearer 凭证从运行环境读取，不输出凭证。
 先读取目标部署 /openapi.json 与 /guides/ai-integration.md。
-无需独立图片描述：选 /mineru 或已启用普通 worker 的 /mineru/task。
-需要图片描述：长任务优先 /two_stage/task，普通队列图片增强使用 /mineru_with_images/task。
+无需独立图片描述：选 /mineru 或异步 /mineru/task。
+需要图片描述：长任务优先 /two_stage/task，普通图片增强使用 /mineru_with_images/task。
 400–1000 页批量先遵循第 5.3 节：整本单任务验收，再从 1→2→3 个在途试起。
 延长客户端等待不改变服务端执行/消息确认期限；当前未承诺千页整本并发容量。
 上传 multipart file，缺省 advanced；准确区分 query 与 form。

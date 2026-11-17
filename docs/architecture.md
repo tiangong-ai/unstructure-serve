@@ -24,17 +24,18 @@ checkPaths:
 ```mermaid
 flowchart LR
   Client --> API[Gunicorn / Uvicorn / FastAPI]
-  API --> Upload[分块落盘 / Office 转换]
+  API --> Upload[分块落盘]
   Upload --> Sync[同步 scheduler 子进程]
-  Upload --> Queue[Redis / Celery]
-  Queue --> Worker[普通 / two-stage parse]
+  Upload --> Queue[本节点 Redis 公共解析队列]
+  Queue --> Worker[公共解析 worker]
   Sync --> Slots[主机共享解析槽]
   Worker --> Slots
   Slots --> Parser[MinerU CPU ONNX + Docker VLM]
   Parser --> Assets[内容 / 页码 / 图片资产]
-  Assets --> Vision[可选独立图片模型]
-  Assets --> Result[JSON / TXT]
-  Vision --> Result
+  Assets --> SyncResult[同步组装返回]
+  Assets --> Handoff[异步检查点及交接]
+  Handoff --> Followup[普通后续或 two-stage 分发识别汇总]
+  Followup --> Result[持久结果 JSON / TXT]
 ```
 
 - Router 负责字段、鉴权后的请求编排与 HTTP 合同。阻塞 I/O 经线程池执行；不是给每个同步函数加 async 就能非阻塞。
@@ -43,11 +44,13 @@ flowchart LR
 - `parse_capacity.py` 在所有本机解析入口共享 Linux 文件锁容量。API worker 数量只改变 HTTP 容量；缺省解析上限仍为 3。不同机器/不共享锁目录的容器不受同一上限约束。
 - `content_projection.py` 统一 V1 内容到旧业务块的投影与文本组合；同步图片和 two-stage 通过各自的图片解析回调保留增强/筛选差异，调度器保持普通与科研入口的当前行为。它不负责 HTTP null 策略或任务状态。
 - `mineru_service_full.py` 是上游 SDK 适配层，保存资产后归一化业务字段、页码、阅读顺序与 checkbox；若解析为零块，仅在所选 PDF 页文本层明显非空时拒绝该结果，防止失败检查点被当成成功。新 MinerU 输出变化优先在此吸收。
-- 适配层统一 CPU ONNX 策略：先以 `.env` 补充已有进程环境，再为缺失值设置 onnx/cpu；`get_mineru_config()` 惰性读取并校验上游 4.1 配置。所有档位在解析器执行前经过此检查，`/ready` 和持久 profile 使用同一入口。显式 gpu/auto/torch 或提前缓存的非 CPU SDK 配置会被拒绝；不改写上游配置对象，不执行设备自动探测或小模型混合调度。大模型仍通过独立 vLLM 服务使用 GPU。
-- 4.1 的公开 `ParseResult.save()` 保存 MiddleJson、渲染结果与图片资产，已经没有原始 `model_output.json`。旧 dump 参数仍可调用并给出不可用警告，log 参数控制结构化产物的 debug 日志；不能通过伪造原始诊断或跳过资产保存来维持旧行为。
+- 适配层统一 CPU ONNX 策略：先以 `.env` 补充已有进程环境，再为缺失值设置 onnx/cpu；`get_mineru_config()` 惰性读取并校验 SDK 配置。所有档位在解析器执行前经过此检查，`/ready` 和持久 profile 使用同一入口。显式 gpu/auto/torch 或提前缓存的非 CPU SDK 配置会被拒绝；不改写上游配置对象，不执行设备自动探测或小模型混合调度。大模型仍通过独立 vLLM 服务使用 GPU。
+- 公开 `ParseResult.save()` 保存 MiddleJson、渲染结果与图片资产，已经没有原始 `model_output.json`。旧 dump 参数仍可调用并给出不可用警告，log 参数控制结构化产物的 debug 日志；不能通过伪造原始诊断或跳过资产保存来维持旧行为。
 - Office 转换的执行位置不同：同步在解析前转换，三个持久异步入口均在隔离的 parse 阶段转换；图中为逻辑阶段，不能据此推定提交耗时。
-- two-stage 的 parse/dispatch/vision/merge 是独立阶段，队列仅传任务与图片引用，全文和检查点保存在持久目录；默认每波 32 张缺失图片，用 chord 触发下一波，最后合并。任务内不阻塞等待其他 task。独立图片模型的并发与解析槽位分开。
-- `job_store.py` 管理输入身份、文件锁、原子完成标记及过期墓碑；`durable_pipeline.py` 管理整本解析/逐图检查点和执行配置摘要，其中包括 SDK/DocVortex 版本、小模型后端和 ONNX 设备。`job_submission.py` 负责保存后发布，HTTP 发布结果不明也保留已知 ID；`job_router.py` 提供轻量状态、流式结果和显式恢复。新代次拒绝旧消息写入，恢复不删除已完成阶段。升级 SDK 后的 CPU 配置不等于旧 profile 兼容，4.1.3 检查点不能直接在 4.1.4 环境 resume，旧任务需要其原版本环境或明确重新提交。
+- 三个异步入口把 `job_id/generation` 投入本节点的 `queue_parse_shared`，由 `shared_parse_app` 的 solo worker 执行 `shared_parse.parse_document`。Redis 用两档优先级，`urgent=0`、`normal=9`。每个 worker 并发 1、prefetch 1，解析 late ack。优先级以空闲 worker 领取消息为准，已领取的工作不会被中断。同步解析仍直接竞争文件锁，严格顺序测试应隔离同步流量；不同节点各自使用 broker/DB 和本地持久目录。
+- 公共解析生成 manifest 后按 mode 交接，普通后续组装或增强，two-stage 执行 dispatch/vision/merge。新后续任务必须验证并使用已有解析检查点，缺失或无效即失败，恢复重新通过公共队列。队列仅传任务与图片引用。two-stage 默认每波 32 张缺失图片，用 chord 触发下一波，任务内不等待其他 Celery 任务。独立图片模型的并发与解析槽位分开。
+- 首次发布与后续交接单独记账。当前代的后续交接用 `pending/uncertain/published`，接收方可以确认交接，解析 worker 不等待后续结果。重复消息依靠代次、阶段锁和完成检查点处理。交接重试耗尽后，任务保持 STARTED，handoff 为 uncertain。初次发布前为任务及代次在本机任务目录的 `.handoffs` 持久化索引。交接恢复进程仅检查此索引，对首次发布已确认、当前代已进入 STARTED、有有效检查点且后续未确认的任务补同代交接。resume 后的新代应先从公共队列领取，仍处于 PENDING 时不依据保留的旧检查点提前交接。它不会扫描历史任务、重新解析或重发首次发布未确认的任务。也可用 `manage_jobs recover` 人工恢复同代，或在确需重新运行阶段时用 `resume` 提升代次。
+- `job_store.py` 管理输入身份、文件锁、原子完成标记及过期墓碑；`durable_pipeline.py` 管理整本解析/逐图检查点和执行配置摘要，其中包括 SDK/DocVortex 版本、小模型后端和 ONNX 设备。`job_submission.py` 负责保存后发布，HTTP 发布结果不明也保留已知 ID；`job_router.py` 提供轻量状态、流式结果和显式恢复。新代次拒绝旧消息写入，恢复不删除已完成阶段。升级 SDK 后的 CPU 配置不等于旧 profile 兼容，4.1.4 应用检查点不能直接在 4.2.3 环境 resume，旧任务需要其原版本环境或明确重新提交。
 - vLLM 图片调用通过 `vision_capacity.py` 共用本机端点容量、轮换与故障冷却；不同 API/worker 的线程窗口不能绕过相同端点的共享上限。配置及锁目录必须一致；跨主机仍需独立协调设计。
 - 图片客户端将连接/TLS 与模型读写预算分开，连接异常、临时服务错误或普通图片清理后无可用事实会尝试其他端点；故障端点冷却后通过跨进程独占的半开推理租约恢复，普通图片只有清理后仍有内容才重新开放并发。原生 DOCX 严格 OCR 保留逐字内容，不用普通图片清理预检；新故障会使旧成功失效，探测进程退出自动释放租约。最终失败仅为无可用图片内容时，业务层在该图位置输出 `[图片内容无法识别]` 并继续处理；备选耗尽后的连接、超时、截断、请求及资产错误仍向任务传播，不以原文伪装视觉结果；400 等请求错误不切换。超时配置见[调优指南](performance-tuning.md)。
 

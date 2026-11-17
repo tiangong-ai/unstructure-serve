@@ -432,22 +432,24 @@ def test_launcher_fails_when_uvm_devices_never_appear(tmp_path):
 
 def test_parse_workers_have_unique_names_and_bounded_concurrency():
     apps = json.loads((ROOT / "deploy/pm2/ecosystem.two_stage.celery.json").read_text())["apps"]
-    parsers = [app for app in apps if app["name"].startswith("celery-two-stage-parse")]
-    assert len(parsers) == 3
+    fourth = json.loads((ROOT / "deploy/pm2/ecosystem.two_stage.parse4.json").read_text())["apps"]
+    parsers = [app for app in [*apps, *fourth] if app["name"].startswith("celery-two-stage-parse")]
+    assert len(parsers) == 4
     names = set()
     for app in parsers:
         args = shlex.split(app["args"])
         names.add(args[args.index("-n") + 1])
         assert args[args.index("-P") + 1] == "solo"
         assert args[args.index("-c") + 1] == "1"
-        assert args[args.index("-Q") + 1] == "queue_parse_urgent,queue_parse_gpu"
+        assert "-Q" not in args, "Use the app queue so CELERY_SHARED_PARSE_QUEUE is honored"
+        assert args[args.index("-A") + 1] == "src.services.shared_parse_app:celery_app"
         assert "--prefetch-multiplier=1" in args
         assert app["kill_timeout"] >= 1900000
         assert app["env"]["MINERU_PROCESSING_WINDOW_SIZE"] == "64"
         assert app["env"]["MINERU_MODEL_VLM_MAX_CONCURRENCY"] == "8"
         assert app["env"]["MINERU_INTRA_OP_NUM_THREADS"] == "16"
         assert app["env"]["MINERU_INTER_OP_NUM_THREADS"] == "1"
-    assert len(names) == 3
+    assert len(names) == 4
     api = json.loads((ROOT / "deploy/pm2/ecosystem.config.json").read_text())["apps"][0]
     assert api["env"]["MINERU_PROCESSING_WINDOW_SIZE"] == "64"
     assert api["env"]["MINERU_INTRA_OP_NUM_THREADS"] == "16"
@@ -462,7 +464,11 @@ def test_ordinary_worker_does_not_steal_two_stage_merge_tasks():
         result = set()
         for app in apps:
             args = shlex.split(app["args"])
-            result.update(args[args.index("-Q") + 1].split(","))
+            if "-Q" in args:
+                result.update(args[args.index("-Q") + 1].split(","))
+            else:
+                assert args[args.index("-A") + 1] == "src.services.shared_parse_app:celery_app"
+                result.add("queue_parse_shared")
         return result
 
     assert not (queues(ordinary) & queues(staged))

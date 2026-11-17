@@ -17,6 +17,7 @@ from threading import Lock
 import time
 import uuid
 
+SHARED_PARSE_WORKFLOW = "shared-parse"
 _NAMESPACE = uuid.UUID("b1d26d74-2a41-46ad-a20a-d1322cc5a535")
 _fds = set()
 _fork_lock = Lock()
@@ -68,6 +69,14 @@ def job_dir(job_id):
     return store_root() / value
 
 
+def _sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,17 +87,33 @@ def atomic_json(path, value):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
 
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def handoff_index_dir():
+    return store_root() / ".handoffs"
+
+
+def handoff_index_path(job_id, generation):
+    job_dir(job_id)
+    if type(generation) is not int or generation < 0:
+        raise ValueError("Invalid durable job generation")
+    return handoff_index_dir() / f"{job_id}.{generation}.json"
+
+
+def index_handoff(record):
+    job_id, generation = record["job_id"], record["generation"]
+    path = handoff_index_path(job_id, generation)
+    atomic_json(path, {"job_id": job_id, "generation": generation})
+    # The atomic write syncs the index directory, but the directory itself may
+    # have been added to the job store in this or a concurrent publication.
+    _sync_directory(path.parent.parent)
 
 
 @contextmanager
@@ -227,8 +252,8 @@ def source_path(job_id):
 
 
 @contextmanager
-def execution(job_id, generation):
-    with stage_lock(job_id, "lifetime", shared=True):
+def execution(job_id, generation, *, blocking=True):
+    with stage_lock(job_id, "lifetime", shared=True, blocking=blocking):
         record = read_job(job_id)
         if record["generation"] != generation or record["state"] == "EXPIRED":
             raise StaleGeneration("Superseded job attempt")
@@ -277,6 +302,9 @@ def status(job_id):
         "generation": record["generation"],
         "publication": record["publication"],
     }
+    handoff = record.get("handoff") or {}
+    if handoff.get("generation") == record["generation"]:
+        result["handoff"] = handoff["state"]
     if state == "FAILURE":
         result["error"] = record.get("error", "Task failed")
     if record.get("progress") is not None:
@@ -284,7 +312,31 @@ def status(job_id):
     return result
 
 
-def publish_job(job_id, publisher):
+def record_handoff(job_id, generation, state, *, received=False):
+    """Record current-generation publication or receipt under the metadata lock."""
+    with stage_lock(job_id, "metadata"):
+        record = read_job(job_id)
+        if (
+            record["generation"] != generation
+            or record["state"] in {"SUCCESS", "EXPIRED"}
+            or (job_dir(job_id) / "complete.json").is_file()
+        ):
+            return False
+        previous = record.get("handoff") or {}
+        if previous.get("generation") != generation:
+            previous = {}
+        if previous.get("received") or (received and not previous):
+            return False
+
+        handoff = {"generation": generation, "state": state}
+        if received:
+            handoff["received"] = True
+        record.update(handoff=handoff, updated_at=time.time())
+        atomic_json(job_dir(job_id) / "job.json", record)
+        return True
+
+
+def publish_job(job_id, publisher, *, workflow=None):
     with stage_lock(job_id, "publication"):
         record = read_job(job_id)
         if record["publication"] == "published" or status(job_id)["state"] in {
@@ -293,6 +345,10 @@ def publish_job(job_id, publisher):
         }:
             return record
         try:
+            if workflow is not None and record.get("workflow") != workflow:
+                record = update_job(job_id, workflow=workflow)
+            if record.get("workflow") == SHARED_PARSE_WORKFLOW:
+                index_handoff(record)
             publisher(record)
             return update_job(job_id, publication="published")
         except Exception as exc:
@@ -318,6 +374,7 @@ def resume_job(job_id):
             state="PENDING",
             stage="queued",
             publication="pending",
+            handoff=None,
             error=None,
         )
 

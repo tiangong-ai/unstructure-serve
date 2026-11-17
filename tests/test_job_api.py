@@ -4,7 +4,7 @@ import pytest
 from types import SimpleNamespace
 
 from src.routers import mineru_task_router, mineru_with_images_task_router, two_stage_router
-from src.services import job_store, two_stage_pipeline
+from src.services import job_store, shared_parse_app
 from src.services.tasks import mineru_tasks
 from src.routers import job_router
 
@@ -30,10 +30,7 @@ def publications(monkeypatch):
         calls.append((args, kwargs))
         return Accepted()
 
-    monkeypatch.setattr(mineru_tasks.run_mineru_task, "apply_async", publish)
-    monkeypatch.setattr(mineru_tasks.run_mineru_with_images_task, "apply_async", publish)
-    monkeypatch.setattr(two_stage_router, "submit_two_stage_job", publish, raising=False)
-    monkeypatch.setattr(two_stage_pipeline, "submit_durable_two_stage", publish, raising=False)
+    monkeypatch.setattr(shared_parse_app.parse_document, "apply_async", publish)
     return calls
 
 
@@ -61,9 +58,33 @@ def test_idempotent_post_retains_original_input_and_publishes_only_references(
     assert record["mode"] == mode
     assert record["options"]["backend"] == "advanced"
     assert job_store.source_path(job_id).read_bytes() == b"%PDF-real-upload-bytes"
-    args, kwargs = publications[0]
-    ref = args[0] if mode == "two-stage" else kwargs["args"][0]
-    assert ref == {"job_id": job_id, "generation": 0}
+    assert publications[0] == (
+        (),
+        {
+            "args": [{"job_id": job_id, "generation": 0}],
+            "queue": shared_parse_app.SHARED_PARSE_QUEUE,
+            "priority": 9,
+        },
+    )
+    assert record["workflow"] == "shared-parse"
+
+
+@pytest.mark.parametrize(
+    ("mode", "priority", "expected"),
+    [
+        ("parse", "URGENT", 0),
+        ("images", "URGENT", 0),
+        ("two-stage", "urgent", 0),
+        ("parse", "unspecified-priority", 9),
+        ("images", "unspecified-priority", 9),
+    ],
+)
+def test_priority_mapping_preserves_existing_api_values(
+    client, publications, mode, priority, expected
+):
+    response = post(client, mode, priority=priority)
+    assert response.status_code == 200
+    assert publications[0][1]["priority"] == expected
 
 
 @pytest.mark.parametrize("mode", ENDPOINTS)
@@ -79,7 +100,7 @@ def test_ambiguous_publish_retains_job_and_input_and_exposes_recoverable_id(clie
     def fail(**kwargs):
         raise ConnectionError("private backend address must not escape")
 
-    monkeypatch.setattr(mineru_tasks.run_mineru_task, "apply_async", fail)
+    monkeypatch.setattr(shared_parse_app.parse_document, "apply_async", fail)
     response = post(client, "parse")
     assert response.status_code == 503
     detail = response.json()["detail"]
@@ -87,7 +108,7 @@ def test_ambiguous_publish_retains_job_and_input_and_exposes_recoverable_id(clie
     assert "private backend" not in response.text
     assert job_store.read_job(job_id)["publication"] == "uncertain"
     assert job_store.source_path(job_id).is_file()
-    monkeypatch.setattr(mineru_tasks.run_mineru_task, "apply_async", lambda **kwargs: None)
+    monkeypatch.setattr(shared_parse_app.parse_document, "apply_async", lambda **kwargs: None)
     recovered = post(client, "parse")
     assert recovered.status_code == 200 and recovered.json()["task_id"] == job_id
 

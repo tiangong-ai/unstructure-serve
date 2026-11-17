@@ -13,13 +13,13 @@ name = "accelerate"
 version = "1.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "psutil" },
-    { name = "pyyaml" },
-    { name = "safetensors" },
-    { name = "torch" },
+    { name = "huggingface-hub", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "numpy", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "packaging", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "psutil", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "pyyaml", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "safetensors", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "torch", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f5/b5/1d3ed029ac71d3f2961346829a268da923698e9fd63f218f78841f216bfd/accelerate-1.15.0.tar.gz", hash = "sha256:5654f8c5eaa0d4fa68b33e287a97765da6849bf6d51dcac874e73fbbddfb6134", size = 422615, upload-time = "2026-09-09T13:04:49.078Z" }
 wheels = [
@@ -420,7 +420,7 @@ wheels = [
 
 [[package]]
 name = "docvortex"
-version = "0.6.11"
+version = "0.6.24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -453,11 +453,11 @@ dependencies = [
     { name = "ziamath" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/65/086435e2568329d586b906daa55528f5fa2161dd27ff172db43c7b5a1807/docvortex-0.6.11-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:499ef2773d63592621995fd39647a1c67ad94bc98a85ea8d0b275ab2c47ad458", size = 5266576, upload-time = "2026-11-02T12:46:06.35Z" },
-    { url = "https://files.pythonhosted.org/packages/ed/21/def75308003a70a2c28f387ad30216e02697263eb2d07cb3363f5de1abf5/docvortex-0.6.11-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:134a5b7d00b541f2949268a896d92e538d3826c4b0348beb3c0ef6da31e62d83", size = 5310535, upload-time = "2026-11-02T12:46:08.482Z" },
-    { url = "https://files.pythonhosted.org/packages/44/3e/7e17863cca973ac24b1632a3f7c7abf08f0409889869f353c5718873f289/docvortex-0.6.11-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:be32a3a6802908f1533ae4973bf97a1e18e16b2c94d82946dc610cb30b6d8ffd", size = 5438841, upload-time = "2026-11-02T12:46:10.358Z" },
-    { url = "https://files.pythonhosted.org/packages/04/01/ce6c1365dee93489313a5029a4b6889df9047c2ee2d6ab7504746a390b69/docvortex-0.6.11-cp311-abi3-win_amd64.whl", hash = "sha256:c4282154a1e4fdc723da7fe2c8c948695acc3b3255aa40a6356566e64342d2f7", size = 5332722, upload-time = "2026-11-02T12:46:12.035Z" },
-    { url = "https://files.pythonhosted.org/packages/f1/a8/349be875cd91010aa9b9af5bd4acb46ade8e74a447e5f8bd679ad324dd71/docvortex-0.6.11-cp311-abi3-win_arm64.whl", hash = "sha256:63e4e4a66b49fb7be50ba915f4e5b22f9306787ece3c42a28b70d537c381fc79", size = 5161208, upload-time = "2026-11-02T12:46:13.711Z" },
+    { url = "https://files.pythonhosted.org/packages/11/fe/4b9417cc724a343fdfbf5c72cbb10816d14fe64ef9c4d9c491b9129323da/docvortex-0.6.24-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:417faec2b82331a4675a3de301349fa13de2d32fd51a3e5ceea2097d11250709", size = 5315081, upload-time = "2026-11-16T13:18:05.397Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/5f/0899c1a21d3326690d97968bed0da1eff3f86cc6986b3d88bae4b4f5a412/docvortex-0.6.24-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:2f23c44719729f519efb3f01baf353b7cc45c54621bc52f7313495bb7bd2c43d", size = 5360029, upload-time = "2026-11-16T13:18:07.746Z" },
+    { url = "https://files.pythonhosted.org/packages/88/83/eaf5c8e0f322f57dc6046693029304dfc333801c61610f903ccedf318ce8/docvortex-0.6.24-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:8a83268ce6e7a3fb9609bfcd72c4c8fffca2335f74b3c3b5278adb8fb3b8f610", size = 5489030, upload-time = "2026-11-16T13:18:09.938Z" },
+    { url = "https://files.pythonhosted.org/packages/91/3b/664d2f2ffeb1f97cd5ed8bfa70ec8a1f466600fdaa4b4b2551b07b440509/docvortex-0.6.24-cp311-abi3-win_amd64.whl", hash = "sha256:161a9b0a264ec914097eb314baa974d24304666cb13e63024556779c4567e807", size = 5384630, upload-time = "2026-11-16T13:18:12.226Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/f0/be05e767e1bb8a0c959cdd0662d91e829685e50daf807ae1a32cdd596e2b/docvortex-0.6.24-cp311-abi3-win_arm64.whl", hash = "sha256:e59ead5a08392597b71d2b35e28ee89d7b0186ddd4b54e7ea3e800d5e3d2d6a2", size = 5211304, upload-time = "2026-11-16T13:18:14.053Z" },
 ]
 
 [[package]]
@@ -1028,7 +1028,7 @@ wheels = [
 
 [[package]]
 name = "mineru"
-version = "4.1.4"
+version = "4.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
@@ -1078,19 +1078,19 @@ dependencies = [
     { name = "watchfiles" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/f0/82eda6336a796d226e1792246e74b84bdb9ac603339137b0dc82c8cebe48/mineru-4.1.4-py3-none-any.whl", hash = "sha256:15b5c70ce8f48f1532eca5ebf7f610ad7cab677c16f571190667f69aadeb4a8c", size = 3841079, upload-time = "2026-11-02T13:35:13.007Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/2f/b1b0300e27108e36b407a2326e9e5734fdcb7d4ed3cdb29142516163a7b6/mineru-4.2.3-py3-none-any.whl", hash = "sha256:d73e1e01deef1cee569674e7dcb322c65b6e5be1ab5c8031bbe3cbd9a022fa9b", size = 3951634, upload-time = "2026-11-16T18:13:30.977Z" },
 ]
 
 [[package]]
 name = "mineru-llama-cpp"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/74/43b27d0c0956d10467810155ecd5d1794979d473fa02aeeabd12f9fc6139/mineru_llama_cpp-0.2.0-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:9b9f6049fb54a215f9e76e596ce32f64ba78ce2360e9f9bbb59184e237adfc01", size = 6332731, upload-time = "2026-10-22T16:49:32.175Z" },
-    { url = "https://files.pythonhosted.org/packages/a7/89/aadba5bfe3af6606d3853df83c1ba1c67495ceb16e2682274fbeafbbe20f/mineru_llama_cpp-0.2.0-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:dc30e1e254a8d24932917c92ef2fd2572d465ebfa5d8259bf359d690adcb53e9", size = 20662961, upload-time = "2026-10-22T16:49:35.376Z" },
-    { url = "https://files.pythonhosted.org/packages/54/98/208ed7f4e03ec21dbbd283f9ebc08d837bf3de5ada10d3ff80af2e113c95/mineru_llama_cpp-0.2.0-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:45b73833b2829888ebf2df1a96a264959908052f8f6eb90eecd00ec9f0461820", size = 21542958, upload-time = "2026-10-22T16:49:39.319Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/cb/049e30298485a69f4d0c170a9069000026384f869539276c45c3483a4377/mineru_llama_cpp-0.2.0-cp311-abi3-win_amd64.whl", hash = "sha256:668b7e8284031897b82f4699dc9ae0b15571eab22efd47ff1db7abd803021d84", size = 19472610, upload-time = "2026-10-22T16:49:42.908Z" },
-    { url = "https://files.pythonhosted.org/packages/5b/11/74bd67b2330450a1e755d6b52e38c7321399abf56f035a91c0f61ece2b9f/mineru_llama_cpp-0.2.0-cp311-abi3-win_arm64.whl", hash = "sha256:0e1f835695c82e0f7e434adc19f00a0b51c1579c26e773dbf1a9e60c55727c18", size = 19475380, upload-time = "2026-10-22T16:49:46.686Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/8f/2f05d8240bb70fca64e850534c67498baae605b4a37964d2bbf398f44405/mineru_llama_cpp-0.2.1-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:693586a1c1c1f7617f42f5956616ea33228ecc16e72fa83d7ae066bb491ef821", size = 6339672, upload-time = "2026-11-13T13:11:32.344Z" },
+    { url = "https://files.pythonhosted.org/packages/87/f6/9aa0d2dcb7f13075789a5a01ef5cbb3a218b90014ccf358107a35b182a56/mineru_llama_cpp-0.2.1-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:9ebb2bf9492e5aa56a0553a63a68826f19be8538b6ffa5c4ec62b1a71e1ec690", size = 20668321, upload-time = "2026-11-13T13:11:34.698Z" },
+    { url = "https://files.pythonhosted.org/packages/af/1f/966a0a27a302e1d8e117636b8f6789019d14c490eb2eefab2b9e18aa373f/mineru_llama_cpp-0.2.1-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:ba446f211481ca33c42090358a8b93371ea9fed59c1d466882958fa258a66436", size = 21548939, upload-time = "2026-11-13T13:11:37.882Z" },
+    { url = "https://files.pythonhosted.org/packages/2d/04/76868b7f15bf7a97a110cd1fb4741bfaf275b58209c37d50e45ad5b4be31/mineru_llama_cpp-0.2.1-cp311-abi3-win_amd64.whl", hash = "sha256:0c77b7fd944b80c93e334b5a2cfed7355e867eaac0560879d3d5c9e48917bebd", size = 19478139, upload-time = "2026-11-13T13:11:41.237Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/97/23ac36e6bbacab57db5d0ebb008c433a37205406ef495f0032dbf97b30c2/mineru_llama_cpp-0.2.1-cp311-abi3-win_arm64.whl", hash = "sha256:2b9f49044c24f893810aeb8e5e9512d74d66985b01d89113d771b1ae255846ff", size = 19482937, upload-time = "2026-11-13T13:11:44.328Z" },
 ]
 
 [[package]]
@@ -1107,7 +1107,7 @@ wheels = [
 
 [[package]]
 name = "mineru-vl-utils"
-version = "2.0.8"
+version = "2.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1118,9 +1118,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7d/34/16da4a40e16aed47faf180558e6a143892b00a885ebca866234f810b6eda/mineru_vl_utils-2.0.8.tar.gz", hash = "sha256:fa5ce0014b2c220189218ed60fa89213fa44f89365afe7292e174493d4260132", size = 136162, upload-time = "2026-10-29T09:08:27.574Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/b3/7a7e60e99e082a219625ca929c258e2579475ca5c1435bfed3333104189e/mineru_vl_utils-2.0.9.tar.gz", hash = "sha256:d1c819a9d9b0e1675bd816ee38d71aa67e1407c919e681b33bb99086af9a12c6", size = 164104, upload-time = "2026-11-13T12:56:04.091Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/b8/ad7f3908743e42c2e975c97e7cea0ddf529e55c357e3cb5d8b142e438609/mineru_vl_utils-2.0.8-py3-none-any.whl", hash = "sha256:e418c28bfc04a92296569c33a6819f4ca1a00fda8159521b5b9af6f7337c228f", size = 113706, upload-time = "2026-10-29T09:08:25.951Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/85/0cc761680e3d26525d0bf1919d0c08f9d1e39878210085dd334dfa5a4357/mineru_vl_utils-2.0.9-py3-none-any.whl", hash = "sha256:d09c612d28d0d2a1fa561aae3764639e6c704baf7a30d8c4f07f78bc9d2b4060", size = 124327, upload-time = "2026-11-13T12:56:02.427Z" },
 ]
 
 [[package]]
@@ -1297,11 +1297,11 @@ name = "onnxruntime-directml"
 version = "1.24.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "flatbuffers" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "protobuf" },
-    { name = "sympy" },
+    { name = "flatbuffers", marker = "platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and sys_platform == 'win32'" },
+    { name = "numpy", marker = "platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and sys_platform == 'win32'" },
+    { name = "packaging", marker = "platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and sys_platform == 'win32'" },
+    { name = "protobuf", marker = "platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and sys_platform == 'win32'" },
+    { name = "sympy", marker = "platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and sys_platform == 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/53/2bd2696fac19cf8ca55496a0bcfe431f3aff9579eabbb0e231dc238acf6f/onnxruntime_directml-1.24.4-cp313-cp313-win_amd64.whl", hash = "sha256:2f1031cb2281e5b27cca9efe0b9399317c7286e4d226f7a79d4ab79bbd94d19e", size = 25112253, upload-time = "2026-03-17T21:47:22.043Z" },
@@ -1799,7 +1799,7 @@ wheels = [
 
 [package.optional-dependencies]
 accel = [
-    { name = "rl-accel" },
+    { name = "rl-accel", marker = "(platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64') or sys_platform != 'win32'" },
 ]
 
 [[package]]
@@ -2031,7 +2031,7 @@ name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "mpmath" },
+    { name = "mpmath", marker = "(platform_machine != 'ARM64' and platform_machine != 'aarch64' and platform_machine != 'arm64' and sys_platform == 'win32') or (sys_platform != 'emscripten' and sys_platform != 'win32')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
@@ -2089,7 +2089,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "celery", extras = ["redis"], specifier = ">=5.6.3" },
-    { name = "docvortex", specifier = "==0.6.11" },
+    { name = "docvortex", specifier = "==0.6.24" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "flower", specifier = ">=2.1.0" },
     { name = "google-genai", specifier = ">=2.24.0" },
@@ -2097,8 +2097,8 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "kombu", extras = ["redis"], specifier = ">=5.6" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mineru", specifier = ">=4.1.4,<4.2" },
-    { name = "mineru-vl-utils", specifier = "==2.0.8" },
+    { name = "mineru", specifier = ">=4.2.3,<4.3" },
+    { name = "mineru-vl-utils", specifier = "==2.0.9" },
     { name = "openai", specifier = ">=2,<3" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "protobuf", specifier = ">=7.36.2" },
@@ -2184,13 +2184,13 @@ name = "torch"
 version = "2.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "networkx" },
-    { name = "setuptools" },
-    { name = "sympy" },
-    { name = "typing-extensions" },
+    { name = "filelock", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "fsspec", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jinja2", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "networkx", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "setuptools", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "sympy", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "typing-extensions", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7d/11/faaca4f8541c45127b7e0d6bb141221fe944c8466d89986b8466c6c195f9/torch-2.14.1-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:dbe359d705f4d67236743794c296c6dee93a922fd8117eff8c3e880d7d0fb2b9", size = 127315286, upload-time = "2026-09-30T17:52:27.43Z" },
@@ -2201,9 +2201,9 @@ name = "torchvision"
 version = "0.29.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
-    { name = "pillow" },
-    { name = "torch" },
+    { name = "numpy", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "pillow", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "torch", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/85/33819e5ed0caf494a5c0caa6c72bcd9d5bd22c68480d636288832d9d5f55/torchvision-0.29.1-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:b0b3de76f2ee5678b7950ba9971cf72d9c5887cd7993db61788552f371686fed", size = 1813847, upload-time = "2026-09-30T17:57:17.586Z" },
@@ -2243,15 +2243,15 @@ name = "transformers"
 version = "5.19.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "safetensors" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
-    { name = "typer" },
+    { name = "huggingface-hub", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "numpy", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "packaging", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "pyyaml", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "regex", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "safetensors", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "tokenizers", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "tqdm", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "typer", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/65/4c/70012ed0795235fb6bd7806fafd4a1842f03e49ebbfa3bb9580e451948ce/transformers-5.19.0.tar.gz", hash = "sha256:87f38dd25e4521151b97e94520ac457f44a0ae8a8358a5b112daff6c64a822d6", size = 10032022, upload-time = "2026-10-06T16:39:00.229Z" }
 wheels = [

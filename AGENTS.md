@@ -16,7 +16,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 
 # TianGong AI Unstructure Serve 代理说明
 
-仓库为 `tiangong-ai/unstructure-serve`。仓库依赖基线是 MinerU 4.1.4 + DocVortex 0.6.11 + mineru-vl-utils 2.0.8 + CPU ONNX 小模型 + Docker vLLM，应用依赖由 `uv.lock` 固定，部署使用 Python 3.13.15。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。仓库基线和模板不代表某台运行中的服务已经升级，切换前须按实际依赖与镜像验收。验证范围与命令见 [验证指南](docs/validation.md)。
+仓库为 `tiangong-ai/unstructure-serve`。仓库应用依赖基线是 MinerU 4.2.3 + DocVortex 0.6.24 + mineru-vl-utils 2.0.9 + CPU ONNX 小模型，由 `uv.lock` 固定，部署使用 Python 3.13.15。GPUStack 和原生 Docker vLLM 模型镜像使用独立的 MinerU 4.1.4 基线。API 与 worker 仍在应用环境运行，`.venv` 使用基础 mineru + CPU ONNX，不安装 Torch/vLLM；四档不依赖 all/full extra。仓库基线和模板不代表某台运行中的服务已经升级，切换前须按实际依赖与镜像验收。验证范围与命令见 [验证指南](docs/validation.md)。
 
 
 ## 文档治理
@@ -59,7 +59,9 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 | `src/services/gpu_scheduler.py` | 排队、进程隔离、hard timeout、任务进程组收尾 |
 | `src/services/mineru_with_images_service.py` | 图片描述并发及同步 DOCX TXT 增强 |
 | `src/services/mineru_task_runner.py` / `tasks/mineru_tasks.py` | 普通 Celery 任务，复用 scheduler 与响应合同 |
-| `src/services/two_stage_pipeline.py` | 独立 Celery app 的 parse/dispatch/vision/merge |
+| `src/services/shared_parse_app.py` / `shared_parse.py` | 公共解析队列、按优先级领取、清单持久化后的后续交接 |
+| `src/services/handoff_recovery.py` | 本机按代次索引恢复有效解析检查点对应的未确认交接 |
+| `src/services/two_stage_pipeline.py` | two-stage 下游 dispatch/vision/merge 及旧解析消息兼容 |
 | `src/services/job_store.py` / `durable_pipeline.py` | 持久身份、输入、阶段锁、解析/单图检查点、原子结果和过期墓碑 |
 | `src/services/job_submission.py` / `src/routers/job_router.py` | 幂等提交、轻量状态、结果下载和显式恢复 |
 | `src/scripts/manage_jobs.py` | 本地清单、发布恢复、阶段恢复和保留期清理（默认预览） |
@@ -109,22 +111,22 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 - 三个异步 POST 支持 Idempotency-Key，保存原始输入后只发送 job_id/generation 引用，固定返回已知 ID/PENDING，不读取发布后的 Redis 状态；不明确发布返回含 ID 的 503 并保留输入。重复键与不同参数/内容冲突 409，过期墓碑 410。Office 转换在异步 parse 隔离进程内执行。
 - durable_pipeline 保存整本 parse manifest、逐图输入及结果；阶段排它锁与生命周期共享锁防重复/清理竞态。默认每波 MINERU_VISION_WAVE_SIZE=32，整波完成才发下一波，慢图会阻塞后续波次；不是逐图滚动补位。图片完成返回稳定小引用，全文不得再次放入 chord callback 或 Redis 结果。普通任务也复用整本与逐图结果；只有完成标记提交后才成功，工作区不在 merge 中删除。
 - GET /tasks/{id}/status 不返回全文；/result 校验摘要后流式返回业务 JSON，持锁覆盖下载/断连；POST /resume 在无活跃阶段时提升 generation，旧代消息禁止写入。旧三类 GET 先查持久存储再回退 Redis，并保留各自 null/失败码合同。旧任务不自动迁移。
-- 检查点冻结执行配置摘要（含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、解析和实际视觉选择、prompt/采样、端点摘要），配置不一致拒绝复用；同模型别名替换权重时提升 MINERU_EXECUTION_PROFILE_REVISION，改变阶段输出语义时更新执行 profile 协议版本。SDK 升级即使仍使用 CPU，也不能将旧检查点补字段或重算摘要后强行复用，4.1.3 检查点不能直接在 4.1.4 环境 resume；需要续算时恢复原代码、锁文件和配置，或明确创建新任务。视觉输出版本 2 将无内容响应写入单图标记；在其他设置完全一致时允许版本 1 的已完成解析/视觉检查点继续复用，未完成图片按新策略处理，纯解析版本仍为 1。失败发生在整本解析完成前仍需重做解析；模型响应后落盘前退出也可能重算该图，不承诺 exactly-once 或按页续算。
-- manage_jobs recover 仅原代重发 publication=pending/uncertain；resume 提升代次复用已完成阶段；gc --retention-days 7 缺省预览，--apply 才清理已结束且无活跃租约的任务。未配置自动定时清理；运维必须规划磁盘和保留策略，不清理在途工作区。
-- 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`；普通 worker 不消费 two-stage 的解析/视觉/default merge 队列，防止不同 Celery app 抢到未注册任务。
-- two-stage 部署显式配置 normal 队列 `queue_parse_gpu/queue_vision/queue_dispatch/default`；四类 urgent 为 `queue_parse_urgent/queue_vision_urgent/queue_dispatch_urgent/queue_merge_urgent`。API 与每个 worker 必须配置一致，不能只改 worker 的 `-Q`。
-- 未配置时代码的 parse 回退到普通队列，dispatch/merge 回退到 default；`.env.example` 显式列出与 PM2 匹配的队列，详细规则见 two-stage 文档。
-- 两个 Celery app 共用 `celery_runtime.py`：Redis 的 broker/backend/app visibility_timeout 一致读取 `CELERY_VISIBILITY_TIMEOUT`（代码 3600 秒、模板 21600 秒），`CELERY_RESULT_EXPIRES` 同时控制两类结果（代码/模板 86400 秒，TOML/环境可覆盖）。普通 worker 同样使用 priority 队列顺序。所有共享 broker 的 worker 必须一同配置；延长确认期限会延迟崩溃后重投，恢复依靠持久阶段锁/检查点，而非此参数本身。
-- Redis 优先级消费按 `-Q` 的 urgent→normal 顺序。dispatch 使用 `self.replace` 启动 chord；不要在 Celery task 内阻塞调用 `result.get()`。四个阶段都要有消费者和可用的 result backend。
-- API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期 ID，`queue_status` ready/unacked 不等于最终结果。
+- 检查点冻结执行配置摘要（含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、解析和实际视觉选择、prompt/采样、端点摘要），配置不一致拒绝复用；同模型别名替换权重时提升 MINERU_EXECUTION_PROFILE_REVISION，改变阶段输出语义时更新执行 profile 协议版本。SDK 升级即使仍使用 CPU，也不能将旧检查点补字段或重算摘要后强行复用，4.1.4 应用检查点不能直接在 4.2.3 环境 resume；需要续算时恢复原代码、锁文件和配置，或明确创建新任务。视觉输出版本 2 将无内容响应写入单图标记；在其他设置完全一致时允许版本 1 的已完成解析/视觉检查点继续复用，未完成图片按新策略处理，纯解析版本仍为 1。失败发生在整本解析完成前仍需重做解析；模型响应后落盘前退出也可能重算该图，不承诺 exactly-once 或按页续算。
+- 后续交接按代次记录 handoff 为 pending/uncertain/published，与首次 publication 分开；发布端最多重试两次。耗尽后保留非终态 `STARTED` 与 `handoff=uncertain`，让调用方继续查询同一 ID。实际解析或后续处理失败仍为 `FAILURE`。接收方可确认交接。
+- app/app4 启动 `parse-handoff-recovery`，按首次发布前写入任务根目录 `.handoffs` 的任务及代次索引轮转检查。只有首次发布已确认、当前代已被公共 worker 领取进入 `STARTED` 且检查点有效时才补后续交接。新代处于 `PENDING` 时仍按优先级等待领取，即使保留了旧代的检查点。该进程不重做解析或重发未确认的首次发布；必要时用 manage_jobs recover 原代恢复。缺少检查点或已发布后续丢失时，用 resume 提升代次并复用有效完成阶段。
+- gc --retention-days 7 缺省预览，--apply 才清理已结束且无活跃租约的任务。未配置自动定时清理；按磁盘余量和后续积压设告警，必要时暂停新增提交。
+- 三个异步入口在同节点共用 `queue_parse_shared`，由 `src.services.shared_parse_app:celery_app` 的 worker 消费，Redis 消息优先级 urgent=0、normal=9。空闲 worker 优先领取已在队列的 urgent；已领取任务不抢占。普通入口保留不区分大小写的 urgent 及其他值回落 normal，two-stage 仍是严格枚举。同步入口直接竞争本机解析槽，严格调度验收隔离同步和旧解析流量。各节点用不同 Redis 实例或 DB，保持本地任务目录的归属。
+- 普通 app `src.services.celery_app` 消费 `queue_urgent,queue_normal`，新任务只运行 `mineru.finish_durable` 后处理，旧普通解析任务名仍兼容。two-stage 的后续使用 vision/dispatch/merge 各自的命名队列，`queue_parse_gpu/queue_parse_urgent` 只服务旧解析消息。新下游要求有效解析检查点，失败或恢复时统一经公共队列，不能自行重新解析。公共解析 app 根据 `CELERY_SHARED_PARSE_QUEUE` 订阅唯一队列，API 与公共 worker 同步该值。其他队列设置仍与后续 worker 的 `-Q` 一致。
+- 三个 Celery app 共用 `celery_runtime.py`：Redis 的 broker/backend/app visibility_timeout 一致读取 `CELERY_VISIBILITY_TIMEOUT`（代码 3600 秒、模板 21600 秒），`CELERY_RESULT_EXPIRES` 缺省 86400 秒。确认期限须覆盖领取至后续交接的最大耗时，并在共享 broker 的各应用同步；延长会推迟崩溃后重投。后续阶段按命名队列路由，`-Q` 顺序不能提供稳定的优先领取保证。dispatch 使用 `self.replace` 启动 chord，禁止在任务内等待 `result.get()`。
+- API 与 worker 共享 broker/backend/任务目录；跨容器时目录绝对路径一致。`PENDING` 也可能是未知或过期的旧 ID。`queue_status` 分开报告公共解析的 urgent/normal ready 数，队列统计与最终结果分开核对。
 - scheduler 每个历史 GPU_IDS 池缺省有 3 个派发进程（MINERU_SCHEDULER_WORKERS），避免 HTTP 连接亲和造成单池串行；实际解析总数仍由共享槽位限制。scheduler 在独立子进程中解析，Linux 使用 parent-death signal 和任务进程组；仅在 hard timeout、父进程退出或结果返回后清理该任务组。不能按名称/运行时长全局误杀解析进程。
 - 隔离任务发送成功/失败结果后，在解释器退出前先关闭本任务已加载的 MinerU VLM runtime，再独立关闭已加载的 DocVortex 渲染池。MinerU 4.1.3 的空闲 runtime 退出修复不替代此主动生命周期。不要为未使用 VLM 的任务额外导入或初始化 SDK，也不要关闭父进程/worker 的共享运行时；SDK 清理失败仍须执行渲染池清理。保留原 hard timeout、正常退出窗口与进程组收尾作为兜底，不通过缩短等待、提前返回或忽略 atexit 错误来跳过清理。
 - `run_isolated_call` 使用 Pipe 接收线程配合子进程存活检查，子进程无结果退出时报告退出码，不等到整段 hard timeout；超时包含执行及结果传输，进程组清理可额外消耗退出窗口。大结果传输也必须持续监督，不退回先 join 再读取的死锁模式。
-- 普通模板 threads/16，可用 solo/1 保守运行；two-stage parse 为三个独立 solo/1 worker（名称 parse、parse-2、parse-3），均消费 urgent/normal，prefetch=1；其余线程池。每个解析 worker 的 VLM 并发为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
+- 普通后续模板 threads/16；公共解析采用三个独立 solo/1 worker，app4 增加第四个，prefetch=1、late ack。PM2 名 celery-two-stage-parse、-2、-3、-4 保留。每个解析 worker 的 VLM 并发预算为 8，PM2 停止窗口 1900 秒；并非全局并发上限。避免 daemonic prefork；保持临时文件 finally 清理和正常 shutdown 等待。
 - API 和 parse PM2 模板均显式设置 processing window=64，减少长文档渲染内存；这是内部窗口大小，保留整本解析和跨页后处理，不是页数上限。不要为了多卡吞吐先把 PDF 拆成独立单页任务。
 - CPU ONNX 模板每个模型会话的 intra/inter 线程数为 16/1，防止高核数机器上自动线程池过度竞争；这是本机混合 PDF 测量后的配置，不是整个进程的线程上限。VLM 并发保持 8；4 线程及 VLM 16 均有对照证据，不凭单个短文档结果扩大并发。
 
-- `parse_capacity.py` 通过 Linux flock 在同一主机的 API 子进程/普通任务/two-stage 间共享解析槽，缺省 `MINERU_PARSE_SLOTS=3`、等待上限 1800 秒；目录由 `MINERU_PARSE_SLOT_DIR` 指定，缺省系统临时目录下 `tiangong_mineru_parse_slots`，在模块加载时固定，不能跟随每任务 Office 转换临时目录改变。所有参与进程必须使用相同目录/槽数；不是跨主机分布式锁。不删除正在使用的锁文件；fork 的渲染子进程关闭继承租约，进程退出自动释放。scheduler hard timeout 包括等待槽位时间。
+- `parse_capacity.py` 通过 Linux flock 在同一主机的 API 子进程、公共解析和旧解析消费者间共享解析槽，缺省 `MINERU_PARSE_SLOTS=3`、等待上限 1800 秒；目录由 `MINERU_PARSE_SLOT_DIR` 指定，缺省系统临时目录下 `tiangong_mineru_parse_slots`，在模块加载时固定，不能跟随每任务 Office 转换临时目录改变。所有参与进程必须使用相同目录/槽数；不是跨主机分布式锁。不删除正在使用的锁文件；fork 的渲染子进程关闭继承租约，进程退出自动释放。scheduler hard timeout 包括等待槽位时间。
 
 ## 配置与运维
 
@@ -164,6 +166,7 @@ uv run --group dev pytest
 - Black 必须排除任意层级 `.venv` 及根目录 output/input/pdfs/pickle，防止修改依赖备份。Ruff 当前显式使用 E4/E7/E9/F；保持异常处理粒度合理，不扩大吞异常范围。
 - `test_guides_router.py` 验证只读 AI 指南与带 root_path 的索引，确保调优资料不被服务提供。视觉代码默认值测试必须隔离本机 `VLLM_VISION_*` 环境覆盖。
 - `test_legacy_api_compatibility.py` 冻结六入口上传、鉴权、query/form 冲突取值、旧 Redis 任务及 JSON/null/失败码合同；`test_content_projection.py` 在真实投影路径验证模式差异、源页与阅读顺序。
+- 公共解析排序的 Redis 回归通过 `MINERU_RUN_SHARED_PARSE_REDIS=1 uv run --no-sync --group dev pytest tests/test_shared_parse_redis.py -q` 显式运行，测试自动启独立 Redis 和四个 solo worker，以阻塞探针验证三个入口的 urgent 顺序。实际 PDF、模型质量和生产竞争另做验证。
 - 常规测试使用外部依赖/调度替身；`test_mineru_tier_routes.py` 验证六入口参数，`test_mineru4_adapter.py` 验证 SDK/资产与诊断参数兼容，`test_mineru_cpu_runtime.py` 在新进程核对四档 CPU 缺省、显式非 CPU 覆盖及提前缓存配置的拒绝，其他测试覆盖阅读顺序、DOCX、视觉和进程生命周期。配置合同测试不加载模型，不能代替真实 CPU provider 与 PDF 验收。
 - `src/scripts/benchmark_vision.py` 对私有图片/上下文/正则检查清单进行真实多端点重复测量，保存图像摘要、原始响应、质量检查和 token/耗时；正则通过不等于完整语义正确，仍需人工对图核验。
 - Qwen3.8 默认模型切换已完成真实 API/任务和论文图验证，但低清气象图仍有重复/虚构数列，不能宣称全面质量通过；证据与规则误报分析集中见 docs/performance-tuning.md。

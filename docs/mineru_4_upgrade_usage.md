@@ -19,7 +19,7 @@ lastReviewedCommit: f454ed87411bec0a795778b3a521f3baf94d5b0f
 
 # 部署、维护与恢复
 
-仓库应用基线为 Python 3.13.15、MinerU 4.1.4、DocVortex 0.6.11、mineru-vl-utils 2.0.8 和 CPU ONNX；大模型由 Docker vLLM 提供。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。模板更新不会自动切换运行中的环境或模型，部署时另核对实际版本与镜像。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
+仓库应用基线为 Python 3.13.15、MinerU 4.2.3、DocVortex 0.6.24、mineru-vl-utils 2.0.9 和 CPU ONNX。大模型由独立 Docker vLLM 提供，GPUStack 与原生模板的模型镜像使用 MinerU 4.1.4。应用依赖以 uv.lock 为准，不在应用环境安装 vLLM。模板更新不会自动切换运行中的环境或模型，部署时另核对实际版本与镜像。接口选择见 [README](../README.md#如何调用)，验证方法见[验证指南](validation.md)。
 
 所有 shell 命令在仓库根目录执行，文件示例使用相对路径。跨进程或容器的共享目录由部署配置决定，必须指向同一位置；本文不预设机器目录。
 
@@ -70,16 +70,18 @@ MINERU_MODEL_SMALL_BACKEND=onnx MINERU_MODEL_ONNX_DEVICE=cpu \
 | MINERU_MODEL_VLM_API_KEY | 可选 | 解析模型认证，需与服务端一致 |
 | MINERU_MODEL_VLM_HTTP_TIMEOUT / MINERU_MODEL_VLM_MAX_CONCURRENCY | 模板 600 秒 / 8 | 每个解析进程的模型请求预算 |
 | MINERU_PROCESSING_WINDOW_SIZE | 模板 64 页 | 内部窗口，不是文件页数上限 |
-| MINERU_PARSE_SLOTS | 代码及模板 3 | 本机 API、普通任务与 two-stage 的共享实际解析上限 |
+| MINERU_PARSE_SLOTS | 代码及模板 3 | 本机同步、公共解析与旧解析消费者的共享实际解析上限 |
 | MINERU_PARSE_SLOT_DIR | 未设置时使用系统临时目录中的 tiangong_mineru_parse_slots | 参与进程必须使用同一锁目录 |
 | MINERU_PARSE_SLOT_WAIT_SECONDS | 代码及模板 1800 秒 | 等待共享槽位的上限；计入 scheduler hard timeout |
 | MINERU_SCHEDULER_WORKERS / GPU_IDS | 模板 3 / 0 | 每个应用调度池的派发进程数 / 池标识；不控制 Docker GPU |
 | MINERU_DOCKER_GPU_MEMORY / MINERU_DOCKER_GPU_MEMORY_MODEL4 | 单卡/三卡缺省 0.10；四卡缺省 0.45 | vLLM 启动空闲显存检查；未固定 KV 时还参与 KV 容量计算 |
 | MINERU_DOCKER_KV_CACHE_MEMORY_BYTES / MINERU_DOCKER_KV_CACHE_MEMORY_BYTES_MODEL4 | 单卡默认未设置；三卡/四卡默认每卡 3221225472 字节（3 GiB） | 可用正整数字节数覆盖；显式设为空值可恢复按比例计算 KV 容量 |
-| CELERY_BROKER_URL / CELERY_RESULT_BACKEND | 模板为本机 Redis DB 0 | API 与 worker 必须一致 |
-| CELERY_VISIBILITY_TIMEOUT / CELERY_RESULT_EXPIRES | 模板 21600 / 86400 秒 | 两个 app 共用的 Redis 消息确认期限 / 结果保留时间；不是任务执行期限 |
+| CELERY_BROKER_URL / CELERY_RESULT_BACKEND | 模板为本机 Redis DB 0 | 节点内 API 与 worker 必须一致，跨节点用不同 Redis 实例或 DB |
+| CELERY_SHARED_PARSE_QUEUE | 代码及模板 queue_parse_shared | 三个异步入口共用，API 与公共解析 worker 的配置值一致 |
+| CELERY_VISIBILITY_TIMEOUT / CELERY_RESULT_EXPIRES | 模板 21600 / 86400 秒 | 三个 app 共用的 Redis 消息确认期限 / 结果保留时间；任务执行期限独立设置 |
 | MINERU_TASK_STORAGE_DIR | 未设置时使用系统临时目录中的 tiangong_mineru_tasks | 旧任务临时工作区 |
-| MINERU_JOB_STORE_DIR | 未设置时使用仓库 output/jobs | 新任务的持久输入、检查点和结果，所有 API/worker 共用 |
+| MINERU_JOB_STORE_DIR | 未设置时使用仓库 output/jobs | 新任务的持久输入、检查点和结果，本机 API、worker 和恢复进程共用 |
+| MINERU_HANDOFF_RECOVERY_INTERVAL_SECONDS / MINERU_HANDOFF_RECOVERY_LIMIT | 30 秒 / 64 条 | 自动补交接扫描间隔 / 每轮处理上限 |
 | MINERU_VISION_WAVE_SIZE | 代码及模板 32 | two-stage 每波派发的缺失图片数 |
 | VLLM_BASE_URLS / VISION_* | 按部署填写 | 独立图片描述模型；采样与并发见调优指南 |
 
@@ -87,7 +89,7 @@ HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 ba
 
 ### 超时区别
 
-- scheduler 的全局 hard timeout 代码缺省为 600 秒；.env.example 将普通/图片解析设为 1800 秒。API PM2 env 也显式设为 1800 秒；普通 worker 读取自身环境及 .env，不能从 API 配置推定其有效值。
+- scheduler 的全局 hard timeout 代码缺省为 600 秒；.env.example 将普通/图片解析设为 1800 秒。API PM2 env 也显式设为 1800 秒；公共解析 worker 读取自身环境及 .env，需逐进程核对有效值。
 - 科研 API 模板的 HTTP 等待为 110 秒、子进程 hard timeout 为 300 秒；Office 转换模板为 600 秒。
 - Gunicorn timeout/graceful_timeout 缺省为 1900 秒，API PM2 停止窗口为 1900 秒。worker PM2 停止窗口也为 1900 秒，模型 PM2 为 70 秒、容器为 60 秒。
 - 持久 two-stage 的转换/parse 通过隔离子进程执行，MINERU_TWO_STAGE_HARD_TIMEOUT_SECONDS 缺省回退任务预算 1800 秒；普通/图片任务分别读取对应 hard timeout。该预算包含排队槽位和结果传输，不含所有后续图片请求；客户端等待和 PM2 停止窗口均不能替代执行期限。千页任务还需检查消息确认和结果保存期限，见[长任务准入](performance-tuning.md#12-4001000-页整本批量的专项准入)。
@@ -100,13 +102,13 @@ HTTP 的 tier 支持 flash/basic/standard/advanced。直接调用兼容的旧 ba
 
 新异步任务将原始输入、整本解析检查点、单图结果及最终业务 JSON 保存在 `MINERU_JOB_STORE_DIR`，缺省仓库 `output/jobs`。部署应使用可靠持久磁盘，API 和全部 worker 解析到同一路径；备份时包含该目录。旧任务仍使用原临时工作区和 Redis 结果，不自动迁移。
 
-恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以在执行配置匹配的前提下复用解析及已完成图片。profile 包含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、模型、prompt 和采样等设置；4.1.3 检查点不能直接在 4.1.4 环境 resume，4.0 到 4.1 即使都使用 CPU，也不能默认续用旧阶段。需要续算旧任务时恢复原代码、锁文件及配置，或明确创建新任务，不手工补字段或重算旧 manifest 摘要。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
+恢复依赖完成阶段的原子文件及本机文件锁。解析在完成前被中断时，仍需重做整本解析；已完成解析但图片失败时，可以在执行配置匹配的前提下复用解析及已完成图片。profile 包含 MinerU/DocVortex 版本、`small_backend`、`onnx_device`、模型、prompt 和采样等设置；4.1.4 应用检查点不能直接在 4.2.3 应用 resume，即使两边都使用 CPU。需要续算旧任务时恢复原代码、锁文件及配置，或明确创建新任务，不手工补字段或重算旧 manifest 摘要。同名模型替换权重时更新 `MINERU_EXECUTION_PROFILE_REVISION`，客户端无法自行识别服务端权重更换。
 
 ```bash
 # 仅显示身份、状态和阶段，不打印原文、请求参数或错误正文
 uv run python -m src.scripts.manage_jobs list
 
-# 已保存任务但 broker 发布结果未确认：沿用原代次重发
+# 首次发布未确认，或完成解析但后续交接未确认：沿用原代次恢复
 uv run python -m src.scripts.manage_jobs recover "$TASK_ID"
 
 # 修复失败原因并确认没有活跃阶段后：增加代次，复用完成阶段
@@ -117,9 +119,13 @@ uv run python -m src.scripts.manage_jobs gc --retention-days 7
 uv run python -m src.scripts.manage_jobs gc --retention-days 7 --apply
 ```
 
-recover 不会重新提交已标记 published 的任务；需要显式恢复时用 resume。resume 遇到活跃阶段、已成功或已过期任务会拒绝，不是取消接口。broker 仍不可用时保留已知任务身份，恢复连接后再处理。
+`publication` 记录首次发布。公共解析完成后另记本代 `handoff`（`pending` / `uncertain` / `published`）；首次发布已确认、当前代已进入 STARTED、有有效解析检查点且后续发布还未确认时，`recover` 在同代补交接。后续发布最多重试两次，仍不确定时保留 STARTED、`handoff=uncertain` 和已解析产物。接收方已取到消息时可确认交接。进程中断且没有检查点，或后续已标记发布但消息丢失时，确认原因和没有活跃阶段后用 `resume` 新开代次。已成功、已过期或有活跃阶段的任务拒绝 `resume`。恢复期间保留任务 ID 和输入，broker 恢复后再处理。
+
+生产 `app` / `app4` 包含 `parse-handoff-recovery`，可通过 `./deploy/manage.sh start handoff-recovery` 单独管理，入口为 `.venv/bin/python -m src.services.handoff_recovery`。它在同一持久目录中读取初次发布前写入的 `.handoffs` 任务及代次索引，轮转检查索引，沿用同代补交接条件。resume 后即使有旧代检查点，新代仍须先在公共队列等待领取并进入 STARTED，恢复进程不会提前交接处于 PENDING 的任务。已结束、旧代次和已确认交接的索引会被移除。该进程不会重做解析或自动重发首次发布未确认的任务。发现 handoff 长时间停在 pending/uncertain 时，检查恢复进程状态、其日志、broker 和磁盘可用性；按同一 task ID 查询及人工恢复。
 
 清理仅处理超过保留期的 SUCCESS/FAILURE，执行中或下载中的共享租约会阻止删除；保留身份墓碑，避免旧幂等键意外创建新任务。默认未配置自动定时清理；需要周期执行时由运维按容量设置，不能无差别删除共享目录。失败且需要续算的任务应在保留期内恢复。Redis 的 `CELERY_RESULT_EXPIRES` 控制阶段引用/chord 与旧任务结果，不控制新任务的磁盘保留期。
+
+公共解析可在图片后处理积压时继续执行。应对子队列最老等待时长、未完成任务及任务目录可用空间设告警阈值，按本机文件体积和正常后处理速率校准。超过阈值时暂停或压低新增批量提交，保留已接受任务并继续处理，恢复到安全水位再放开。
 
 统一入口为 deploy/manage.sh。start 跳过已 online/launching 的组件；修改代码或配置后使用 restart。配置从 deploy/pm2 的模板读取，日志进入 output/logs。
 
@@ -128,12 +134,13 @@ recover 不会重新提交已标记 published 的任务；需要显式恢复时�
 | model | 三卡 MinerU 模型，PM2 名 mineru-vlm-docker-parallel |
 | model4 | 四卡 MinerU 模型，PM2 名 mineru-vlm-docker-parallel4 |
 | api | Gunicorn，PM2 名 unstructured-gunicorn |
-| workers | 三个 parse，加 vision/dispatch/merge，共六个 two-stage worker |
-| workers4 | 四个 parse，加 vision/dispatch/merge，共七个 two-stage worker |
-| ordinary | 普通 Celery worker，PM2 名 celery-worker |
+| workers | 三个公共解析 worker，加 two-stage 的 vision/dispatch/merge |
+| workers4 | 四个公共解析 worker，加 two-stage 的 vision/dispatch/merge |
+| ordinary | 普通后续 worker，兼容旧普通任务，PM2 名 celery-worker |
 | vision-health | 独立图片端点探测，PM2 名 vision-health-monitor |
-| app | api 加 workers、vision-health，不含 model 或 ordinary |
-| app4 | api 加 workers4、vision-health，不含 model4 或 ordinary |
+| handoff-recovery | 本机解析交接恢复，PM2 名 parse-handoff-recovery |
+| app | api 加 workers、vision-health、handoff-recovery，不含 model 或 ordinary |
+| app4 | api 加 workers4、vision-health、handoff-recovery，不含 model4 或 ordinary |
 
 启动顺序：
 
@@ -144,6 +151,7 @@ curl --fail http://127.0.0.1:30000/health
 ./deploy/manage.sh start vision-health
 ./deploy/manage.sh start workers
 ./deploy/manage.sh start ordinary
+./deploy/manage.sh start handoff-recovery
 ./deploy/manage.sh start api
 ./deploy/manage.sh status
 pm2 save
@@ -158,11 +166,13 @@ model 的 PM2 online 不代表模型已就绪。脚本的 status 显示该用户
 ```bash
 ./deploy/manage.sh logs model
 pm2 logs celery-two-stage-vision --lines 100
+pm2 logs parse-handoff-recovery --lines 100
+uv run celery -A src.services.shared_parse_app:celery_app inspect active_queues --timeout=5
 uv run celery -A src.services.celery_app inspect active_queues --timeout=5
 uv run celery -A src.services.two_stage_pipeline inspect active_queues --timeout=5
 ```
 
-普通 worker 为 threads/16；two-stage parse 默认三个 solo/1，四卡组增加第四个 solo/1，vision 为 threads/32，dispatch/merge 各 threads/4，均 prefetch=1。普通和 two-stage 使用不同任务注册表，队列必须按[普通任务](mineru_with_images_task_usage.md)及[two-stage](two_stage_task_usage.md#队列与配置)对应。不要让普通 worker 消费 two-stage merge 的 default 队列。
+公共解析默认三个 solo/1，app4 增加第四个 solo/1，prefetch=1、late ack；保留原 PM2 名 celery-two-stage-parse、-2、-3、-4，改由 shared_parse_app 消费 queue_parse_shared。普通后续为 threads/16，vision 为 threads/32，dispatch/merge 各 threads/4，均 prefetch=1。三个 app 的注册与订阅按[普通任务](mineru_with_images_task_usage.md)及[two-stage](two_stage_task_usage.md#队列与配置)对应。不要让普通 worker 消费 two-stage merge 的 default 队列。
 
 ### 检查就绪
 
@@ -174,7 +184,7 @@ curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:77
 curl --fail -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" http://127.0.0.1:7770/two_stage/queue_status
 ```
 
-health 只检查 API 存活；ready 并行检查配置的 MinerU VLM 端点健康，不检查 Redis、独立视觉模型，也不实际推理。还需核对队列消费者，并用允许测试的 PDF 检查真实 SUCCESS 与内容，见[验证指南](validation.md)。
+health 只检查 API 存活；ready 并行检查配置的 MinerU VLM 端点健康，不检查 Redis、独立视觉模型，也不实际推理。还需核对队列消费者、queue_status 的两档公共解析 ready 数、下游积压与磁盘余量，并用允许测试的 PDF 检查真实 SUCCESS 与内容，见[验证指南](validation.md)。
 
 ### 恢复与停止
 
@@ -186,6 +196,7 @@ health 只检查 API 存活；ready 并行检查配置的 MinerU VLM 端点健�
 ./deploy/manage.sh stop api
 ./deploy/manage.sh stop ordinary
 ./deploy/manage.sh stop workers
+./deploy/manage.sh stop handoff-recovery
 ./deploy/manage.sh stop vision-health
 ./deploy/manage.sh stop model
 pm2 save
@@ -252,6 +263,10 @@ nvidia-smi 正常不保证容器内 CUDA 可用。检查宿主 UVM 设备节点�
 4. 停妥受影响组件再同步环境；不要覆盖或移动运行中的虚拟环境。虚拟环境可执行文件可能记录创建位置，回滚应恢复原环境位置，或按原 Python 与锁文件重新创建。
 5. 模型变更重建对应 Compose project；应用变更补起 API 与 worker。检查实际推理、鉴权、文档入口及任务生命周期，通过后 pm2 save。
 6. 失败时同步恢复代码、依赖、配置和必要的模型版本；只恢复其中一项可能造成不兼容。
+
+公共解析与应用 SDK 切换按节点滚动。先准备新环境并确认本节点 broker、任务目录、槽位和队列订阅，短暂停止旧版本接受新增异步任务，保留旧队列、任务目录和可恢复环境。已接受的任务优先由原消费者排空；若结束旧进程时仍有任务，依据已知 ID 和阶段确认重投或原版本恢复，禁止清空或改写 Redis。普通后续消费者继续兼容旧普通消息；旧 two-stage 解析队列只能由匹配旧工作流和检查点的消费者排空。单靠调用方续查任务 ID 不能恢复 broker 消息。随后启动本节点公共解析、后续 worker 和交接恢复进程，再启动 API。
+
+先确认普通、图片及 two-stage 三入口可以提交、查询并得到完整结果。用受控 normal 积压验证空闲公共解析 worker 优先领取已排队的 urgent，期间避免同步及旧解析流量竞争槽。下游、任务磁盘和正常工作流均通过后恢复该节点投递，再切换其他节点。回滚前暂停新增投递，让新任务排空或保留可恢复的新版本环境，然后恢复旧 API、消费者和锁定依赖。
 
 已完成升级的提交与操作过程由 Git 历史追溯。当前文档不维护机器私有目录、历史进程状态或逐轮增长的测试数量。
 

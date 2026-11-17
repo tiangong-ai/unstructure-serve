@@ -150,22 +150,32 @@ def test_unloaded_sdk_is_not_imported_for_cleanup(monkeypatch):
 
 @pytest.mark.parametrize("parse_fails", [False, True])
 def test_real_sdk_clients_close_before_interpreter_exit(parse_fails):
-    # Exercise the actual cached HTTP runtime and its loop/executor shutdown;
-    # replacing only the network client keeps this deterministic and offline.
+    # Keep the SDK runtime and clients real; answer the model lookup in process.
     script = """
 import asyncio
 import json
 import sys
+
+import httpx
 from src.services import gpu_scheduler as scheduler
 from mineru.model.vlm import runtime
+
 closed = []
 messages = []
-class OfflineClient:
-    def __init__(self, **kwargs):
-        pass
-    async def aclose(self):
-        closed.append('client')
-runtime.MinerUClient = OfflineClient
+
+def model_listing(self, request, **kwargs):
+    assert request.method == 'GET' and request.url.path == '/v1/models', request
+    return httpx.Response(200, request=request, json={'data': [{'id': 'offline-test'}]})
+
+httpx.Client.send = model_listing
+close_client = runtime.MinerUClient.aclose
+
+async def observe_close(client):
+    await close_client(client)
+    closed.append('client')
+
+runtime.MinerUClient.aclose = observe_close
+
 def parse():
     predictor = runtime.ModelSingleton().get_model(
         'http-client', None, 'http://unused.invalid', model_name='offline-test'
